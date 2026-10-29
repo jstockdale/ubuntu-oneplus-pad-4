@@ -90,9 +90,12 @@ follows the gts9u userdata-split model, **never** slot switching.
 4. `fastboot reboot`. Nothing else: no `set_active`, no erase, no other
    partition, no `--disable-verity`, no vbmeta.
 
-Where this ABL permits it, `fastboot boot boot.img` (one-shot boot from RAM,
+Where this ABL permits it, `fastboot boot` (one-shot boot from RAM,
 **UNVERIFIED** on iceland) is the smoke test to run before the first real
-flash of any new kernel.
+flash of any new kernel. It takes a different image than the flashable pair:
+`fastboot boot` does not read the flashed `init_boot`, so the test image must
+carry kernel **and** initramfs together — `scripts/make-test-bootimg.sh`
+builds exactly that (and must never be flashed).
 
 ## Requirements
 
