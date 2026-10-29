@@ -65,6 +65,17 @@ if [ "$magic" != 02214c18 ]; then
 	exit 1
 fi
 
+# The kernel's built-in bootargs say rdinit=/rescue/mainline-init; the
+# device package's hook answers with a symlink to /init.  An archive without
+# it boots to a kernel that cannot find its init, so refuse it here.
+if ! lz4 -dc "$initramfs" 2>/dev/null | cpio -t 2>/dev/null \
+	| grep -q '^rescue/mainline-init$'; then
+	echo 'the initramfs lacks rescue/mainline-init; the iceland-rescue-init' >&2
+	echo 'hook from ubuntu-iceland-device did not run — is the package in' >&2
+	echo 'the rootfs and the hook executable?' >&2
+	exit 1
+fi
+
 size=$(stat -c %s "$initramfs")
 echo "initramfs: $size bytes of a $init_boot_budget byte init_boot budget" >&2
 if [ "$size" -ge "$init_boot_budget" ]; then

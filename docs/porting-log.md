@@ -81,3 +81,22 @@ Next steps, in order:
   build) and its `MANIFEST.tsv` documents each blob's stock source path —
   next session: use it to replace the guessed `source` paths in
   `configs/firmware/iceland.toml` before the first `record` run.
+
+## 2026-10-29 (later) — GLO support decided; handoff semantics understood
+
+- Decision: this port targets the **GLO** variant (our dev unit's region).
+- Read Perpetua's fdt-handoff binding and history: `stock-model` /
+  `stock-compatible` / `stock-bootargs` are each "one of these" string
+  arrays, ANDed; the model match exists because the **RedMagic 11 Pro shares
+  the qcom,canoe bootloader**. A mismatch boots the vendor tree "as usual" —
+  i.e. a silently dead tablet on mainline. The pinned DTS names only the IN
+  model ("...Canoe MTP,iceland-O IN"), so a GLO mismatch is likely.
+  `scripts/check-handoff-match.sh` now verifies model+compatible offline
+  against the staged stock `vendor_boot.img`; stock-bootargs
+  (`oplusboot.prjname=25978`) is ABL-appended at boot and only verifiable on
+  the first RAM boot.
+- Found and defused an initramfs landmine: the built-in tree's bootargs say
+  **`rdinit=/rescue/mainline-init`** (Perpetua's boot userspace layout). Our
+  initramfs now ships a `/rescue/mainline-init -> /init` symlink via the
+  `iceland-rescue-init` initramfs-tools hook (zero kernel delta), and
+  `make-initramfs.sh` refuses an archive without it.

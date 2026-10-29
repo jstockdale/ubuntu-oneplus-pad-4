@@ -1,0 +1,16 @@
+#!/bin/sh
+# The iceland device tree's built-in /chosen bootargs say
+# rdinit=/rescue/mainline-init (Perpetua's own boot userspace layout).  Our
+# kernel is unpatched, so our initramfs must answer to that path.  A symlink
+# to Ubuntu's /init keeps the kernel delta at zero; make-initramfs.sh
+# verifies it made it into the generated archive.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+mkdir -p "${DESTDIR}/rescue"
+ln -sf /init "${DESTDIR}/rescue/mainline-init"
