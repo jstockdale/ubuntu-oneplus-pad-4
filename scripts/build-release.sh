@@ -65,7 +65,12 @@ install -m 0644 "$bundle/boot.img" "$stagezip/"
 install -m 0644 "$bundle/init_boot.img" "$stagezip/"
 install -m 0644 "$image" "$stagezip/ubuntu-iceland-userdata.img"
 install -m 0755 "$repo/configs/install/install.sh" "$stagezip/"
-printf '%s\n' "$product" > "$stagezip/EXPECTED-PRODUCT"
+# The fastboot product string ("canoe") is a repo constant, deliberately NOT
+# the OTA metadata's product (OPD2514): ABL reports the platform name.
+# Confirmed against the iceland-mainline project's install guide; verify on
+# first device contact with `fastboot getvar product`.
+install -m 0644 "$repo/configs/install/expected-fastboot-product" \
+	"$stagezip/EXPECTED-PRODUCT"
 install -m 0644 "$bundle/BUILD-METADATA.txt" "$stagezip/"
 cp -a "$bundle/evidence" "$stagezip/evidence"
 

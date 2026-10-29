@@ -13,8 +13,11 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-# EXPECTED-PRODUCT is stamped by the release build from the stock OTA this
-# bundle was built against.  The gate fails closed: no file, no flashing.
+# EXPECTED-PRODUCT is the fastboot product string, stamped by the release
+# build from configs/install/expected-fastboot-product.  Note it is NOT the
+# OTA metadata's product (OPD2514): this bootloader reports the platform
+# name, "canoe" (per the iceland-mainline project; to be confirmed on our
+# own unit).  The gate fails closed: no file, no flashing.
 expected_product_file=$here/EXPECTED-PRODUCT
 
 say() { printf '%s\n' "$*"; }

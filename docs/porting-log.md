@@ -56,3 +56,28 @@ Next steps, in order:
    USB networking + SSH as the only goal.
 5. Only then the desktop profile, Waydroid, and the release pipeline
    end-to-end.
+
+## 2026-10-29 — OTA located; the iceland-mainline ecosystem discovered
+
+- Installed build identified from Oxygen Updater: `OPD2514_11.A.38_0380_202608042337`
+  = **OxygenOS 16.0.10.501(EX01), GLO region** (catalog: roms.danielspringer.at
+  OTA API). Full package: 6.74 GiB, MD5 `56fac9cb6aadebfb4104a7b2e7df6bcb`.
+  The pending update is `11.C.08` = **ColorOS 17.0.0.101** — deliberately
+  declined (OxygenOS is the base every iceland port was developed on; ColorOS
+  unlock policy risk). Auto-update is to stay off on the dev unit.
+- Discovered a second, further-along port ecosystem:
+  **github.com/mzakamin-hub/{iceland-mainline,iceland-linux,iceland-firmware}**
+  (+ iceland-u-boot; Fedora 44, U-Boot in boot_b, GRUB, btrfs on userdata,
+  dual boot with BlissROM; kernel = patch queue on linux-next "7.4 base").
+  Their hardware answers adopted as strong priors, each still to be confirmed
+  on our unit: `fastboot getvar product` = **canoe**; `fastboot boot` works;
+  sparse-flashing userdata works; stock 11.A.38 wanted on **both slots**;
+  working camera/sensors/pen/DP; no SuperVOOC.
+- Fixed in this repo accordingly: the installer's product gate now uses the
+  repo constant `configs/install/expected-fastboot-product` (= canoe) instead
+  of the OTA metadata product (OPD2514) — those are different namespaces and
+  the old gate would have refused every real device.
+- `mzakamin-hub/iceland-firmware` is built from stock **11.A.38** (our exact
+  build) and its `MANIFEST.tsv` documents each blob's stock source path —
+  next session: use it to replace the guessed `source` paths in
+  `configs/firmware/iceland.toml` before the first `record` run.
