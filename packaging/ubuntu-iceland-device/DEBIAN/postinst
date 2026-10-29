@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+	configure)
+		# The grow service is enabled by the rootfs build for images; this
+		# covers an apt (re)install on a running device.  Guarded: postinst
+		# also runs inside mmdebstrap's chroot, where systemctl enable works
+		# but start would not.
+		if command -v systemctl >/dev/null 2>&1; then
+			systemctl enable ubuntu-iceland-grow-rootfs.service >/dev/null 2>&1 || true
+		fi
+		# A changed conf.d must reach the installed initramfs; harmless in
+		# the image build, where make-initramfs.sh regenerates anyway.
+		if command -v update-initramfs >/dev/null 2>&1 && \
+			[ -d /lib/modules ] && [ -n "$(ls -A /lib/modules 2>/dev/null)" ]; then
+			update-initramfs -u || true
+		fi
+		;;
+esac
+
+exit 0

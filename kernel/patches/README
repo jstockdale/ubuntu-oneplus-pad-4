@@ -1,0 +1,20 @@
+Local kernel patches
+====================
+
+Patches in this directory apply on top of the pinned Perpetua commit, in
+lexical order, with `git apply --index`, and the build fails loudly when one
+stops applying.
+
+Policy, inherited from both parent projects:
+
+- The first response to a missing feature is a patch *to Perpetua upstream*
+  (github.com/denialwm/linux-perpetua), not a file here.  This directory is
+  for what upstream has not merged yet, carried with a link to the submission,
+  and for genuinely Ubuntu-specific needs upstream would rightly reject.
+- Never a fix imported from a vendor kernel because it exists there; the
+  device's downstream kernel is a reference for what the hardware needs,
+  never a base (Perpetua devices/README states the same rule).
+- Every patch names its origin and its exit condition in its header: merged
+  upstream (drop on the next pin bump) or permanent (say why).
+
+Currently empty, deliberately.

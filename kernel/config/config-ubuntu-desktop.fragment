@@ -1,0 +1,60 @@
+# Kernel options an Ubuntu desktop needs on top of Perpetua's iceland
+# configuration.
+#
+# Perpetua's own merged config (defconfig + mobile.config + qcom.config +
+# kaanapali.config + devices/iceland/kernel.config) targets a lean mobile
+# Linux and already carries the hardware.  This fragment carries only what the
+# Ubuntu userspace assumes.  Unlike the gts9u port — which shipped almost no
+# modules and therefore needed everything =y — this port installs Perpetua's
+# full module tree into the rootfs, so =m is acceptable wherever the symbol is
+# not needed before the root filesystem is mounted.
+#
+# build-mainline-kernel.sh fails the build if Kconfig drops any symbol set
+# here, so a Perpetua rebase cannot silently cost us one of these.
+
+# --- snaps -------------------------------------------------------------------
+# Every snap is a squashfs image attached to a loop device.  In Ubuntu,
+# `apt install firefox` installs a snap; without these the browser install
+# fails in ways that look like distro bugs.  =y because snapd runs at boot,
+# before any lesson about module loading has been learned.
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XATTR=y
+CONFIG_SQUASHFS_ZLIB=y
+CONFIG_SQUASHFS_LZ4=y
+CONFIG_SQUASHFS_XZ=y
+CONFIG_SQUASHFS_ZSTD=y
+CONFIG_BLK_DEV_LOOP=y
+
+# snapd layers writable data over the read-only snap; portals and flatpak-style
+# runtimes want FUSE.
+CONFIG_OVERLAY_FS=y
+CONFIG_FUSE_FS=y
+
+# --- security ----------------------------------------------------------------
+# Ubuntu's profiles load only when AppArmor is in the LSM list; the userspace
+# ships and enables them unconditionally.
+CONFIG_SECURITY=y
+CONFIG_SECURITY_APPARMOR=y
+CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,apparmor"
+
+# --- root filesystem ---------------------------------------------------------
+# The root is ext4 in userdata and must mount before any module can load.
+CONFIG_EXT4_FS=y
+CONFIG_EXT4_FS_POSIX_ACL=y
+CONFIG_EXT4_FS_SECURITY=y
+
+# --- memory ------------------------------------------------------------------
+# Two-tier swap as on the gts9u port: zstd zram in front of a swapfile the
+# first boot creates.  zram is =y so the swap tier exists even when something
+# keeps /lib/modules from loading.
+CONFIG_ZRAM=y
+CONFIG_ZRAM_BACKEND_ZSTD=y
+CONFIG_CRYPTO_ZSTD=y
+CONFIG_SWAP=y
+
+# --- diagnostics -------------------------------------------------------------
+# The journal is the primary diagnostic channel while the panel path is
+# unproven; pstore keeps the last oops across a forced reboot.
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_MAGIC_SYSRQ=y

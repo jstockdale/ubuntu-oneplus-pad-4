@@ -1,0 +1,4 @@
+# Scripts and configs are LF everywhere; a CRLF initramfs conf.d would be
+# sourced with \r in the values and fail in ways that look like hardware.
+* text=auto eol=lf
+*.patch -text

@@ -1,0 +1,19 @@
+# Scratch space for anything too big or too proprietary for Git.
+work/
+
+# Build outputs live under $UBUNTU_WORKDIR, but belt and braces: no image,
+# archive or proprietary blob ever enters this repository.
+*.img
+*.zip
+*.deb
+*.mbn
+*.bin
+payload*.bin
+
+# Only checksums and release manifests are committed under artifacts/.
+artifacts/*
+!artifacts/*.sha256
+!artifacts/RELEASE-*.txt
+
+__pycache__/
+*.pyc

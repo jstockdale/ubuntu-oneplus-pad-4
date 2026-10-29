@@ -1,0 +1,27 @@
+#!/bin/sh
+# Grow the root filesystem to the whole userdata partition, once.
+#
+# The shipped image is deliberately small (download size) and was created with
+# enough reserved group descriptor blocks (-E resize=...) that this online
+# resize takes seconds.  Idempotent and self-disarming: a stamp file, not the
+# unit state, decides — the unit staying enabled costs one stat per boot and
+# survives /etc being restored from a backup.
+set -eu
+
+stamp=/var/lib/ubuntu-iceland/grow-rootfs-done
+[ -e "$stamp" ] && exit 0
+
+rootdev=$(findmnt -n -o SOURCE /)
+case "$rootdev" in
+	/dev/*) ;;
+	*) echo "unexpected root source: $rootdev" >&2; exit 1 ;;
+esac
+
+# resize2fs without a size argument grows to the containing device; on the
+# first boot that is the whole userdata partition.  It is a no-op (exit 0,
+# "nothing to do") when the filesystem already fills it.
+resize2fs "$rootdev"
+
+mkdir -p "${stamp%/*}"
+: > "$stamp"
+echo "root filesystem grown to $(findmnt -n -o SIZE /)"

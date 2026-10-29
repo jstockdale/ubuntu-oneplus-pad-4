@@ -1,0 +1,14 @@
+[Unit]
+Description=Grow the iceland root filesystem to the whole userdata partition
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=sysinit.target
+ConditionPathExists=!/var/lib/ubuntu-iceland/grow-rootfs-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/ubuntu-iceland-grow-rootfs
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

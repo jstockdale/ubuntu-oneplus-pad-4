@@ -1,0 +1,30 @@
+# Kernel options Waydroid needs.  Phase-1 scope: Android apps in an LXC
+# container sharing this kernel, as on the gts9u port.
+#
+# Perpetua may already set some of these (Droidloom needs binder too); the
+# fragment states them anyway, because this port's Waydroid support must not
+# depend on another project's unrelated decision staying the same.
+
+# Binder: the Android IPC.  binderfs so the container gets its own device
+# nodes without a fixed CONFIG_ANDROID_BINDER_DEVICES list.
+CONFIG_ANDROID_BINDER_IPC=y
+CONFIG_ANDROID_BINDERFS=y
+
+# The container is an LXC guest: namespaces and cgroups come with the arm64
+# defconfig, but the veth/bridge/NAT path Waydroid builds its networking on
+# does not have to.  =m is fine — Waydroid starts well after the rootfs.
+CONFIG_VETH=m
+CONFIG_BRIDGE=m
+CONFIG_NETFILTER_XT_MATCH_COMMENT=m
+CONFIG_NETFILTER_XT_CHECKSUM=m
+CONFIG_IP_NF_IPTABLES=m
+CONFIG_IP_NF_NAT=m
+CONFIG_IP_NF_TARGET_MASQUERADE=m
+CONFIG_IP6_NF_IPTABLES=m
+CONFIG_NF_TABLES=m
+CONFIG_NFT_NAT=m
+CONFIG_NFT_MASQ=m
+CONFIG_NFT_COMPAT=m
+
+# Ashmem is gone from modern Android/Waydroid (memfd is used), so it is
+# deliberately absent here.

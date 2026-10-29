@@ -1,0 +1,22 @@
+Package: ubuntu-iceland-device
+Version: 0.1.0
+Section: admin
+Priority: optional
+Architecture: arm64
+Maintainer: Ubuntu iceland port contributors <noreply@example.invalid>
+Depends: systemd, kmod, e2fsprogs, util-linux, cloud-guest-utils,
+ systemd-zram-generator
+Description: Device support for the OnePlus Pad 4 (iceland)
+ Board-specific integration for the OPD2514 running an Ubuntu userspace on
+ the Perpetua mainline kernel:
+ .
+  * root filesystem discovery: the initramfs conf.d that points
+    initramfs-tools at LABEL=UBPAD4_ROOT, because the stock vendor_boot
+    cmdline carries no root= and is deliberately never rewritten;
+  * first-boot root filesystem expansion to the whole userdata partition;
+  * two-tier swap: zstd-compressed zram in front of the storage.
+ .
+ This package grows the way its gts9u counterpart did: one integration at a
+ time, each added only when the matching regression has been observed on this
+ hardware.  Hardware enablement lives in the kernel and in the firmware
+ overlay; this package only carries userspace integration.

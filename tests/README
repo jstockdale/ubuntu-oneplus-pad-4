@@ -1,0 +1,15 @@
+Tests run against build artifacts, never against a device.
+
+The convention inherited from the gts9u port: every defect that was invisible
+until it bit gets a check here that proves its fix on the finished artifact
+(see build-rootfs-image.sh's debugfs root-inode check for the pattern — that
+one lives inline because it gates the build).
+
+Planned first entries, each blocked on its stage existing:
+
+  check-boot-bundle.sh    headers, AVB footers and payload hashes of the two
+                          boot images match the android-gki evidence output
+  check-rootfs.sh         no distro kernel installed, fstab labels, conf.d
+                          present, required-packages list complete
+  check-release-zip.sh    the ZIP contains exactly the documented files and
+                          its SHA256SUMS verifies

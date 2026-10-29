@@ -1,0 +1,10 @@
+# Root filesystem discovery for iceland.
+#
+# The kernel cmdline comes from the STOCK vendor_boot — this port never
+# rewrites it — so there is no root= on the cmdline.  initramfs-tools sources
+# conf.d before parsing the cmdline, and a cmdline without root= leaves these
+# in force.  By label, never by device name: UFS LUN enumeration order is not
+# a contract.
+ROOT=LABEL=UBPAD4_ROOT
+ROOTFSTYPE=ext4
+ROOTFLAGS=rw,noatime

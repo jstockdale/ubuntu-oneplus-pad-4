@@ -1,0 +1,63 @@
+# Firmware manifest for iceland (OnePlus Pad 4) — TEMPLATE.
+#
+# State: no stock package has been opened yet, so every entry below is a
+# starting point: the `dest` names are the ones the iceland DTS and drivers
+# request; the `source` paths are the CONVENTIONAL locations inside OnePlus
+# vendor/odm images and have NOT been confirmed for this device.  The
+# workflow, enforced by stage-firmware.py:
+#
+#   1. scripts/stage-stock-images.sh <full OTA zip>
+#   2. scripts/stage-firmware.py record --manifest configs/firmware/iceland.toml \
+#          --stock $UBUNTU_WORKDIR/stock/current
+#      Fix every "NOT FOUND" by locating the real file in the extracted trees
+#      (fsck.erofs leaves them under the record run's messages), re-record.
+#   3. Review the diff, commit.  `stage` refuses to run from an unrecorded
+#      manifest, so nothing unverified can reach an image.
+#
+# The list grows empirically: boot the minimal image, read
+# `dmesg | grep -iE 'firmware|direct-loading|failed to load'`, add what the
+# kernel asked for, re-record.  Keep each addition's reason in a `note`.
+
+# --- GPU ----------------------------------------------------------------------
+# The iceland DTS pins the zap shader path.  The Adreno SQE/GMU firmware names
+# for the a840 are requested by the GPU driver at probe; confirm via dmesg.
+[[file]]
+dest = "qcom/kaanapali/iceland/gen80200_zap.mbn"
+image = "vendor"
+source = "etc/firmware/gen80200_zap.mbn"
+note = "GPU zap shader; dest path pinned by the iceland DTS"
+
+# --- Audio/compute DSP ---------------------------------------------------------
+[[file]]
+dest = "qcom/kaanapali/iceland/adsp.mbn"
+image = "vendor"
+source = "etc/firmware/adsp.mbn"
+note = "ADSP; dest path pinned by the iceland DTS (remoteproc_adsp)"
+
+[[file]]
+dest = "qcom/kaanapali/iceland/adsp_dtb.mbn"
+image = "vendor"
+source = "etc/firmware/adsp_dtb.mbn"
+note = "ADSP devicetree blob; requested alongside adsp.mbn on this SoC family"
+
+# --- Wi-Fi / Bluetooth (WCN7860, ath12k) ---------------------------------------
+# ath12k loads board-2.bin/amss.bin/m3.bin for the PCIe chip (pci17cb,110e) and
+# the BT firmware via qca.  Exact filenames and sources must come from dmesg +
+# record; these are the conventional names only.
+[[file]]
+dest = "ath12k/WCN7850/hw2.0/board-2.bin"
+image = "vendor"
+source = "firmware/wlan/board-2.bin"
+note = "UNCONFIRMED name and source; fix from dmesg on first Wi-Fi probe"
+
+[[file]]
+dest = "ath12k/WCN7850/hw2.0/amss.bin"
+image = "vendor"
+source = "firmware/wlan/amss.bin"
+note = "UNCONFIRMED name and source"
+
+[[file]]
+dest = "ath12k/WCN7850/hw2.0/m3.bin"
+image = "vendor"
+source = "firmware/wlan/m3.bin"
+note = "UNCONFIRMED name and source"

@@ -1,0 +1,2 @@
+/etc/initramfs-tools/conf.d/iceland-root
+/etc/systemd/zram-generator.conf.d/iceland.conf
