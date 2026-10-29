@@ -37,8 +37,14 @@ sudo apt install git clang lld llvm make flex bison bc device-tree-compiler \
     android-sdk-platform-tools
 ```
 
-- `avbtool`: `sudo apt install avbtool` if your release has it, else
-  `pipx install avbtool` (or pip in a venv on PATH for root).
+- `avbtool`: no apt or PyPI package exists (verified on resolute, 2026-10).
+  It is a self-contained script in AOSP:
+
+  ```bash
+  git clone --depth 1 https://android.googlesource.com/platform/external/avb /tmp/aosp-avb
+  sudo install -m 0755 /tmp/aosp-avb/avbtool.py /usr/local/bin/avbtool
+  ```
+
 - `payload-dumper-go`: grab the linux-amd64 release from
   github.com/ssut/payload-dumper-go, put the binary in `/usr/local/bin`.
 

@@ -52,7 +52,7 @@ need fsck.erofs 'apt install erofs-utils (extracts firmware from vendor/odm imag
 need python3 'apt install python3'
 
 echo '=== Android boot packaging (Perpetua devices/boot/android-gki) ==='
-need avbtool 'no apt package on current Ubuntu: apt install pipx && sudo pipx install --global avbtool'
+need avbtool 'no apt or PyPI package: install avbtool.py from AOSP platform/external/avb (see docs/runbook.md stage 0)'
 need unpack_bootimg 'apt install mkbootimg (ships unpack_bootimg too)'
 need lz4 'apt install lz4'
 need cpio 'apt install cpio'
