@@ -20,6 +20,22 @@ dest=${1:?usage: capture-device-data.sh <ssh-destination> [label]}
 label=${2:-iceland-$(date +%Y%m%d)}
 out=$base/stock/device-capture/$label
 
+# One authenticated connection, shared by every command: without
+# multiplexing a password-auth run prompts a dozen times, and binary dd
+# output forbids the -t workaround. accept-new keeps the first contact
+# with a freshly flashed tablet non-interactive without blessing key
+# CHANGES. The dev image grants the ubuntu user passwordless sudo
+# (ICELAND_PW builds only), which "ssh ... sudo ..." here depends on.
+control=$(mktemp -u "${TMPDIR:-/tmp}/capture-ssh.XXXXXX")
+SSH=${CAPTURE_SSH:-ssh}
+rssh() {
+	command $SSH -o ControlMaster=auto -o "ControlPath=$control" \
+		-o ControlPersist=120 -o StrictHostKeyChecking=accept-new \
+		"$dest" "$@"
+}
+finish() { command $SSH -o "ControlPath=$control" -O exit "$dest" 2>/dev/null || true; }
+trap finish EXIT
+
 # The candidate list; each is captured only if the tablet has it. The GPT
 # inventory recorded below is the authority on what exists.
 partitions='persist modemst1 modemst2 fsg fsc devinfo engineering_cdt
@@ -30,26 +46,26 @@ echo "capturing from $dest into $out"
 
 # Inventory first: every by-name partition and the GPT, so the capture is
 # interpretable years from now.
-ssh "$dest" 'ls -l /dev/disk/by-partlabel/' > "$out/by-partlabel.txt"
-ssh "$dest" 'cat /proc/partitions' > "$out/proc-partitions.txt"
+rssh 'ls -l /dev/disk/by-partlabel/' > "$out/by-partlabel.txt"
+rssh 'cat /proc/partitions' > "$out/proc-partitions.txt"
 
 captured=0
 for p in $partitions; do
-	if ! ssh "$dest" "test -e /dev/disk/by-partlabel/$p"; then
+	if ! rssh "test -e /dev/disk/by-partlabel/$p"; then
 		echo "  $p: not present, skipped"
 		continue
 	fi
 	# Suffixed A/B copies (persist usually is not slotted; these are).
 	echo "  $p: capturing"
-	ssh "$dest" "sudo dd if=/dev/disk/by-partlabel/$p bs=1M status=none | gzip -c" \
+	rssh "sudo dd if=/dev/disk/by-partlabel/$p bs=1M status=none | gzip -c" \
 		> "$out/$p.img.gz"
 	captured=$((captured + 1))
 done
 # Slotted variants, where present.
 for p in modemst1_a modemst1_b modemst2_a modemst2_b fsg_a fsg_b; do
-	if ssh "$dest" "test -e /dev/disk/by-partlabel/$p" 2>/dev/null; then
+	if rssh "test -e /dev/disk/by-partlabel/$p" 2>/dev/null; then
 		echo "  $p: capturing"
-		ssh "$dest" "sudo dd if=/dev/disk/by-partlabel/$p bs=1M status=none | gzip -c" \
+		rssh "sudo dd if=/dev/disk/by-partlabel/$p bs=1M status=none | gzip -c" \
 			> "$out/$p.img.gz"
 		captured=$((captured + 1))
 	fi

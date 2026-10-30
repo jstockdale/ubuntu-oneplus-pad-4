@@ -284,6 +284,13 @@ if [ -n '$password' ]; then
 	chroot "\$target" useradd -m -s /bin/bash \
 		-G sudo,adm,dialout,audio,video,plugdev,netdev,input,render '$username'
 	echo '$username:$password' | chroot "\$target" chpasswd
+	# Development image only (this branch exists only when ICELAND_PW is
+	# set): passwordless sudo, because capture-device-data.sh and every
+	# other scripted remote step run "ssh ... sudo ..." with no TTY to
+	# answer a prompt on. Shipping images never get this file.
+	echo '$username ALL=(ALL) NOPASSWD:ALL' \
+		> "\$target/etc/sudoers.d/90-iceland-dev"
+	chmod 0440 "\$target/etc/sudoers.d/90-iceland-dev"
 elif [ '$profile' = desktop ]; then
 	# Shipping image: no account, so GDM runs gnome-initial-setup and the
 	# owner creates their own.  The key must be written, not uncommented:
