@@ -100,3 +100,28 @@ Next steps, in order:
   initramfs now ships a `/rescue/mainline-init -> /init` symlink via the
   `iceland-rescue-init` initramfs-tools hook (zero kernel delta), and
   `make-initramfs.sh` refuses an archive without it.
+
+## 2026-10-29 (evening) — GLO handoff fully verified offline; no patch needed
+
+Measured from the staged GLO 11.A.38 firmware plus the running unit
+(SELinux blocks adb's /proc/device-tree reads on OxygenOS; properties and
+the OTA's own images do not lie):
+
+- `ro.boot.dtb_idx=12` → base FDT = "CanoeP v2 SoC" (`qcom,canoep`);
+  `ro.boot.dtbo_idx=6` → board overlay 06 of ten (five board variants ×
+  two silicon families in dtbo).
+- Overlay 06 root: model **"Qualcomm Technologies, Inc. Canoe
+  MTP,iceland-O IN"** — identical to the pinned stock-model even on GLO
+  firmware (OnePlus ships the IN board string for project 0x657a/25978
+  globally) — and compatible "qcom,canoe-mtp qcom,canoe qcom,canoep-mtp
+  qcom,canoep qcom,mtp", which contains the pinned `qcom,canoe`.
+- `ro.boot.prjname=25978` matches stock-bootargs.
+- VERDICT (scripts/check-handoff-final.sh): all three handoff legs MATCH;
+  the pinned Perpetua tree accepts this unit unpatched. Assumption 5's
+  product gate ("canoe") still gets its direct confirmation at first
+  fastboot contact.
+
+Tooling hardened along the way by real-world contact: quoted-string
+parsing in check-handoff-match.sh, the pipefail/head trap in
+inspect-dtbo.sh, zip-direct payload extraction in stage-stock-images.sh,
+and check-handoff-final.sh for the composed-root question.
