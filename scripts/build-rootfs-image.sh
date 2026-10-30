@@ -107,9 +107,12 @@ tar -C "$rootfs" --numeric-owner --acls \
 echo 'merging the firmware overlay'
 # --owner=0 --group=0, not --numeric-owner: the overlay may be staged by an
 # unprivileged builder, and firmware must be root-owned in the image
-# whoever staged it.
+# whoever staged it.  --keep-directory-symlink: the image's /lib is the
+# usr-merge symlink, and extracting the overlay's ./lib/ over it would
+# otherwise replace it with a bare directory (the same trap the modules
+# staging fell into).
 tar -C "$overlay" --owner=0 --group=0 --exclude=PROVENANCE.json -cf - . \
-	| tar -C "$mnt" --numeric-owner -xf -
+	| tar -C "$mnt" --numeric-owner --keep-directory-symlink -xf -
 install -m 0644 "$overlay/PROVENANCE.json" "$mnt/usr/lib/iceland-firmware-provenance.json"
 
 # Both tar streams end by applying "./"'s attributes to the extraction root:

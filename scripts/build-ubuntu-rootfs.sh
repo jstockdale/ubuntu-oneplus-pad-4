@@ -399,8 +399,13 @@ if [ -n "$kernel_release" ] && [ -d "$modules_root" ]; then
 	echo "staging kernel modules from $modules_root"
 	# --owner=0 --group=0: the kernel build may run unprivileged (it needs
 	# no root), and modules must land root-owned in the image regardless of
-	# who built them.
-	tar -C "$modules_root" --owner=0 --group=0 -cf - . | tar -C "$rootfs" -xf -
+	# who built them.  --keep-directory-symlink: the rootfs is usr-merged
+	# (/lib is a symlink to usr/lib) and tar otherwise REPLACES that
+	# symlink with a real directory holding only modules/, severing
+	# /lib/ld-linux-aarch64.so.1 and every chroot after it — the exact
+	# failure the first rootfs build died on.
+	tar -C "$modules_root" --owner=0 --group=0 -cf - . \
+		| tar -C "$rootfs" --keep-directory-symlink -xf -
 	chroot "$rootfs" depmod -a "$kernel_release"
 	# initramfs-tools reads /boot/config-<release> to verify the kernel
 	# supports the compressor we demand; without it the LZ4 requirement
