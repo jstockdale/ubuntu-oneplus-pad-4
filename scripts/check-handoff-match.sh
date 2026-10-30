@@ -45,33 +45,46 @@ done
 # Prefer the built DTB (ground truth for what will boot); fall back to the
 # pinned source tree so the check does not require a kernel build.
 expected_models=() expected_compat=() expected_bootargs=()
-read_expected() {
-	local dtb=$1
-	mapfile -t expected_models < <(fdtget -d '' "$dtb" /chosen/fdt-handoff \
-		stock-model 2>/dev/null | tr '\0' '\n' | sed '/^$/d')
-	mapfile -t expected_compat < <(fdtget -d '' "$dtb" /chosen/fdt-handoff \
-		stock-compatible 2>/dev/null | tr '\0' '\n' | sed '/^$/d')
-	mapfile -t expected_bootargs < <(fdtget -d '' "$dtb" /chosen/fdt-handoff \
-		stock-bootargs 2>/dev/null | tr '\0' '\n' | sed '/^$/d')
+# Quoted-string splitting, never a bare comma split: device tree strings
+# ("qcom,canoe", "... MTP,iceland-O IN") carry commas inside them, which is
+# exactly the mistake this function's first version made.
+split_quoted() { grep -o '"[^"]*"' | tr -d '"'; }
+read_expected_dtb() {
+	# dtc round-trips the node with proper quoting; fdtget joins string
+	# arrays with spaces and cannot be parsed back once strings have spaces.
+	local node
+	node=$(dtc -I dtb -O dts -q "$1" 2>/dev/null \
+		| sed -n '/fdt-handoff {/,/};/p')
+	mapfile -t expected_models < <(printf '%s\n' "$node" \
+		| sed -n 's/.*stock-model = //p' | split_quoted)
+	mapfile -t expected_compat < <(printf '%s\n' "$node" \
+		| sed -n 's/.*stock-compatible = //p' | split_quoted)
+	mapfile -t expected_bootargs < <(printf '%s\n' "$node" \
+		| sed -n 's/.*stock-bootargs = //p' | split_quoted)
+}
+read_expected_dts() {
+	mapfile -t expected_models < <(sed -n 's/.*stock-model = //p' "$1" \
+		| split_quoted)
+	mapfile -t expected_compat < <(sed -n 's/.*stock-compatible = //p' "$1" \
+		| split_quoted)
+	mapfile -t expected_bootargs < <(sed -n 's/.*stock-bootargs = //p' "$1" \
+		| split_quoted)
 }
 if [ -f "$kernel_out/iceland.dtb" ]; then
-	read_expected "$kernel_out/iceland.dtb"
+	read_expected_dtb "$kernel_out/iceland.dtb"
 	expected_from="built DTB $kernel_out/iceland.dtb"
 elif [ -f "$kernel_src/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts" ]; then
-	# A quick dtc of the source needs the full include chain; grep instead.
-	mapfile -t expected_models < <(sed -n \
-		's/.*stock-model = \(.*\);/\1/p' \
-		"$kernel_src/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts" \
-		| tr ',' '\n' | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//' | sed '/^$/d')
-	mapfile -t expected_compat < <(sed -n \
-		's/.*stock-compatible = \(.*\);/\1/p' \
-		"$kernel_src/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts" \
-		| tr ',' '\n' | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//' | sed '/^$/d')
+	read_expected_dts \
+		"$kernel_src/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts"
 	expected_from="DTS source in $kernel_src"
 else
 	echo 'neither a built iceland.dtb nor the Perpetua checkout found' >&2
 	exit 1
 fi
+[ "${#expected_compat[@]}" -gt 0 ] || {
+	echo 'could not parse stock-compatible from the kernel side' >&2
+	exit 1
+}
 echo "expected (from $expected_from):"
 printf '  stock-compatible: %s\n' "${expected_compat[@]:-<none>}"
 printf '  stock-model:      %s\n' "${expected_models[@]:-<none>}"
@@ -107,6 +120,7 @@ print(f'{n} device tree(s) in vendor_boot', file=sys.stderr)
 EOF
 
 matched=0 total=0
+stock_compats_seen=()
 echo
 for dtb in "$tmp"/stock-*.dtb; do
 	total=$((total + 1))
@@ -117,6 +131,7 @@ for dtb in "$tmp"/stock-*.dtb; do
 	echo "  model:      $model"
 	echo "  compatible: $compat"
 	[ -n "$bootargs" ] && echo "  bootargs:   $bootargs"
+	for c in $compat; do stock_compats_seen+=("$c"); done
 	model_ok=no
 	for m in "${expected_models[@]:-}"; do
 		[ "$model" = "$m" ] && model_ok=yes
@@ -130,16 +145,24 @@ for dtb in "$tmp"/stock-*.dtb; do
 done
 
 echo
+echo 'NOTE: vendor_boot carries SoC-level base trees; the board identity'
+echo '(the "... MTP,iceland-O <region>" model) is applied at boot as a dtbo'
+echo 'overlay, so this offline check can only prove the COMPATIBLE leg and'
+echo 'enumerate the bases. The authoritative model string comes from the'
+echo 'RUNNING tablet, no root needed:'
+echo '    adb shell cat /proc/device-tree/model'
+echo
 if [ "$matched" -gt 0 ]; then
-	echo "VERDICT: $matched of $total stock tree(s) match — the handoff will"
-	echo 'take the built-in tree on this firmware. stock-bootargs'
-	echo '(oplusboot.prjname) is appended by ABL at boot and stays unverified'
-	echo 'until the first RAM boot.'
+	echo "VERDICT: $matched of $total stock tree(s) match on model+compatible."
+elif printf '%s\n' "${stock_compats_seen[@]:-}" | grep -qxF -- "${expected_compat[0]}"; then
+	echo 'VERDICT: compatible MATCHES on at least one base tree; the model'
+	echo 'leg must be settled from the running tablet (command above). If its'
+	echo 'model differs from the expected list, add it to stock-model in the'
+	echo 'iceland DTS — a one-line patch for kernel/patches/, worth sending'
+	echo 'upstream to Perpetua.'
 else
-	echo 'VERDICT: NO stock tree matches. The kernel would silently boot the'
-	echo 'vendor tree. Fix: add this unit'\''s model string (printed above) to'
-	echo 'stock-model in arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts'
-	echo '— a one-line patch for kernel/patches/, and worth sending upstream'
-	echo 'to Perpetua so the next pin bump carries it for everyone.'
+	echo 'VERDICT: NO stock tree even matches stock-compatible — wrong'
+	echo 'firmware for this device tree, or a staging problem. Stop and'
+	echo 'investigate before any boot attempt.'
 	exit 1
 fi
