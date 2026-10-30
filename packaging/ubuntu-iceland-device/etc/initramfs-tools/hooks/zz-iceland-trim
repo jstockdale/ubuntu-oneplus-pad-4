@@ -1,0 +1,38 @@
+#!/bin/sh
+# Trim the generated initramfs to fit iceland's 8 MiB init_boot partition.
+# Runs last (zz-). Measured on the first oversized build (13.2 MB packed,
+# 37 MB raw): the weight was never kernel modules but stock Ubuntu payload
+# this initramfs cannot use —
+#   udev/hwdb.bin   13.8 MB  device METADATA lookup; udevd creates nodes
+#                            and runs rules fine without it
+#   dhcpcd          ~0.9 MB  netboot support; this device mounts a local
+#                            ext4 root by label, BOOT=local always
+#   loadkeys etc    ~0.3 MB  console keymaps; KEYMAP=n already set
+#   libdevmapper    ~0.5 MB  no LVM/crypt anywhere in this port
+#   fuse3           ~0.3 MB  nothing in the boot path mounts FUSE
+# Everything removed here is still present in the real root filesystem.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+for f in \
+	usr/lib/udev/hwdb.bin \
+	usr/sbin/dhcpcd \
+	usr/share/dhcpcd \
+	usr/lib/dhcpcd \
+	usr/libexec/dhcpcd-hooks \
+	usr/libexec/dhcpcd-run-hooks \
+	usr/bin/loadkeys \
+	usr/share/consolefonts \
+	usr/share/keymaps \
+	usr/sbin/dmsetup \
+	usr/lib/aarch64-linux-gnu/libdevmapper.so.1.02.1 \
+	usr/lib/aarch64-linux-gnu/libfuse3.so.3 \
+	usr/lib/aarch64-linux-gnu/libfuse3.so.3.*; do
+	rm -rf "${DESTDIR:?}/$f"
+done
+exit 0
