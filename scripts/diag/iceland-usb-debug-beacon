@@ -46,10 +46,10 @@ esac
 		# Stream the kernel ring buffer to the host for the life of the boot.
 		cat /dev/kmsg > /dev/ttyGS0 2>/dev/null
 	else
-		echo "iceland-usb-debug: no UDC after ${n}s; reboot beacon" > /dev/kmsg
-		sleep 2
-		echo b > /proc/sysrq-trigger 2>/dev/null
-		reboot -f 2>/dev/null
+		# Marker only: the reboot beacon served flights 1-16; with a
+		# live console it would now kill working sessions (observed:
+		# the UDC check misreads under a kernel-bound g_serial).
+		echo "iceland-usb-debug: no UDC visible after ${n}s" > /dev/kmsg
 	fi
 ) 2>/dev/null &
 exit 0
