@@ -23,7 +23,11 @@ cp -a "$src/." "$build/"
 # Permissions are part of the package, not of the checkout.
 find "$build" -type d -exec chmod 0755 {} +
 find "$build" -type f -exec chmod 0644 {} +
-chmod 0755 "$build"/DEBIAN/postinst "$build"/usr/libexec/* 2>/dev/null || true
+# Executable bits are part of the package's behavior, not cosmetics:
+# initramfs-tools SILENTLY skips a non-executable hook, which is how the
+# first initramfs shipped without rescue/mainline-init.
+chmod 0755 "$build"/DEBIAN/postinst "$build"/usr/libexec/* \
+	"$build"/etc/initramfs-tools/hooks/* 2>/dev/null || true
 
 # dpkg-deb refuses stray editor droppings and so should we.
 find "$build" -name '*~' -o -name '*.swp' | grep -q . && {

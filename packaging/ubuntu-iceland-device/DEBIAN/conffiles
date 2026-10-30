@@ -1,2 +1,3 @@
 /etc/initramfs-tools/conf.d/iceland-root
+/etc/initramfs-tools/hooks/iceland-rescue-init
 /etc/systemd/zram-generator.conf.d/iceland.conf
