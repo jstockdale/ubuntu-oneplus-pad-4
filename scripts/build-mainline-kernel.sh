@@ -15,7 +15,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 kernel_src=${KERNEL_SRC:-$base/linux-perpetua}
 kernel_tree=${KERNEL_WORKTREE:-$base/build/linux-src-iceland}
 build_dir=${KERNEL_BUILD_DIR:-$base/build/linux-iceland}

@@ -12,7 +12,7 @@
 # Usage: inspect-dtbo.sh [dtbo.img]   (default: $STOCK_DIR/dtbo.img)
 set -euo pipefail
 
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 stock=${STOCK_DIR:-$base/stock/current}
 img=${1:-$stock/dtbo.img}
 

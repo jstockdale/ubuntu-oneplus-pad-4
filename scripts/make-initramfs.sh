@@ -10,7 +10,7 @@
 # stdout.  Nothing is flashed.
 set -euo pipefail
 
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 rootfs=${ROOTFS_DIR:-$base/rootfs}
 kernel_out=${KERNEL_OUT_DIR:-$base/out/kernel-iceland}
 kernel_release=${KERNEL_RELEASE:-$(cat "$kernel_out/kernel.release" 2>/dev/null || true)}

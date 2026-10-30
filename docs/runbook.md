@@ -58,7 +58,7 @@ build stages as root. The clean pattern:
 ```bash
 sudo -i
 cd /home/jstockdale/projects/ubuntu-oneplus-pad-4
-# All stages default to UBUNTU_WORKDIR=/root/ubuntu-iceland; set it only to
+# All stages default to UBUNTU_WORKDIR=/srv/ubuntu-iceland; set it only to
 # move the build elsewhere (fast disk, more space):
 # export UBUNTU_WORKDIR=/srv/ubuntu-iceland
 ```

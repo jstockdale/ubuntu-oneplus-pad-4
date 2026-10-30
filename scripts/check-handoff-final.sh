@@ -14,7 +14,7 @@
 # Reads only files; nothing is flashed.
 set -euo pipefail
 
-base_dir=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base_dir=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 stock=${STOCK_DIR:-$base_dir/stock/current}
 kernel_src=${KERNEL_SRC:-$base_dir/linux-perpetua}
 kernel_out=${KERNEL_OUT_DIR:-$base_dir/out/kernel-iceland}

@@ -14,7 +14,7 @@
 # to bump often at first.
 set -euo pipefail
 
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 branch=${PERPETUA_BRANCH:-perpetua/v7.3}
 commit=${PERPETUA_COMMIT:-7c98a10e6bb75d64a9f2e7b1e152ad1234a38659}
 # A local kernel checkout (any clone of torvalds/linux or of Perpetua itself)

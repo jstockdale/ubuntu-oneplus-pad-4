@@ -8,7 +8,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 src=$repo/packaging/ubuntu-iceland-device
 out=${PACKAGES_OUT_DIR:-$base/out/packages}
 build=$base/build/ubuntu-iceland-device

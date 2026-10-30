@@ -16,7 +16,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 rootfs=${ROOTFS_DIR:-$base/rootfs}
 overlay=${OVERLAY_OUT_DIR:-$base/out/rootfs-overlay}
 out=${IMAGE_OUT:-$base/out/ubuntu-iceland-userdata.img}
@@ -105,7 +105,10 @@ tar -C "$rootfs" --numeric-owner --acls \
 	--xattrs --xattrs-include='*' -xf -
 
 echo 'merging the firmware overlay'
-tar -C "$overlay" --numeric-owner --exclude=PROVENANCE.json -cf - . \
+# --owner=0 --group=0, not --numeric-owner: the overlay may be staged by an
+# unprivileged builder, and firmware must be root-owned in the image
+# whoever staged it.
+tar -C "$overlay" --owner=0 --group=0 --exclude=PROVENANCE.json -cf - . \
 	| tar -C "$mnt" --numeric-owner -xf -
 install -m 0644 "$overlay/PROVENANCE.json" "$mnt/usr/lib/iceland-firmware-provenance.json"
 

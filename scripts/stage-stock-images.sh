@@ -18,7 +18,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 ota=${1:?usage: stage-stock-images.sh OTA.zip}
 stock_root=${STOCK_ROOT:-$base/stock}
 # boot and init_boot are the repack templates.  vendor and odm feed

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 version=${RELEASE_VERSION:-$(tr -d '[:space:]' < "$repo/VERSION")}
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
 	echo "invalid release version: $version" >&2

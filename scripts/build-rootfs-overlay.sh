@@ -13,7 +13,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 overlay=${OVERLAY_OUT_DIR:-$base/out/rootfs-overlay}
 stock=${STOCK_DIR:-$base/stock/current}
 manifest=${FIRMWARE_MANIFEST:-$repo/configs/firmware/iceland.toml}

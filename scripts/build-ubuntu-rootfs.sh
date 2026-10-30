@@ -24,7 +24,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-base=${UBUNTU_WORKDIR:-/root/ubuntu-iceland}
+base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 rootfs=${ROOTFS_DIR:-$base/rootfs}
 profile=${ICELAND_PROFILE:-desktop}
 suite=${UBUNTU_SUITE:-resolute}
@@ -390,7 +390,10 @@ done
 
 if [ -n "$kernel_release" ] && [ -d "$modules_root" ]; then
 	echo "staging kernel modules from $modules_root"
-	cp -a "$modules_root/." "$rootfs/"
+	# --owner=0 --group=0: the kernel build may run unprivileged (it needs
+	# no root), and modules must land root-owned in the image regardless of
+	# who built them.
+	tar -C "$modules_root" --owner=0 --group=0 -cf - . | tar -C "$rootfs" -xf -
 	chroot "$rootfs" depmod -a "$kernel_release"
 	# initramfs-tools reads /boot/config-<release> to verify the kernel
 	# supports the compressor we demand; without it the LZ4 requirement
