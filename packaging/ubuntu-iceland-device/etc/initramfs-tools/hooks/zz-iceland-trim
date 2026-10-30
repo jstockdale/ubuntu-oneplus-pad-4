@@ -11,6 +11,13 @@
 #   libdevmapper    ~0.5 MB  no LVM/crypt anywhere in this port
 #   fuse3           ~0.3 MB  nothing in the boot path mounts FUSE
 # Everything removed here is still present in the real root filesystem.
+# The udev removal is the big one, and it is by design, verified against
+# the shipped scripts: wait_for_udev() no-ops when udevadm is absent,
+# resolve_device() maps LABEL= through blkid directly, devtmpfs provides
+# the nodes, and local_device_setup's polling loop is the documented
+# fallback when wait-for-root is not there. kmod goes with it: a
+# zero-module initramfs loads nothing, and kmod was libcrypto's other
+# consumer. The closure test proves no kept ELF loses a dependency.
 PREREQ=""
 prereqs() { echo "$PREREQ"; }
 case "$1" in
@@ -38,7 +45,23 @@ for f in \
 	usr/lib/klibc-*.so \
 	usr/lib/aarch64-linux-gnu/dhcpcd \
 	usr/lib/modules/*/modules.builtin.modinfo \
-	usr/lib/modules/*/modules.builtin.alias.bin; do
+	usr/lib/modules/*/modules.builtin.alias.bin \
+	usr/bin/udevadm \
+	usr/lib/systemd \
+	usr/lib/udev \
+	etc/udev \
+	usr/lib/aarch64-linux-gnu/systemd \
+	usr/lib/aarch64-linux-gnu/libcrypto.so.* \
+	usr/lib/aarch64-linux-gnu/libudev.so.* \
+	usr/lib/aarch64-linux-gnu/libzstd.so.* \
+	usr/lib/aarch64-linux-gnu/libpcre2-8.so.* \
+	usr/lib/aarch64-linux-gnu/libcrypt.so.* \
+	usr/bin/kmod \
+	usr/sbin/modprobe usr/sbin/depmod usr/sbin/insmod \
+	usr/sbin/rmmod usr/sbin/lsmod usr/sbin/modinfo \
+	usr/sbin/wait-for-root \
+	scripts/init-top/udev \
+	scripts/init-bottom/udev; do
 	rm -rf "${DESTDIR:?}/$f"
 done
 exit 0
