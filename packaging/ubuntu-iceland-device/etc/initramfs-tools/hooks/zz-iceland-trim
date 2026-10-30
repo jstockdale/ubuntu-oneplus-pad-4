@@ -32,7 +32,13 @@ for f in \
 	usr/sbin/mount.fuse3 \
 	usr/sbin/dmsetup \
 	usr/lib/aarch64-linux-gnu/libdevmapper.so.1.02.1 \
-	usr/lib/aarch64-linux-gnu/libfuse3.so.*; do
+	usr/lib/aarch64-linux-gnu/libfuse3.so.* \
+	usr/lib/aarch64-linux-gnu/libselinux.so.* \
+	usr/lib/aarch64-linux-gnu/libkmod.so.* \
+	usr/lib/klibc-*.so \
+	usr/lib/aarch64-linux-gnu/dhcpcd \
+	usr/lib/modules/*/modules.builtin.modinfo \
+	usr/lib/modules/*/modules.builtin.alias.bin; do
 	rm -rf "${DESTDIR:?}/$f"
 done
 exit 0
