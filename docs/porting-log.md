@@ -447,3 +447,32 @@ symlinks (ld-linux-aarch64.so.1, klibc-*.so) that resolve through
 usr/lib — it merges over the vendor's lib/ instead of fighting it.
 Verified: the full vendor00+archive chain boots in qemu to the wrapper
 (6.6 s), /init, and the 30 s beacon.
+
+## 2026-10-30 (night) — PHASE A COMPLETE: interactive Ubuntu initramfs on hardware
+
+Flight 18: stable `(initramfs)` shell over the USB ACM console, no
+resets, waiting indefinitely. Evidence captured live
+(out/flight-18.log on the build host):
+
+- `/proc/device-tree/model` = "OnePlus Pad 4" — the built-in mainline
+  DTS is what booted;
+- `/proc/device-tree/chosen/linux,fdt-handoff` present — the handoff
+  formally engaged, ABL memory map carried;
+- all six UFS LUNs enumerated (sda..sdf incl. the 103-partition sde),
+  zram0 present; `userdata` located at sda15 from inside the system;
+- g_serial console enumerated as "Linux 7.3.0+ with dwc3-gadget";
+- minutes idle without reset: the ABL-armed watchdog is genuinely
+  handled by the built-in driver.
+
+The road here, for the record: ABL ignores RAM-boot ramdisks (flash
+init_boot_b instead); the archive must be one LZ4-legacy frame; lib/
+must be a real directory with loader links or the vendor ramdisk
+poisons every dynamic exec; the apps SMMU probe kills the splash
+scanout (diag leaves it disabled; the kaanapali-mdss client patch is
+the real fix later); panic=N doubles as initramfs-tools policy (keep it
+off diag cmdlines; break=mount for a deliberate shell); the beacon
+pattern must never reboot once a console exists.
+
+Next: Phase B — rootfs image, release boot+init_boot pair via
+android-gki, userdata (sda15) flash, first boot, factory-data capture
+first, then the desktop profile.
