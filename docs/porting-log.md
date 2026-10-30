@@ -266,9 +266,12 @@ nothing we changed was in the air. The control pair told the truth:
   flashed init_boot + vendor ramdisk.
 
 So attempts 1–7 ran our kernel with Android's ramdisk: handoff fine,
-rdinit=/rescue/mainline-init absent, fallback /init = Android first-
-stage init on a mainline kernel → fatal → its own reboot() → the
-7-s-black / 3-s-logo signature. Not a watchdog, not the clock sweep,
+rdinit=/rescue/mainline-init absent — and the kernel's fallback list
+(/sbin/init, /etc/init, /bin/init, /bin/sh) does NOT include /init, so
+Android's init never ran either: "No working init found" panic. Under
+panic=0 (attempts 1–3) that HANGS until a forced reset — exactly what
+we observed; under the diag panic=10 it resets ~10 s after the early
+panic — the 7-s-black / 3-s-logo signature. Not a watchdog, not the clock sweep,
 not TrustZone. The beacon never fired because our initramfs never flew;
 qemu (which does load it) keeps proving the archive itself sound.
 
@@ -294,9 +297,10 @@ ABL offers:
   "Failed to load/authenticate boot image: Load Error" — but the command
   was issued while the ABL sat on its failure screen (winking mascot,
   CN text) left by the previous attempt, so that run was void. Retested
-  from clean fastboot: v3 is ACCEPTED, boots, and shows the same
-  7-s-black / 3-s-logo Android-init suicide — the v3-embedded ramdisk
-  is ignored exactly like v4's. The failure screen still serves the
+  from clean fastboot: v3 is ACCEPTED, the kernel starts, and the same
+  7-s-black / 3-s-logo RESET follows (no-init panic + panic=10), after
+  which the flashed stock chain boots Android normally — the
+  v3-embedded ramdisk is ignored exactly like v4's. The failure screen still serves the
   fastboot protocol and `fastboot reboot` returns to Android.
 
 Corroboration from the wild: cfig/Android_boot_image_editor
