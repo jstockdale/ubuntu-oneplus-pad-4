@@ -1,63 +1,219 @@
-# Firmware manifest for iceland (OnePlus Pad 4) — TEMPLATE.
+# Firmware manifest for iceland (OnePlus Pad 4), stock 11.A.38 — phase 1.
 #
-# State: no stock package has been opened yet, so every entry below is a
-# starting point: the `dest` names are the ones the iceland DTS and drivers
-# request; the `source` paths are the CONVENTIONAL locations inside OnePlus
-# vendor/odm images and have NOT been confirmed for this device.  The
-# workflow, enforced by stage-firmware.py:
+# Sources and SHA-256s cross-referenced from MANIFEST.tsv of
+# github.com/mzakamin-hub/iceland-firmware (built from the same stock
+# 11.A.38), regenerated 2026-10-29. stage-firmware.py still
+# extracts every byte from the OWNER's own staged OTA partitions and
+# refuses on any hash mismatch, so the two independent sources must agree
+# or nothing ships. Hashes are of the DESTINATION file (after the
+# transform, where one applies).
 #
-#   1. scripts/stage-stock-images.sh <full OTA zip>
-#   2. scripts/stage-firmware.py record --manifest configs/firmware/iceland.toml \
-#          --stock $UBUNTU_WORKDIR/stock/current
-#      Fix every "NOT FOUND" by locating the real file in the extracted trees
-#      (fsck.erofs leaves them under the record run's messages), re-record.
-#   3. Review the diff, commit.  `stage` refuses to run from an unrecorded
-#      manifest, so nothing unverified can reach an image.
+# transform values: fwup-strip-80-128 (drop an 80-byte header and a
+# 128-byte trailer), pil-join (join .mdt + .bNN siblings into one ELF,
+# pil-squasher equivalent). Absent means byte copy.
 #
-# The list grows empirically: boot the minimal image, read
-# `dmesg | grep -iE 'firmware|direct-loading|failed to load'`, add what the
-# kernel asked for, re-record.  Keep each addition's reason in a `note`.
+# Out of scope for phase 1, deliberately: the sensor-hub dsp tree, sensor
+# configs and registry (needs the sensors userspace), audio calibration
+# database (needs the sound card up), the thermal model (their decoder is
+# unpublished), socinfo (generated on device).
 
-# --- GPU ----------------------------------------------------------------------
-# The iceland DTS pins the zap shader path.  The Adreno SQE/GMU firmware names
-# for the a840 are requested by the GPU driver at probe; confirm via dmesg.
-[[file]]
-dest = "qcom/kaanapali/iceland/gen80200_zap.mbn"
-image = "vendor"
-source = "etc/firmware/gen80200_zap.mbn"
-note = "GPU zap shader; dest path pinned by the iceland DTS"
-
-# --- Audio/compute DSP ---------------------------------------------------------
 [[file]]
 dest = "qcom/kaanapali/iceland/adsp.mbn"
-image = "vendor"
-source = "etc/firmware/adsp.mbn"
-note = "ADSP; dest path pinned by the iceland DTS (remoteproc_adsp)"
+image = "modem"
+source = "image/adsp.mdt"
+sha256 = "781512dbb6d9958d7e7eb50862000db867bea9e8b0e27cad87ffc94c6bc536af"
+transform = "pil-join"
+note = "adsp"
 
 [[file]]
 dest = "qcom/kaanapali/iceland/adsp_dtb.mbn"
-image = "vendor"
-source = "etc/firmware/adsp_dtb.mbn"
-note = "ADSP devicetree blob; requested alongside adsp.mbn on this SoC family"
-
-# --- Wi-Fi / Bluetooth (WCN7860, ath12k) ---------------------------------------
-# ath12k loads board-2.bin/amss.bin/m3.bin for the PCIe chip (pci17cb,110e) and
-# the BT firmware via qca.  Exact filenames and sources must come from dmesg +
-# record; these are the conventional names only.
-[[file]]
-dest = "ath12k/WCN7850/hw2.0/board-2.bin"
-image = "vendor"
-source = "firmware/wlan/board-2.bin"
-note = "UNCONFIRMED name and source; fix from dmesg on first Wi-Fi probe"
+image = "modem"
+source = "image/adsp_dtb.mdt"
+sha256 = "09e35c4294fd3b3d25146603538c5e858af7e13a5d60a639f495783d397c448a"
+transform = "pil-join"
+note = "adsp"
 
 [[file]]
-dest = "ath12k/WCN7850/hw2.0/amss.bin"
-image = "vendor"
-source = "firmware/wlan/amss.bin"
-note = "UNCONFIRMED name and source"
+dest = "qcom/kaanapali/iceland/adspr.jsn"
+image = "modem"
+source = "image/adspr.jsn"
+sha256 = "66ce8531efb7979d234e0f0eabbe18d038ac97da771a8a194f613df8f0724e81"
+note = "adsp"
 
 [[file]]
-dest = "ath12k/WCN7850/hw2.0/m3.bin"
+dest = "qca/brhbtfw20.mbn"
+image = "bluetooth"
+source = "image/brhbtfw20.mbn"
+sha256 = "74ee832cd724fb6a4391bc06f4b0d9697d36b460e7f4b14fb6bc14b69e7cc287"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b2e"
+image = "bluetooth"
+source = "image/brhbtnv20.b2e"
+sha256 = "aaa2261d86b79da1561ac642f592506a3d4d7d71b7d2877306334fbce439d860"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b34"
+image = "bluetooth"
+source = "image/brhbtnv20.b34"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b35"
+image = "bluetooth"
+source = "image/brhbtnv20.b35"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b36"
+image = "bluetooth"
+source = "image/brhbtnv20.b36"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b37"
+image = "bluetooth"
+source = "image/brhbtnv20.b37"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b38"
+image = "bluetooth"
+source = "image/brhbtnv20.b38"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b39"
+image = "bluetooth"
+source = "image/brhbtnv20.b39"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b3e"
+image = "bluetooth"
+source = "image/brhbtnv20.b3e"
+sha256 = "0690ba889498dc37d7611d0b8f3743d3b225b1fdd4fdf3f68e60461d5097e17a"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b41"
+image = "bluetooth"
+source = "image/brhbtnv20.b41"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b44"
+image = "bluetooth"
+source = "image/brhbtnv20.b44"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b46"
+image = "bluetooth"
+source = "image/brhbtnv20.b46"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.b47"
+image = "bluetooth"
+source = "image/brhbtnv20.b47"
+sha256 = "83daa443101d928b478c0a8ed9aa640e4fed374e3a620190093e017642d0d406"
+note = "bt"
+
+[[file]]
+dest = "qca/brhbtnv20.bin"
+image = "bluetooth"
+source = "image/brhbtnv20.bin"
+sha256 = "9671c2f0c1a860d0c4955e0427c51b0f8ae177b73fb2a933b838102a5f055698"
+note = "bt"
+
+[[file]]
+dest = "qcom/kaanapali/iceland/cdsp.mbn"
+image = "modem"
+source = "image/cdsp.mdt"
+sha256 = "5e5fa6eb8b61eae77d23ebf7f868b45419bbb65d7358ed99010bab68fe88791d"
+transform = "pil-join"
+note = "cdsp"
+
+[[file]]
+dest = "qcom/kaanapali/iceland/cdsp_dtb.mbn"
+image = "modem"
+source = "image/cdsp_dtb.mdt"
+sha256 = "6aedd298727f336a19e5215e8b629002f5caea0073fcaf6a9bcae9804f44e19e"
+transform = "pil-join"
+note = "cdsp"
+
+[[file]]
+dest = "qcom/kaanapali/iceland/gen80200_zap.mbn"
 image = "vendor"
-source = "firmware/wlan/m3.bin"
-note = "UNCONFIRMED name and source"
+source = "firmware/gen80200_zap.mbn"
+sha256 = "d185bfc9a819394537775a9facd49a6136f1fc66b848ea3de4e4e04ce9053db0"
+note = "gpu-zap"
+
+[[file]]
+dest = "novatek/novatek_nt36536_fw.bin"
+image = "odm"
+source = "firmware/tp/25926/FW_NT36536_HUAXING.img"
+sha256 = "5e9d96517199ce11d44db90436e5835fed7982031102f52a74b7230ad64d83e2"
+transform = "fwup-strip-80-128"
+note = "touch"
+
+[[file]]
+dest = "qcom/kaanapali/iceland/vpu40_2v.mbn"
+image = "vendor"
+source = "firmware/vpu40_2v.mbn"
+sha256 = "69d4e2154ca1704a751922d2b6e4680539c995d1e85dcf07ab349a009a411abc"
+note = "vpu"
+
+[[file]]
+dest = "ath12k/WCN7860/hw2.0/amss.bin"
+image = "modem"
+source = "image/peach/amss20.bin"
+sha256 = "23811bd6abe91a89ef00057e0a4d2e85ea3d0defcad377334cdef987ec4df820"
+note = "wifi"
+
+[[file]]
+dest = "ath12k/WCN7860/hw2.0/aux_ucode.bin"
+image = "modem"
+source = "image/peach/aux_ucode20.elf"
+sha256 = "4db9df6fdac982752f71c513f174da7e22307a769a9d49fd336b054919c9451e"
+note = "wifi"
+
+[[file]]
+dest = "ath12k/WCN7860/hw2.0/board.bin"
+image = "odm"
+source = "etc/wifi/peach/bdwlan.elf"
+sha256 = "355578ce4162b885c9371e8df7eac20bb4bcd28c8b9d11cf0bdd5114ec6cfe3c"
+note = "wifi"
+
+[[file]]
+dest = "ath12k/WCN7860/hw2.0/m3.bin"
+image = "modem"
+source = "image/peach/phy_ucode20.elf"
+sha256 = "c1a1295b1808ba204676c03967aea91effc5d85b55a9d269ba858c5e80c92b9c"
+note = "wifi"
+
+[[file]]
+dest = "ath12k/WCN7860/hw2.0/qdss.cfg"
+image = "modem"
+source = "image/peach/qdss_trace_config_v2.cfg"
+sha256 = "4683d8683437a11172723dc5820801aaaf5eb082336875a7664142582cc90cbb"
+note = "wifi"
+
+[[file]]
+dest = "ath12k/WCN7860/hw2.0/regdb.bin"
+image = "odm"
+source = "etc/wifi/peach/regdb.bin"
+sha256 = "365026525f6a9a1ebf0668b8c61fb1300bfdb2450148e994b9a4ca66257e7e43"
+note = "wifi"

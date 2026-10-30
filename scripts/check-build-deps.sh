@@ -49,6 +49,7 @@ echo '=== stock image + firmware staging ==='
 need payload-dumper-go 'github.com/ssut/payload-dumper-go (extracts boot/init_boot from the OTA payload)'
 need unzip 'apt install unzip'
 need fsck.erofs 'apt install erofs-utils (extracts firmware from vendor/odm images)'
+need mcopy 'apt install mtools (extracts firmware from the vfat modem/bluetooth/dsp images)'
 need python3 'apt install python3'
 
 echo '=== Android boot packaging (Perpetua devices/boot/android-gki) ==='

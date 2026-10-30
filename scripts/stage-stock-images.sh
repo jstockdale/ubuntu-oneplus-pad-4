@@ -24,7 +24,7 @@ stock_root=${STOCK_ROOT:-$base/stock}
 # boot and init_boot are the repack templates.  vendor and odm feed
 # stage-firmware.py.  vendor_boot and vbmeta are staged as evidence and for
 # recovery, never for flashing by this port.
-partitions=${STOCK_PARTITIONS:-boot,init_boot,vendor_boot,vbmeta,vendor,odm}
+partitions=${STOCK_PARTITIONS:-boot,init_boot,vendor_boot,vbmeta,dtbo,vendor,odm,modem,bluetooth,dsp}
 
 test -f "$ota" || { echo "no such OTA package: $ota" >&2; exit 1; }
 command -v payload-dumper-go >/dev/null || {

@@ -59,7 +59,12 @@ def load_manifest(path: Path) -> dict:
 
 
 def extract_images(manifest: dict, stock: Path, scratch: Path) -> dict:
-    """Extract each partition image the manifest references, once."""
+    """Extract each partition image the manifest references, once.
+
+    vendor/odm are EROFS; modem/bluetooth/dsp are vfat (the NON-HLOS
+    style), detected by magic rather than by name so a wrong staging fails
+    loudly instead of extracting garbage.
+    """
     trees = {}
     for image in sorted({e["image"] for e in manifest.get("file", [])}):
         img = stock / f"{image}.img"
@@ -68,14 +73,88 @@ def extract_images(manifest: dict, stock: Path, scratch: Path) -> dict:
                      "(run stage-stock-images.sh with it in STOCK_PARTITIONS)")
         tree = scratch / image
         tree.mkdir()
-        # OnePlus vendor/odm are EROFS.  --extract is read-only by design.
-        res = subprocess.run(
-            ["fsck.erofs", f"--extract={tree}", str(img)],
-            capture_output=True, text=True)
-        if res.returncode != 0:
-            sys.exit(f"fsck.erofs failed on {img}:\n{res.stderr}")
+        with img.open("rb") as f:
+            f.seek(1024)
+            erofs = f.read(4) == b"\xe2\xe1\xf5\xe0"
+        if erofs:
+            res = subprocess.run(
+                ["fsck.erofs", f"--extract={tree}", str(img)],
+                capture_output=True, text=True)
+            if res.returncode != 0:
+                sys.exit(f"fsck.erofs failed on {img}:\n{res.stderr}")
+        else:
+            # mtools needs no root and no loop devices.  -s recurse,
+            # -p preserve attributes, -n overwrite silently, -Q quit on
+            # the first error so a truncated image cannot half-stage.
+            res = subprocess.run(
+                ["mcopy", "-i", str(img), "-spnQ", "::", str(tree)],
+                capture_output=True, text=True)
+            if res.returncode != 0:
+                sys.exit(f"mcopy failed on {img} (is mtools installed, and "
+                         f"is this really a vfat image?):\n{res.stderr}")
         trees[image] = tree
     return trees
+
+
+def pil_join(mdt: Path) -> bytes:
+    """Join Qualcomm split firmware (.mdt + .bNN) into one ELF, as
+    pil-squasher does: the mdt supplies the ELF and program headers, and
+    each program header's file content comes from its .bNN sibling when
+    one exists.  The manifest hash of the joined output is the oracle
+    that this reimplementation stays byte-exact."""
+    data = mdt.read_bytes()
+    if data[:4] != b"\x7fELF":
+        sys.exit(f"{mdt}: not an ELF")
+    is64 = data[4] == 2
+    if is64:
+        phoff = int.from_bytes(data[0x20:0x28], "little")
+        phentsize = int.from_bytes(data[0x36:0x38], "little")
+        phnum = int.from_bytes(data[0x38:0x3A], "little")
+    else:
+        phoff = int.from_bytes(data[0x1C:0x20], "little")
+        phentsize = int.from_bytes(data[0x2A:0x2C], "little")
+        phnum = int.from_bytes(data[0x2C:0x2E], "little")
+    out = bytearray(data)
+    base = str(mdt)[:-len(".mdt")]
+    for i in range(phnum):
+        ph = data[phoff + i * phentsize:][:phentsize]
+        if is64:
+            p_offset = int.from_bytes(ph[8:16], "little")
+            p_filesz = int.from_bytes(ph[0x20:0x28], "little")
+        else:
+            p_offset = int.from_bytes(ph[4:8], "little")
+            p_filesz = int.from_bytes(ph[16:20], "little")
+        if p_filesz == 0:
+            continue
+        seg = Path(f"{base}.b{i:02d}")
+        if not seg.is_file():
+            continue
+        content = seg.read_bytes()
+        end = p_offset + len(content)
+        if end > len(out):
+            out.extend(b"\0" * (end - len(out)))
+        out[p_offset:end] = content
+    return bytes(out)
+
+
+def build_output(entry: dict, tree: Path) -> bytes:
+    """Produce the destination bytes for one manifest entry: the source
+    file with its declared transform applied."""
+    src = tree / entry["source"]
+    if not src.is_file():
+        sys.exit(f"{entry['dest']}: source missing: "
+                 f"{entry['image']}:{entry['source']}")
+    transform = entry.get("transform")
+    if transform is None:
+        return src.read_bytes()
+    if transform == "fwup-strip-80-128":
+        data = src.read_bytes()
+        if len(data) <= 208:
+            sys.exit(f"{entry['dest']}: too small for fwup-strip-80-128")
+        return data[80:-128]
+    if transform == "pil-join":
+        return pil_join(src)
+    sys.exit(f"{entry['dest']}: unknown transform '{transform}'")
 
 
 def cmd_record(args):
@@ -87,7 +166,8 @@ def cmd_record(args):
         for entry in manifest.get("file", []):
             src = trees[entry["image"]] / entry["source"]
             if src.is_file():
-                entry["sha256"] = sha256(src)
+                data = build_output(entry, trees[entry["image"]])
+                entry["sha256"] = hashlib.sha256(data).hexdigest()
                 print(f"measured {entry['dest']}: {entry['sha256']}")
             else:
                 missing.append(entry)
@@ -126,20 +206,19 @@ def cmd_stage(args):
             if "sha256" not in entry:
                 sys.exit(f"{entry['dest']}: no pinned hash in the manifest; "
                          "run `record` first and commit the result")
-            src = trees[entry["image"]] / entry["source"]
-            if not src.is_file():
-                sys.exit(f"{entry['dest']}: source missing: "
-                         f"{entry['image']}:{entry['source']}")
-            measured = sha256(src)
+            data = build_output(entry, trees[entry["image"]])
+            measured = hashlib.sha256(data).hexdigest()
             if measured != entry["sha256"]:
-                sys.exit(f"{entry['dest']}: hash mismatch\n"
+                sys.exit(f"{entry['dest']}: hash mismatch after "
+                         f"'{entry.get('transform', 'byte copy')}'\n"
                          f"  manifest {entry['sha256']}\n"
-                         f"  package  {measured}\n"
-                         "a different firmware build: re-record deliberately "
-                         "or stage the matching OTA")
+                         f"  built    {measured}\n"
+                         "either a different firmware build (re-record "
+                         "deliberately / stage the matching OTA) or a "
+                         "transform defect — nothing is staged either way")
             dest = out / "lib/firmware" / entry["dest"]
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dest)
+            dest.write_bytes(data)
             dest.chmod(0o644)
             staged.append({"dest": entry["dest"], "sha256": measured})
             print(f"staged {entry['dest']}")
