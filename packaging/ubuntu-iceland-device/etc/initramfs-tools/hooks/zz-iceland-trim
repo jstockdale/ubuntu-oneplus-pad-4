@@ -43,8 +43,6 @@ for f in \
 	usr/lib/aarch64-linux-gnu/libselinux.so.* \
 	usr/lib/aarch64-linux-gnu/libkmod.so.* \
 	usr/lib/aarch64-linux-gnu/dhcpcd \
-	usr/lib/modules/*/modules.builtin.modinfo \
-	usr/lib/modules/*/modules.builtin.alias.bin \
 	usr/bin/udevadm \
 	usr/lib/systemd \
 	usr/lib/udev \
