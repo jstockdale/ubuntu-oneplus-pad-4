@@ -55,26 +55,63 @@ chroot "$rootfs" update-initramfs -c -k "$kernel_release" >&2
 initramfs=$rootfs/boot/initrd.img-$kernel_release
 test -f "$initramfs" || { echo 'update-initramfs produced nothing' >&2; exit 1; }
 
-# LZ4 legacy (magic 02 21 4c 18): ABL concatenates the stock vendor_boot
-# fragments (LZ4) with this archive, and mixed compression across the
-# concatenation is the one physically observed way to lose the initrd.
-magic=$(head -c4 "$initramfs" | od -An -tx1 | tr -d ' \n')
-if [ "$magic" != 02214c18 ]; then
-	echo "initramfs is not LZ4 legacy (magic $magic); check" >&2
-	echo '/etc/initramfs-tools/initramfs.conf COMPRESS=lz4' >&2
-	exit 1
-fi
-
-# The kernel's built-in bootargs say rdinit=/rescue/mainline-init; the
-# device package's hook answers with a symlink to /init.  An archive without
-# it boots to a kernel that cannot find its init, so refuse it here.
-if ! lz4 -dc "$initramfs" 2>/dev/null | cpio -t 2>/dev/null \
-	| grep -q '^rescue/mainline-init$'; then
-	echo 'the initramfs lacks rescue/mainline-init; the iceland-rescue-init' >&2
-	echo 'hook from ubuntu-iceland-device did not run — is the package in' >&2
-	echo 'the rootfs and the hook executable?' >&2
-	exit 1
-fi
+# Segment-aware verification.  Ubuntu 26.04's initramfs-tools emits a
+# SEGMENTED archive: zero or more plain (uncompressed) cpio segments, then
+# the compressed main body.  The kernel unpacks each segment by its own
+# magic, and ABL prepends the stock vendor_boot fragments (LZ4) ahead of all
+# of ours, so the rules are: leading segments may only be plain cpio, the
+# final segment must be LZ4 legacy (gzip behind an LZ4 fragment is the one
+# physically observed way to lose the initrd), and rescue/mainline-init —
+# the name the kernel's built-in bootargs exec — must exist in one of them.
+verify=$(python3 - "$initramfs" <<'PYEOF'
+import subprocess, sys
+data = open(sys.argv[1], 'rb').read()
+i, names = 0, set()
+while i < len(data):
+    magic4 = data[i:i+4]
+    if magic4 == b'\x02\x21\x4c\x18':
+        out = subprocess.run(['lz4', '-dc'], input=data[i:],
+                             capture_output=True)
+        lst = subprocess.run(['cpio', '-t'], input=out.stdout,
+                             capture_output=True)
+        names.update(lst.stdout.decode(errors='replace').split())
+        print(f'final segment: LZ4 legacy at offset {i}')
+        break
+    if data[i:i+6] in (b'070701', b'070702'):
+        j = i
+        while j < len(data):
+            hdr = data[j:j+110]
+            if hdr[:6] not in (b'070701', b'070702'):
+                break
+            namesize = int(hdr[94:102], 16)
+            filesize = int(hdr[54:62], 16)
+            name = data[j+110:j+110+namesize-1].decode(errors='replace')
+            j = j + 110 + namesize
+            j = (j + 3) // 4 * 4
+            j += filesize
+            j = (j + 3) // 4 * 4
+            if name == 'TRAILER!!!':
+                break
+            names.add(name)
+        while j < len(data) and data[j:j+1] == b'\x00':
+            j += 1
+        print(f'segment: plain cpio {i}..{j}')
+        i = j
+        continue
+    sys.exit(f'segment at offset {i} is neither plain cpio nor LZ4 legacy '
+             f'(magic {magic4.hex()}): check COMPRESS=lz4 in '
+             '/etc/initramfs-tools/initramfs.conf')
+else:
+    sys.exit('no LZ4-legacy segment found: the main body is not LZ4; check '
+             'COMPRESS=lz4 in /etc/initramfs-tools/initramfs.conf')
+if 'rescue/mainline-init' not in names:
+    sys.exit('the initramfs lacks rescue/mainline-init; the '
+             'iceland-rescue-init hook from ubuntu-iceland-device did not '
+             'run — is the package installed and the hook executable?')
+print('rescue/mainline-init: present')
+PYEOF
+) || { printf '%s\n' "$verify" >&2; exit 1; }
+printf '%s\n' "$verify" >&2
 
 size=$(stat -c %s "$initramfs")
 echo "initramfs: $size bytes of a $init_boot_budget byte init_boot budget" >&2

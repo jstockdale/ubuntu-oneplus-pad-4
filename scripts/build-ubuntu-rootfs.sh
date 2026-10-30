@@ -168,11 +168,15 @@ EOF
 # LZ4 legacy is mandatory: ABL concatenates the stock vendor_boot ramdisk
 # fragments with our init_boot ramdisk, and the gts9u port physically
 # established that a gzip generic ramdisk behind an LZ4 vendor fragment makes
-# Linux reject the initrd.  MODULES=most, not dep: dep inspects the BUILD
-# host's root device and fails.  The init_boot budget is enforced later by
-# make-initramfs.sh and by android-gki against the stock partition size.
+# Linux reject the initrd.  MODULES=list with an empty list, measured, not
+# guessed: MODULES=most packed all 939 modules into 17.3 MB against the
+# 8.4 MB init_boot partition, and Perpetua builds every pre-rootfs provider
+# (UFS, ext4) into the kernel precisely so the initramfs needs none.
+# Anything that ever does belong here goes in /etc/initramfs-tools/modules,
+# named and justified.  The budget is enforced by make-initramfs.sh and by
+# android-gki against the stock partition size.
 cat > "\$target/etc/initramfs-tools/initramfs.conf" <<EOF
-MODULES=most
+MODULES=list
 BUSYBOX=y
 KEYMAP=n
 COMPRESS=lz4
