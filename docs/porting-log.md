@@ -396,3 +396,29 @@ sibling) lands these on our plan:
   FW_DEVLINK_SYNC_STATE_TIMEOUT=y, CMA heap off), cpuidle 0277/0278
   ready-switches if idle resets appear, binder note (7.4 drops the C
   driver; binderfs path for Waydroid on any future rebase).
+
+## 2026-10-30 (afternoon) — Phase A flight 1: the loop, the cmdline, the feeder
+
+First flashed flight (diag init_boot_b + RAM-booted diag kernel): our
+kernel raised the gadget at T+2 s and died before enumeration finished
+(host journal), then every NORMAL boot looped at the logo ~4 s apart —
+stock kernel + our ramdisk, and the watchdog petter Android normally
+loads from vendor modules in its first second never loads from ours.
+Slot flags survived untouched (b: successful, 6 retries; and we learned
+slot a is marked unbootable on this unit — ABL would park in fastboot,
+not switch). Stock init_boot restored; Android normal.
+
+The bugreport captured what SELinux hides: the full runtime cmdline.
+oplusboot.prjname=25978 IS a live cmdline word — the strict handoff
+bootargs leg verifies at runtime on this GLO unit. Also: init=/init,
+console=ttynull, panel mdss_dsi_panel_XN251_P_D_A0024_vid (NT36536),
+oplus_region=167, verifiedbootstate=orange. LAST KMSG in the bugreport
+is empty — pstore really does not survive these resets.
+
+Open question: why our built-in qcom-wdt + HANDLE_BOOT_ENABLED did not
+keep the dog fed (suspect: the already-running detection through the
+hypervisor-emulated register). Countermeasure built: the diag overlay
+now replaces rescue/mainline-init with a wrapper that disarms/feeds
+/dev/watchdog* within ~2 s of kernel start, stamps kmsg markers, then
+execs /init. New diag initrd + stock-templated init_boot rebuilt and
+cross-verified.

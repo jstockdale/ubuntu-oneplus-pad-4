@@ -1,0 +1,29 @@
+#!/bin/sh
+# DIAGNOSTIC rescue/mainline-init for RAM-boot flights: feed the watchdog
+# BEFORE anything else, then hand over to the real initramfs init.
+#
+# ABL hands off with a watchdog armed (Perpetua's rescue loads qcom-wdt.ko
+# as PID 1's first act for exactly this reason). Our kernel builds the
+# driver in and WATCHDOG_HANDLE_BOOT_ENABLED should auto-feed — but that
+# relies on the driver reading the dog as already-running through a
+# hypervisor-emulated register. Flights die ~4-5 s in with the gadget
+# mid-enumeration, so this wrapper takes no chances: open-write-close of
+# 'V' is the magic close (disarms a stoppable dog), and the loop re-feeds
+# every 2 s in case the driver keeps it running. Runs within ~2 s of
+# kernel start, beating the observed bite.
+#
+# The overlay cpio replaces the packaged rescue/mainline-init symlink with
+# this file; the release archive is never modified.
+mount -t proc proc /proc 2>/dev/null
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+echo "iceland-diag: wrapper up, watchdogs: $(ls /dev/watchdog* 2>/dev/null || echo none)" > /dev/kmsg
+(
+	while :; do
+		for w in /dev/watchdog0 /dev/watchdog; do
+			[ -e "$w" ] && printf V > "$w" 2>/dev/null
+		done
+		sleep 2
+	done
+) &
+echo "iceland-diag: feeder running, exec /init" > /dev/kmsg
+exec /init

@@ -188,10 +188,14 @@ PYEOF
 
 overlay=$base/build/initrd-diag-overlay
 rm -rf -- "$overlay"
-mkdir -p "$overlay/scripts/init-top"
+mkdir -p "$overlay/scripts/init-top" "$overlay/rescue"
 install -m 0755 "$beacon" "$overlay/scripts/init-top/iceland-usb-debug"
+# Replaces the packaged rescue/mainline-init SYMLINK with the watchdog
+# wrapper (the kernel's cpio unpack unlinks the old entry first).
+install -m 0755 "$repo/scripts/diag/mainline-init-wrapper" \
+	"$overlay/rescue/mainline-init"
 (cd "$overlay" && printf '%s\n' scripts scripts/init-top \
-	scripts/init-top/iceland-usb-debug | \
+	scripts/init-top/iceland-usb-debug rescue rescue/mainline-init | \
 	cpio -o -H newc --owner=0:0 2>/dev/null) | lz4 -l > "$base/out/initrd-diag.overlay"
 
 cat "$base/out/initrd-diag.base" "$base/out/initrd-diag.overlay" \
