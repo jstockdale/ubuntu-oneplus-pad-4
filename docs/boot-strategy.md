@@ -130,7 +130,7 @@ Two invariants that cannot be touched:
 
 | # | Assumption | How it gets verified |
 |---|---|---|
-| 1 | Stock vendor-ramdisk prepended to our initramfs is benign | first boot: initramfs logs the pre-existing tree |
+| 1 | ~~Stock vendor-ramdisk prepended to our initramfs is benign~~ **FALSIFIED 2026-10-30**: the vendor ramdisk is LZ4-legacy, the kernel's LZ4-legacy decoder reads straight past frame boundaries, and our leading plain cpio segment failed the whole unpack before PID 1 (RAM-boot attempts 1–3: dark panel, dead USB). `make-initramfs.sh` now repacks the archive as one LZ4-legacy frame, which chains validly after the vendor frame | repack enforced by the gate; boot proof pending the next RAM boot |
 | 2 | `fastboot flash userdata <raw ext4>` works on this ABL | attempt on hardware; fallback documented above |
 | 3 | `fastboot boot` is permitted by this ABL | attempt before the first real flash |
 | 4 | Stock `init_boot` is large enough for an Ubuntu initramfs | `android-gki` hard-fails on size; `make-initramfs.sh` prints the margin |

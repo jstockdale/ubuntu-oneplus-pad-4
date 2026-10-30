@@ -199,3 +199,53 @@ switch_root.
 test-boot.img: 45,350,912 bytes (kernel with built-in DTB + the 2.53 MB
 initramfs, v4, unsigned-footer). Known wrinkle: stock header OS version
 fields read as unset and are mirrored as such. Next: fastboot boot.
+
+## 2026-10-30 — Attempts 1–3 dark; the decompressor finds the bug
+
+Three RAM boots (`fastboot boot test-boot.img`), three identical results:
+"Booting OKAY", panel dark, the device gone from USB entirely, no
+self-reboot (built-in `panic=0` makes a panic and a healthy headless boot
+look alike — noted for later, fixed in the diag image). Attempt 2 flew an
+ACM debug gadget in init-top that raced dwc3's asynchronous UDC
+registration; attempt 3 flew the fixed script (backgrounded 30 s poll,
+verified byte-for-byte in the flown archive) and still nothing — a clean
+negative: the kernel never reached our initramfs.
+
+Working the boot chain backwards found two candidate killers:
+
+1. **The fdt-handoff match is stricter at runtime than offline.** Reading
+   `arch/arm64/kernel/fdt-handoff.c`: `stock-model` is an exact `strcmp`
+   against the *live* root model and `stock-bootargs`
+   (`oplusboot.prjname=25978`) a word-match against the *live*
+   `/chosen/bootargs` — both of which ABL composes at boot, and nothing
+   guarantees RAM boots get the dtbo overlay applied. A failed match
+   boots the Android tree silently (dark, dead USB); a passed match that
+   then errors hangs on `cpu_relax()` forever. Both invisible.
+
+2. **The ramdisk layout was fatal all along.** ABL prepends the stock
+   vendor ramdisk — LZ4-legacy — to ours, and Ubuntu's initramfs-tools
+   emits a *plain cpio segment first*. The kernel's LZ4-legacy decoder
+   (`lib/decompress_unlz4.c`) has no end-of-stream marker: after the
+   vendor frame it reads the next four bytes as a chunk size, and ASCII
+   `0707` is an ~0.8 GB chunk. In the no-fill path there is not even a
+   bounds check before `LZ4_decompress_safe` eats garbage; the whole
+   unpack fails before PID 1 (`init/initramfs.c`). Android never hits
+   this because its chain is LZ4 end to end; Perpetua's rescue ramdisk is
+   a single LZ4 stream. Ours was the odd one out — and the old
+   `make-initramfs.sh` gate even documented the prepend while blessing
+   the layout that breaks under it.
+
+Fixes, all verified offline: `make-initramfs.sh` now repacks the archive
+as **one LZ4-legacy frame over the concatenated raw cpio bytes**
+(entry-exact, decoded by the kernel as successive cpio archives, exactly
+like stock's vendor+generic pair) and its gate now enforces LZ4-from-
+byte-0. `make-diag-bootimg.sh` builds the attempt-4 image with no root
+and no rootfs writes: the repacked initramfs plus an LZ4 overlay segment
+carrying `scripts/diag/iceland-usb-debug-beacon` (ACM stream on UDC,
+forced reboot after a 30 s UDC timeout), and a diagnostic kernel —
+handoff match loosened to compatible-only (`qcom,canoe`/`qcom,canoep`,
+covering a skipped dtbo) and `panic=0` → `panic=10` — built from the
+release worktree and reverted after. Outcome map: ACM = read the log;
+reboot ~15–25 s = post-handoff panic; reboot ~35–50 s = userspace ran,
+USB never probed; dark = handoff hang or match still failing. RAM boot
+only; nothing diagnostic is ever flashed.

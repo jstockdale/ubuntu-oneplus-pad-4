@@ -1,0 +1,55 @@
+#!/bin/sh
+# DIAGNOSTIC variant of scripts/init-top/iceland-usb-debug, for RAM-boot
+# flights only — never shipped in the device package.  Identical ACM gadget
+# and kmsg stream, plus a reboot beacon: when no UDC appears within the poll
+# window, force a reset.  On a tablet with no display output and no serial
+# pads, the stock boot logo becomes the one observable bit:
+#
+#   reboot ~40 s after `fastboot boot`  -> the kernel reached this initramfs
+#                                          but USB never probed
+#   ACM device on the host              -> full debug channel, read the log
+#   stays dark                          -> the kernel never got this far
+#
+# make-diag-bootimg.sh overlays this file over the shipped script in a
+# trailing LZ4 cpio segment; the release archive is never modified.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+(
+	mount -t configfs none /sys/kernel/config 2>/dev/null
+	G=/sys/kernel/config/usb_gadget/iceland-dbg
+	mkdir -p "$G" || exit 0
+	echo 0x1d6b > "$G/idVendor"
+	echo 0x0104 > "$G/idProduct"
+	mkdir -p "$G/strings/0x409"
+	echo iceland-debug > "$G/strings/0x409/serialnumber"
+	echo Ubuntu-iceland > "$G/strings/0x409/manufacturer"
+	echo "iceland initramfs debug" > "$G/strings/0x409/product"
+	mkdir -p "$G/configs/c.1/strings/0x409"
+	echo acm > "$G/configs/c.1/strings/0x409/configuration"
+	mkdir -p "$G/functions/acm.GS0"
+	ln -s "$G/functions/acm.GS0" "$G/configs/c.1/acm.GS0"
+	n=0
+	UDC=
+	while [ "$n" -lt 30 ]; do
+		UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+		[ -n "$UDC" ] && break
+		sleep 1
+		n=$((n + 1))
+	done
+	if [ -n "$UDC" ]; then
+		echo "$UDC" > "$G/UDC"
+		echo "iceland-usb-debug: acm gadget on $UDC after ${n}s" > /dev/kmsg
+		# Stream the kernel ring buffer to the host for the life of the boot.
+		cat /dev/kmsg > /dev/ttyGS0 2>/dev/null
+	else
+		echo "iceland-usb-debug: no UDC after ${n}s; reboot beacon" > /dev/kmsg
+		sleep 2
+		echo b > /proc/sysrq-trigger 2>/dev/null
+		reboot -f 2>/dev/null
+	fi
+) 2>/dev/null &
+exit 0
