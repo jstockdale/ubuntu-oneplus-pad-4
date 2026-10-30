@@ -96,9 +96,16 @@ old_args = ('bootargs = "rdinit=/rescue/mainline-init panic=0 '
 # DRM_SIMPLEDRM, the kernel log is readable ON THE PANEL inside the
 # 5-second death window; ttyGS0 stays last so the rescue shell lands on
 # USB when the boot survives.
+# The initcall_blacklist + fw_devlink=off set is the tb323fu port's
+# SM8850 bring-up survival kit: genpd/regulator/interconnect sync_state
+# and the clk sweep all power off "unclaimed" boot state, several of
+# them whatever pd_ignore_unused says, and the live splash scanout (and
+# whatever else ABL left running) dies with it.
 new_args = old_args.replace(
     'panic=0', 'panic=10 console=tty0 console=ttyGS0 initcall_debug '
-    'clk_ignore_unused pd_ignore_unused')
+    'clk_ignore_unused pd_ignore_unused '
+    'initcall_blacklist=clk_disable_unused,genpd_power_off_unused,'
+    'regulator_init_complete,of_platform_sync_state_init fw_devlink=off')
 
 # ABL's live splash as a framebuffer console (the Fedora port's measured
 # recipe: MDP at 650 MHz needs MMCX TURBO, dispcc is fed by MX/MXC, and
