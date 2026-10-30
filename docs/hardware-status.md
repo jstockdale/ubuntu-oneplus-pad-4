@@ -33,6 +33,7 @@ Status legend: ✅ verified here · 🟡 partial, limitation described ·
 | Stylus | ❓ | existence of a supported stylus path unknown |
 | Vibration | ❓ | nothing in the DTS |
 | Waydroid | ❓ | binder/netfilter in `kernel/config/config-waydroid.fragment` |
+| DRM streaming (Netflix etc.) | ❓ | browser + arm64 Widevine CDM (ChromeOS-sourced, Pi-style), L3 tier: HD yes, 4K/HDR no (no Linux has it); unlock's Android L1 loss is irrelevant to this path |
 | Fingerprint | — | no hardware |
 | Modem / GPS | — | Wi-Fi-only device |
 | microSD | — | no slot |
