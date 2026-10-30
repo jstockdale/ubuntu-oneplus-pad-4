@@ -9,7 +9,10 @@ case "$1" in
 	prereqs) prereqs; exit 0 ;;
 esac
 
-{
+# Backgrounded: init-top runs before the USB controller has probed (dwc3
+# registers its UDC asynchronously), so the setup polls for the UDC for up
+# to 30 seconds without ever delaying the boot itself.
+(
 	mount -t configfs none /sys/kernel/config 2>/dev/null
 	G=/sys/kernel/config/usb_gadget/iceland-dbg
 	mkdir -p "$G" || exit 0
@@ -23,11 +26,18 @@ esac
 	echo acm > "$G/configs/c.1/strings/0x409/configuration"
 	mkdir -p "$G/functions/acm.GS0"
 	ln -s "$G/functions/acm.GS0" "$G/configs/c.1/acm.GS0"
-	UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+	n=0
+	UDC=
+	while [ "$n" -lt 30 ]; do
+		UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+		[ -n "$UDC" ] && break
+		sleep 1
+		n=$((n + 1))
+	done
 	[ -n "$UDC" ] || exit 0
 	echo "$UDC" > "$G/UDC"
+	echo "iceland-usb-debug: acm gadget on $UDC after ${n}s" > /dev/kmsg
 	# Stream the kernel ring buffer to the host for the life of the boot.
-	( cat /dev/kmsg > /dev/ttyGS0 2>/dev/null ) &
-	echo "iceland-usb-debug: streaming kmsg on acm gadget ($UDC)" > /dev/kmsg
-} 2>/dev/null
+	cat /dev/kmsg > /dev/ttyGS0 2>/dev/null
+) 2>/dev/null &
 exit 0
