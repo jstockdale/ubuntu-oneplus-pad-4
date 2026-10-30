@@ -279,3 +279,30 @@ actually in the air). Next flight: flash init_boot_b with our wrapped
 initramfs (first persistent write, stock image retained for restore),
 then `fastboot boot` a kernel-only image of our kernel — the full
 Ubuntu chain with still nothing permanent on boot_b.
+
+## 2026-10-30 (later still) — RAM-boot ramdisk delivery: every path closed
+
+Confirming the control-pair finding against every delivery variant this
+ABL offers:
+
+- pre-built header-v4 image with ramdisk: boots, ramdisk ignored
+  (the stock-kernel hybrid booted Android with our cpio aboard);
+- `fastboot boot <kernel> <ramdisk>` (client-constructed, default
+  header): accepted for download, refused at boot, silent fall-back to
+  the fastboot screen;
+- the same with --header-version 3: explicit
+  "Failed to load/authenticate boot image: Load Error" and the oplus
+  failure screen (winking mascot, CN text) — still serving the fastboot
+  protocol; `fastboot reboot` returns to Android cleanly.
+
+Corroboration from the wild: cfig/Android_boot_image_editor
+discussion #144 reports a Pixel ignoring the merged-in ramdisk on
+`fastboot boot` the same way — AOSP leaves RAM-boot ramdisk semantics
+to the vendor, and init_boot-era bootloaders took the license.
+
+Conclusion: on this ABL the downloaded ramdisk is never used; only the
+flashed init_boot reaches the kernel. Testing our chain therefore
+requires the first persistent write — init_boot_b carrying our wrapped
+initramfs (image staged, stock image retained for one-command restore)
+with the kernel still RAM-booted. Held pending the external research
+agents' reports, at the owner's call.
