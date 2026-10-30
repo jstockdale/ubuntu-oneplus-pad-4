@@ -58,3 +58,13 @@ CONFIG_SWAP=y
 CONFIG_PSTORE=y
 CONFIG_PSTORE_RAM=y
 CONFIG_MAGIC_SYSRQ=y
+
+# --- watchdog ----------------------------------------------------------------
+# ABL hands over with the APSS watchdog armed.  Perpetua carries QCOM_WDT=m,
+# which its module-carrying rescue initramfs can live with — our initramfs
+# deliberately ships no modules, so nothing would pet the dog and the SoC
+# resets a few seconds into boot (measured on RAM-boot attempts 4-5: dark
+# panel, hard reset ~3-5 s after handoff, no panic delay).  Built in, the
+# driver probes immediately and WATCHDOG_HANDLE_BOOT_ENABLED (already =y)
+# keeps a boot-armed watchdog fed until userspace opens it.
+CONFIG_QCOM_WDT=y

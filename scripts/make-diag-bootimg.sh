@@ -110,12 +110,19 @@ PYEOF
 # scratch, so flipping it here cannot leak into release kernels.  The
 # initramfs debug script tolerates the UDC being taken: its configfs bind
 # fails quietly and its kmsg cat lands on the same ttyGS0.
-"$kernel_tree/scripts/config" --file "$build_dir/.config" -e USB_G_SERIAL
+# QCOM_WDT=y: ABL hands over with the APSS watchdog armed, Perpetua carries
+# the driver =m, and this initramfs has no modules — unfed, the dog bites a
+# few seconds in (the attempt-4/5 hard resets).  Built in, it probes at once
+# and WATCHDOG_HANDLE_BOOT_ENABLED keeps it fed.  Also in the release
+# fragment; set here too because this build reuses the existing .config.
+"$kernel_tree/scripts/config" --file "$build_dir/.config" -e USB_G_SERIAL -e QCOM_WDT
 make -C "$kernel_tree" ARCH=arm64 LLVM=1 O="$build_dir" olddefconfig
-grep -q '^CONFIG_USB_G_SERIAL=y' "$build_dir/.config" || {
-	echo 'USB_G_SERIAL did not take; check its Kconfig dependencies' >&2
-	exit 1
-}
+for sym in CONFIG_USB_G_SERIAL=y CONFIG_QCOM_WDT=y; do
+	grep -q "^$sym\$" "$build_dir/.config" || {
+		echo "$sym did not take; check its Kconfig dependencies" >&2
+		exit 1
+	}
+done
 
 make -C "$kernel_tree" ARCH=arm64 LLVM=1 O="$build_dir" -j"$jobs" Image
 
