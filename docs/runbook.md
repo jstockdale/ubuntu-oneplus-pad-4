@@ -108,7 +108,13 @@ Failure modes seen in advance:
    ```
 
    Write down `product` — the release installer gates on it later — and the
-   slot. Both also go in `docs/porting-log.md`.
+   slot. Both also go in `docs/porting-log.md`. Also snapshot the stock
+   properties while they are still readable
+   (`adb shell getprop > work/getprop-stock-<date>.txt`) and check the
+   OTHER slot is not ancient: `adb shell getprop ro.build.version.ota`
+   names the active build; a unit that has taken at least one OTA since
+   April 2026 has both slots populated, which also removes the empty-slot
+   EDL hazard entirely.
 5. **⚠ THIS WIPES THE TABLET:**
 
    ```bash
@@ -243,6 +249,13 @@ bash install.sh         # checks product + unlock + checksums, asks for
 
 First boot expectations:
 
+- **Before anything else: capture the factory data.** The first booted
+  Ubuntu is the first moment the per-unit partitions are readable (persist
+  with the sensor calibration/registry, modemst1/2 + fsg NV data,
+  oplusreserve*) — and nothing in this port ever writes them. From the
+  host: `scripts/capture-device-data.sh ubuntu@<tablet-ip>`. Archive the
+  result with the stock OTA zip. (Known, unavoidable loss: Widevine L1
+  drops to L3 from the unlock itself.)
 - `ubuntu-iceland-grow-rootfs` expands the filesystem (seconds).
 - Minimal profile: framebuffer console login (`ubuntu` / your `ICELAND_PW`),
   keyboard via the hub. Join Wi-Fi with `nmcli dev wifi connect <ssid>
