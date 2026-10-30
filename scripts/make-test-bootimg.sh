@@ -45,14 +45,18 @@ command -v mkbootimg >/dev/null || {
 	exit 1
 }
 
-# The vendor ramdisk ahead of ours is LZ4 legacy; mixed compression across
-# ABL's concatenation is the one physically observed way to lose the initrd,
-# RAM boot included.
+# The archive is segmented on 26.04: leading plain cpio, then the LZ4 main
+# body.  Accept either magic at byte 0 here; the full segment walk (leading
+# segments plain, final segment LZ4 legacy) is make-initramfs.sh's gate on
+# the same file.
 magic=$(head -c4 "$initramfs" | od -An -tx1 | tr -d ' \n')
-[ "$magic" = 02214c18 ] || {
-	echo "initramfs is not LZ4 legacy (magic $magic); see make-initramfs.sh" >&2
-	exit 1
-}
+case "$magic" in
+	02214c18|3037303*) ;;
+	*)
+		echo "initramfs has unexpected magic $magic; see make-initramfs.sh" >&2
+		exit 1
+		;;
+esac
 
 # Mirror the stock boot image's OS version and patch level when a stock
 # staging exists: some bootloaders compare them against anti-rollback state
