@@ -163,6 +163,14 @@ splash_mem = '''	reserved-memory {
 assert '\treserved-memory {\n' in text, 'reserved-memory block drifted'
 text = text.replace('\treserved-memory {\n', splash_mem, 1)
 print('DTS: splash framebuffer console node added')
+
+# The apps SMMU's live display mappings are hypervisor-managed and
+# invisible to the read-back ('reserved 0 boot mappings'), so any probe
+# resets them out from under the scanning splash — and bypass does not
+# help, because the mappings translate. The diag kernel leaves that SMMU
+# alone entirely; consumers fall back to direct DMA.
+text += '\n&apps_smmu {\n\tstatus = "disabled";\n};\n'
+print('DTS: apps_smmu disabled for the diag')
 assert old_args in text, 'bootargs line drifted; refit the diagnostic edit'
 text = text.replace(old_args, new_args)
 
