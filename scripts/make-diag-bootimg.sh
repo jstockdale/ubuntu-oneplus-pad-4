@@ -81,7 +81,14 @@ text = open(path).read()
 
 old_args = ('bootargs = "rdinit=/rescue/mainline-init panic=0 '
             'loglevel=7 log_buf_len=2M bootconfig";')
-new_args = old_args.replace('panic=0', 'panic=10')
+# panic=10: a post-handoff panic becomes a visible reboot.
+# console=ttyGS0: the serial-gadget console (USB_G_SERIAL + the already-set
+# U_SERIAL_CONSOLE) registers at USB probe time, no userspace needed, and
+# printk replays its backlog to it — an early panic trace reaches the host
+# if the panic falls after dwc3 comes up.
+# initcall_debug: names the exact initcall that dies.
+new_args = old_args.replace(
+    'panic=0', 'panic=10 console=ttyGS0 initcall_debug')
 assert old_args in text, 'bootargs line drifted; refit the diagnostic edit'
 text = text.replace(old_args, new_args)
 
@@ -96,6 +103,19 @@ text = text.replace(old_match, new_match)
 open(path, 'w').write(text)
 print('DTS: panic=10, handoff match loosened to compatible-only')
 PYEOF
+
+# The legacy g_serial gadget auto-binds the first UDC at initcall time and,
+# with U_SERIAL_CONSOLE=y (already set), carries the kernel console the DTS
+# edit above points at ttyGS0.  The release build regenerates .config from
+# scratch, so flipping it here cannot leak into release kernels.  The
+# initramfs debug script tolerates the UDC being taken: its configfs bind
+# fails quietly and its kmsg cat lands on the same ttyGS0.
+"$kernel_tree/scripts/config" --file "$build_dir/.config" -e USB_G_SERIAL
+make -C "$kernel_tree" ARCH=arm64 LLVM=1 O="$build_dir" olddefconfig
+grep -q '^CONFIG_USB_G_SERIAL=y' "$build_dir/.config" || {
+	echo 'USB_G_SERIAL did not take; check its Kconfig dependencies' >&2
+	exit 1
+}
 
 make -C "$kernel_tree" ARCH=arm64 LLVM=1 O="$build_dir" -j"$jobs" Image
 
