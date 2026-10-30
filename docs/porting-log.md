@@ -359,3 +359,40 @@ open questions:
   does not stop of_genpd_sync_state) is the survival kit if later
   bring-up stalls; the idle cluster-off reset workaround exists if
   idle resets appear.
+
+## 2026-10-30 — Fedora-port review: corrections and adoptions
+
+The deep review of mzakamin-hub's Fedora port (the best-documented
+sibling) lands these on our plan:
+
+- **init_boot flashes do not touch slot flags** (only names starting
+  with "boot" do; ABL source + measured) — Phase A is flag-neutral.
+  The qbootctl -m requirement binds to Phase B's boot_b flash.
+- **The handoff-memory hazard is already closed for us**: their sharpest
+  warning (never boot a DT without ABL's real /memory; a zero-size
+  memory node sent a OnePlus 15 to EDL) is exactly what Perpetua's
+  fdt-handoff.c does right — we read the code: usable RAM comes from the
+  STOCK tree's /memory minus its no-map holes, and kernel+initrd bounds
+  are validated inside it (hard stop otherwise).
+- **GPU firmware pair hazard for the desktop phase**: stock OTA's GMU
+  5.3.39/SQE 0x103 resets the tablet early in boot when GPU preemption
+  is enabled; mainline defaults preemption off — never enable it on the
+  stock pair; the working "vendor533" pair is documented in their
+  iceland-firmware MANIFEST.
+- **fwupd ships with Ubuntu and lists UFS storage firmware as updatable
+  by default** — the one software path to a dead tablet that bypasses
+  partitions; the rootfs must disable/guard those fwupd plugins before
+  first boot (Phase B item).
+- Our initramfs already satisfies their hard rule (no remoteproc/
+  firmware-consumer modules in the initramfs — ours carries none), and
+  our bring-up-only use of clk/pd_ignore_unused matches their F24
+  policy (never on the installed system).
+- Adoption queue for after first light: splash-handover patch set
+  (simple-framebuffer node with MMCX/MX/MXC TURBO votes + both MDSS
+  GDSCs incl. INT2, video-mode splash detect, multi-PD mdss attach,
+  KTZ8869 write-only-diffs), audio UCM2+topology (distribution-
+  neutral), sensors (hexagonrpc/libssc/iio-sensor-proxy) recipe, config
+  gotchas (DMABUF_DEBUG=n, GPIO_SHARED_PROXY=y,
+  FW_DEVLINK_SYNC_STATE_TIMEOUT=y, CMA heap off), cpuidle 0277/0278
+  ready-switches if idle resets appear, binder note (7.4 drops the C
+  driver; binderfs path for Waydroid on any future rebase).

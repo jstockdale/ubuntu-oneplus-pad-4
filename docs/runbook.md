@@ -221,14 +221,22 @@ A power cycle fully undoes a RAM boot. Iterate kernel → `make-initramfs.sh`
 
 ## 5b. Slot-retry rules (learned 2026-10-30, from the sibling ports)
 
-- Flashing any `boot*` partition clears the slot's "successful" flag and
-  resets its retries; every NORMAL boot of a non-successful slot burns a
-  retry; at zero the ABL marks the slot unbootable and switches slots.
-  fastboot-driven, recovery and charger boots burn nothing.
-- While a diagnostic init_boot is flashed: no normal power-on boots.
-  Boot only via fastboot. To hand the tablet back to Android: restore
-  the stock init_boot, then let Android boot fully once (it re-marks
-  the slot successful).
+- Only partitions whose NAME STARTS WITH "boot" have their slot flags
+  reset on flash (ABL source + measured by the Fedora port): flashing
+  `boot_b` clears "successful" and maxes retries; flashing `init_boot_b`
+  or `recovery_b` does NOT touch flags. Every normal power-on of a
+  NOT-successful slot burns one retry; at zero the ABL marks the slot
+  unbootable (switches only if the other slot is successful+bootable,
+  else parks in fastboot — recoverable). fastboot-driven, recovery and
+  charger boots burn nothing.
+- So the diagnostic init_boot_b flash leaves slot flags untouched: a
+  stray normal power-on just lands in our initramfs (hold Vol-Down+Power
+  to get back to fastboot) and costs nothing. After testing, restore the
+  stock init_boot and boot Android once to confirm all is normal.
+- Flashing boot_b (the real install) IS the retry regime: after it, the
+  installed system must mark its own slot good after each good boot
+  (qbootctl -m; the Fedora port's iceland-slot-mark is the reference
+  implementation, including making the boot LUN briefly writable).
 - The installed Ubuntu system must mark its own slot good (qbootctl -m
   equivalent) during first boot, or the slot strands after ~3 boots.
 - `reboot bootloader` requested from mainline Linux is ignored by this
