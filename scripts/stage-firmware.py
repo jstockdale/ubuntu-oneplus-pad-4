@@ -25,6 +25,7 @@ enters Git and nothing is flashed.
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -94,9 +95,16 @@ def extract_images(manifest: dict, stock: Path, scratch: Path) -> dict:
             if res.returncode != 0:
                 sys.exit(f"debugfs failed on {img}:\n{res.stderr}")
         else:
+            # Qualcomm's NON-HLOS style vfat (modem, bluetooth) uses
+            # 4096-byte sectors with the CHS geometry fields zeroed, which
+            # stock mtools rejects ("zero number of heads or sectors").
+            # MTOOLS_SKIP_CHECK=1 is mtools' documented escape hatch;
+            # reproduced and verified byte-exact on a scratch image before
+            # this line was written.
+            env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
             res = subprocess.run(
                 ["mcopy", "-i", str(img), "-spnQ", "::", str(tree)],
-                capture_output=True, text=True)
+                capture_output=True, text=True, env=env)
             if res.returncode != 0:
                 sys.exit(f"mcopy failed on {img} (not EROFS, not ext4, and "
                          f"not readable as vfat):\n{res.stderr}")
