@@ -136,3 +136,17 @@ Two invariants that cannot be touched:
 | 4 | Stock `init_boot` is large enough for an Ubuntu initramfs | `android-gki` hard-fails on size; `make-initramfs.sh` prints the margin |
 | 5 | Product string for the installer gate | recorded by `stage-stock-images.sh` from the OTA metadata |
 | 6 | Firmware file list under `qcom/kaanapali/iceland/` | `stage-firmware.py record` + dmesg firmware requests on first boots |
+
+## Alternatives considered (reviewed 2026-10-30, agents' deep reads of all three sibling ports)
+
+Three independent Linux ports exist for iceland. Verdicts for our port:
+
+| Approach | Boot chain | Writes | Verdict for us |
+|---|---|---|---|
+| **Perpetua (Arch)** — ours | stock ABL → repacked GKI boot_b (DTB-in-Image, FDT handoff) → init_boot_b ramdisk → ext4 on userdata | boot_b, init_boot_b, userdata only; stock GPT untouched | **Keep.** Safe-by-construction; proven on this device; our scaffolding is built for it |
+| **Fedora (mzakamin-hub)** — U-Boot EFI | stock ABL → U-Boot in boot_b (Android-image-wrapped) → blkmap → shim/GRUB → EFI from a GPT disk image inside userdata | boot_b, userdata (dual-boot variant edits GPT — out of scope) | **Phase-2 candidate** for the kernel-update problem (apt upgrade + GRUB trial-boot + btrfs rollback vs our repack-and-reflash); not for first light. Their kernel patch queue (display splash handover, audio, sensors, thermal) is our adoption mine regardless |
+| **SuperTurtleDev (Ubuntu)** — EDK2 BootApp | patched-ABL/SuperFb BDS (gbl_root_canoe lineage, efisp-resident) → BootApp.efi → kernel/dtb/bootcfg/initrd from NEW GPT partitions | **deletes super+userdata, rewrites GPT**, creates 6 partitions; installed chain likely depends on a raw efisp write + GBL-vulnerable ABL | **Avoid the architecture entirely** (violates every brick rail; build-verified only, never run on hardware). But their netdeploy tooling is liftable: deployd/deployclient/makeblob (MIT, ~500 lines total) stream a CRC-framed Android-sparse rootfs over a USB-NCM gadget straight onto any block device, memory-bounded — pointable at userdata with no GPT change. Their ALSA UCM + sensors debs and bare-ext4+sparse image pipeline are also liftable |
+
+Shared lineage note: both alternatives build on map220v/sm8850-mainline's
+iceland DTS — the same ancestry as Perpetua — so kernel-side fixes port
+between all three trees with modest effort.
