@@ -102,7 +102,7 @@ old_args = ('bootargs = "rdinit=/rescue/mainline-init panic=0 '
 # them whatever pd_ignore_unused says, and the live splash scanout (and
 # whatever else ABL left running) dies with it.
 new_args = old_args.replace(
-    'panic=0', 'panic=10 console=tty0 console=ttyGS0 initcall_debug '
+    'panic=0', 'console=tty0 console=ttyGS0 initcall_debug '
     'clk_ignore_unused pd_ignore_unused '
     'initcall_blacklist=clk_disable_unused,genpd_power_off_unused,'
     'regulator_init_complete,of_platform_sync_state_init fw_devlink=off '
