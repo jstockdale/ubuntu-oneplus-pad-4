@@ -73,25 +73,36 @@ def extract_images(manifest: dict, stock: Path, scratch: Path) -> dict:
                      "(run stage-stock-images.sh with it in STOCK_PARTITIONS)")
         tree = scratch / image
         tree.mkdir()
+        # Filesystem by superblock magic, never by partition name: on this
+        # firmware vendor/odm are EROFS, modem is vfat (NON-HLOS style) and
+        # bluetooth/dsp are ext4 — the first run guessed vfat for ext4 and
+        # fell over.  All three extractors run without root or loop devices.
         with img.open("rb") as f:
             f.seek(1024)
-            erofs = f.read(4) == b"\xe2\xe1\xf5\xe0"
-        if erofs:
+            sb = f.read(0x40)
+        if sb[:4] == b"\xe2\xe1\xf5\xe0":
             res = subprocess.run(
                 ["fsck.erofs", f"--extract={tree}", str(img)],
                 capture_output=True, text=True)
             if res.returncode != 0:
                 sys.exit(f"fsck.erofs failed on {img}:\n{res.stderr}")
+        elif sb[0x38:0x3A] == b"\x53\xef":
+            # ext4: debugfs rdump, as the gts9u port does for its dspso.
+            res = subprocess.run(
+                ["debugfs", "-R", f"rdump / {tree}", str(img)],
+                capture_output=True, text=True)
+            if res.returncode != 0:
+                sys.exit(f"debugfs failed on {img}:\n{res.stderr}")
         else:
-            # mtools needs no root and no loop devices.  -s recurse,
-            # -p preserve attributes, -n overwrite silently, -Q quit on
-            # the first error so a truncated image cannot half-stage.
             res = subprocess.run(
                 ["mcopy", "-i", str(img), "-spnQ", "::", str(tree)],
                 capture_output=True, text=True)
             if res.returncode != 0:
-                sys.exit(f"mcopy failed on {img} (is mtools installed, and "
-                         f"is this really a vfat image?):\n{res.stderr}")
+                sys.exit(f"mcopy failed on {img} (not EROFS, not ext4, and "
+                         f"not readable as vfat):\n{res.stderr}")
+        if not any(tree.iterdir()):
+            sys.exit(f"{img}: extraction produced an empty tree; refusing "
+                     "to continue with a silently missing partition")
         trees[image] = tree
     return trees
 
