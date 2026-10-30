@@ -145,3 +145,23 @@ and check-handoff-final.sh for the composed-root question.
   is the working theory. Clean rebuild (relocation invalidated the old
   build dir's absolute paths anyway) now running detached under Claude's
   watch at -j6.
+
+## 2026-10-30 — kernel green; the merge_config lesson
+
+Both earlier build failures were one bug: scripts/kconfig/merge_config.sh
+re-resolves through alldefconfig, which re-defaulted CONFIG_DRM_MSM (a
+symbol no fragment mentions), demoting DRM_KMS_HELPER to =m and killing
+the vmlinux link on undefined DRM helper symbols. Proven by config diff
+plus an A/B of both merge strategies; fixed as append + olddefconfig.
+The OOM theory was wrong.
+
+Clean build: Linux 7.3.0+ at pin 7c98a10e, Image 42.8 MB with the iceland
+DTB built in, 939 stripped modules (18 MB), fragment guard green on the
+as-built config, and the built DTB's fdt-handoff matching every value
+verified against the GLO unit. Artifacts staged with hashes under
+out/kernel-iceland. Also ready ahead of first boot: the factory-data
+capture script with its mock-tablet test (tests/check-capture-script.sh),
+NOPASSWD sudo on dev images, and the DRM-streaming roadmap row.
+
+Next: checkpoint 2 (minimal rootfs, sudo), then initramfs, test image,
+tablet prep, RAM boot.
