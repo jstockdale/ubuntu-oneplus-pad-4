@@ -314,3 +314,48 @@ requires the first persistent write — init_boot_b carrying our wrapped
 initramfs (image staged, stock image retained for one-command restore)
 with the kernel still RAM-booted. Held pending the external research
 agents' reports, at the owner's call.
+
+## 2026-10-30 — Device research lands: watchdog confirmed armed, slot-retry rules, sibling ports
+
+The device-research sweep (primary sources, repos cloned) settles the
+open questions:
+
+- **ABL hands off with the APSS watchdog armed — by the maintainers' own
+  word.** Perpetua's rescue PID1 loads qcom-wdt.ko as its FIRST act
+  ("Let the standard watchdog core service a watchdog left running by
+  ABL", phonewave usb_rescue_init.c); the Fedora port pets the same dog
+  (Gunyah-emulated APSS WDT, 30 s once managed); upstream U-Boot stops
+  it in probe on Snapdragon. Our CONFIG_QCOM_WDT=y (fragment, since v3)
+  probes even earlier than their module load. Our flights never reached
+  the bite because the no-init panic killed them first; with the
+  flashed init_boot the dog is handled.
+- **Slot mechanics (operational rules):** flashing boot* resets the
+  slot's flags; every NORMAL boot of a not-yet-successful slot burns a
+  retry; at zero ABL marks the slot unbootable and switches slots.
+  fastboot/recovery/charger boots burn nothing. So while a diag
+  init_boot is flashed: no normal power-on boots; fastboot-driven boots
+  only; after restoring stock, boot Android fully once to re-mark the
+  slot successful. For the real install, the rootfs must mark its own
+  slot good (qbootctl -m) — added to the phase plan.
+- **Diagnostics:** pstore/ramoops does NOT survive this device's resets
+  (PS_HOLD re-initializes DDR); instead Android's /proc/bootloader_log
+  records the reset reason — read it after any fuse event.
+  qcom_scm.download_mode=full can hold crashes in dump mode.
+- **ABL facts from the sibling ports:** fastboot boot skips verifying
+  the downloaded image but loads dtbo/vendor_boot/init_boot from flash
+  (their measurement matches our delivery matrix); `adb reboot
+  bootloader`-style reboots requested from mainline Linux are ignored
+  (use Vol-Down+Power); flashed boot_b MUST carry an AVB hash footer
+  even unlocked (INVALID_METADATA strands the slot) — android-gki adds
+  it; max-download-size 768 MiB; cable-in power-on = charger mode.
+- **Ecosystem:** three sibling Linux ports exist for iceland — Arch
+  (Perpetua, flash-only, ext4-on-userdata), Fedora (mzakamin-hub,
+  U-Boot EFI chain, 555-patch display/GPU queue incl. the splash
+  handover recipe), and an Ubuntu EDK2-BootApp port (SuperTurtleDev,
+  custom GPT approach). Ours stays Perpetua-aligned (flash boot_b +
+  init_boot_b only); the iceland-linux patch queue is the mining ground
+  for display/GPU once we boot. tb323fu's bring-up cmdline (incl.
+  initcall_blacklist=...genpd_power_off_unused — pd_ignore_unused alone
+  does not stop of_genpd_sync_state) is the survival kit if later
+  bring-up stalls; the idle cluster-off reset workaround exists if
+  idle resets appear.
