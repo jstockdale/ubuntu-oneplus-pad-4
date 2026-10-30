@@ -52,16 +52,15 @@ Re-run `check-build-deps.sh` until it says everything is present, including
 the `binfmt qemu-aarch64 registered` line — without it the rootfs stage
 cannot run arm64 maintainer scripts.
 
-The rootfs/image stages chroot, loop-mount and set ownership, so run the
-build stages as root. The clean pattern:
-
-```bash
-sudo -i
-cd /home/jstockdale/projects/ubuntu-oneplus-pad-4
-# All stages default to UBUNTU_WORKDIR=/srv/ubuntu-iceland; set it only to
-# move the build elsewhere (fast disk, more space):
-# export UBUNTU_WORKDIR=/srv/ubuntu-iceland
-```
+Privileges are split by stage. The workdir `/srv/ubuntu-iceland` is
+user-owned so that both the owner and Claude's sandboxed shell can run and
+verify the root-free stages — fetch/kernel, stock staging, firmware
+overlay, boot bundle, test image — as an ordinary user. Only three stages
+genuinely need root and are run with plain `sudo bash scripts/...`:
+`build-ubuntu-rootfs.sh` (mmdebstrap + chroots), `make-initramfs.sh`
+(chroot) and `build-rootfs-image.sh` (loop mount). In-image file ownership
+does not depend on who built the inputs: modules and firmware are forced
+to root at the two merge points.
 
 ## 2. Kernel (no tablet, no OTA needed — do this today)
 

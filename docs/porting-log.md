@@ -125,3 +125,23 @@ Tooling hardened along the way by real-world contact: quoted-string
 parsing in check-handoff-match.sh, the pipefail/head trap in
 inspect-dtbo.sh, zip-direct payload extraction in stage-stock-images.sh,
 and check-handoff-final.sh for the composed-root question.
+
+## 2026-10-29 (night) — shared workdir; firmware staged end-to-end; kernel rebuild
+
+- Workdir relocated to user-owned **/srv/ubuntu-iceland** so Claude's
+  sandboxed shell runs and verifies every root-free stage directly; only
+  rootfs/initramfs/image keep sudo. In-image ownership made
+  builder-independent (forced --owner=0 at both merge points).
+- **Firmware chapter closed offline**: 28/28 phase-1 files staged from the
+  owner's own OTA and hash-verified against the iceland-firmware 11.A.38
+  manifest — including the pil-join (adsp/cdsp ×4) and FwUp-strip (touch)
+  reimplementations, byte-exact on first run. Three real-world extraction
+  lessons now in stage-firmware.py: EROFS/ext4/vfat by superblock magic,
+  debugfs rdump for ext4, MTOOLS_SKIP_CHECK=1 for the zero-CHS NON-HLOS
+  vfat (reproduced on a scratch image before shipping).
+- First kernel build attempt died with a buried make Error 2; the 1000-line
+  scrollback holds only successful lines. Box has 8 cores/14 GB and was
+  simultaneously extracting a 6.7 GB payload — OOM during the vmlinux link
+  is the working theory. Clean rebuild (relocation invalidated the old
+  build dir's absolute paths anyway) now running detached under Claude's
+  watch at -j6.
