@@ -219,6 +219,25 @@ The script printed the outcome ladder; what to do with each:
 A power cycle fully undoes a RAM boot. Iterate kernel → `make-initramfs.sh`
 → `make-test-bootimg.sh` → `fastboot boot` as often as needed.
 
+## 5b. Slot-retry rules (learned 2026-10-30, from the sibling ports)
+
+- Flashing any `boot*` partition clears the slot's "successful" flag and
+  resets its retries; every NORMAL boot of a non-successful slot burns a
+  retry; at zero the ABL marks the slot unbootable and switches slots.
+  fastboot-driven, recovery and charger boots burn nothing.
+- While a diagnostic init_boot is flashed: no normal power-on boots.
+  Boot only via fastboot. To hand the tablet back to Android: restore
+  the stock init_boot, then let Android boot fully once (it re-marks
+  the slot successful).
+- The installed Ubuntu system must mark its own slot good (qbootctl -m
+  equivalent) during first boot, or the slot strands after ~3 boots.
+- `reboot bootloader` requested from mainline Linux is ignored by this
+  ABL: use Vol-Down+Power (~15 s) to reach fastboot from a Linux boot.
+- RAM-boot reality on this ABL: `fastboot boot` never uses the
+  downloaded image's ramdisk — the flashed init_boot always supplies
+  the generic ramdisk, so kernel-only RAM boots + a flashed diag
+  init_boot is the test vehicle.
+
 ## 6. Full build
 
 With the firmware manifest recorded (phase 4):
