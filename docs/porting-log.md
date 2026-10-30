@@ -181,3 +181,21 @@ removed Oxygen Updater itself).
 
 Remaining before the RAM boot: rootfs (checkpoint 2) → initramfs →
 test image. The tablet side is done.
+
+## 2026-10-29 (midnight) — RAM-boot image ready; the initramfs education
+
+Checkpoint 3 closed the hard way, every lesson caught by a gate rather
+than a dark panel: MODULES=most blew the 8.4 MB init_boot budget (17.3 MB
+— mostly udev hwdb and the module tree); MODULES=list left 13.2 MB of
+stock payload; the trim hook plus the measured udev removal (verified
+against the shipped scripts: wait_for_udev no-ops, resolve_device uses
+blkid, the polling loop is the designed wait-for-root fallback) landed
+2.53 MB with a 5.9 MB margin. The closure audit caught two real defects
+en route: Ubuntu's own orphaned mount.fuse3, and the klibc runtime that
+is no library but the INTERP of thirteen boot utilities. The real
+system's udev is untouched: coldplug replays everything after
+switch_root.
+
+test-boot.img: 45,350,912 bytes (kernel with built-in DTB + the 2.53 MB
+initramfs, v4, unsigned-footer). Known wrinkle: stock header OS version
+fields read as unset and are mirrored as such. Next: fastboot boot.
