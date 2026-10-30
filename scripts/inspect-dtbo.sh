@@ -56,9 +56,12 @@ for dtbo in "$tmp"/overlay-*.dtbo; do
 	}
 	echo "overlay $n:"
 	# Everything that names the board: model strings anywhere in the
-	# overlay, and the id properties selection logic keys on.
-	grep -nE 'model =|board-id|msm-id|pmic-id|oplus,|hw-id|project' "$dts" \
-		| sed 's/^/    /' | head -20
+	# overlay, and the id properties selection logic keys on.  No `head` at
+	# a pipeline's end under pipefail: it SIGPIPEs grep at the cutoff and
+	# set -e then kills the whole script, which is exactly how the first
+	# run died after one overlay.  awk consumes its whole input instead.
+	grep -nE 'model =|board-id|msm-id|pmic-id|oplus,project|hw-id|platform_support' \
+		"$dts" 2>/dev/null | sed 's/^/    /' | awk 'NR<=12{print}' || true
 	grep -qE 'model =' "$dts" || echo '    (no model property)'
 done
 
