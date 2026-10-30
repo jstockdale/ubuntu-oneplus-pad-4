@@ -1,0 +1,33 @@
+#!/bin/sh
+# Early USB debug channel for bring-up: an ACM serial gadget streaming the
+# kernel log, so the host can read what this machine thinks even when the
+# panel shows nothing. Every step tolerates failure — a debug aid must
+# never be the reason a boot dies.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+{
+	mount -t configfs none /sys/kernel/config 2>/dev/null
+	G=/sys/kernel/config/usb_gadget/iceland-dbg
+	mkdir -p "$G" || exit 0
+	echo 0x1d6b > "$G/idVendor"
+	echo 0x0104 > "$G/idProduct"
+	mkdir -p "$G/strings/0x409"
+	echo iceland-debug > "$G/strings/0x409/serialnumber"
+	echo Ubuntu-iceland > "$G/strings/0x409/manufacturer"
+	echo "iceland initramfs debug" > "$G/strings/0x409/product"
+	mkdir -p "$G/configs/c.1/strings/0x409"
+	echo acm > "$G/configs/c.1/strings/0x409/configuration"
+	mkdir -p "$G/functions/acm.GS0"
+	ln -s "$G/functions/acm.GS0" "$G/configs/c.1/acm.GS0"
+	UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+	[ -n "$UDC" ] || exit 0
+	echo "$UDC" > "$G/UDC"
+	# Stream the kernel ring buffer to the host for the life of the boot.
+	( cat /dev/kmsg > /dev/ttyGS0 2>/dev/null ) &
+	echo "iceland-usb-debug: streaming kmsg on acm gadget ($UDC)" > /dev/kmsg
+} 2>/dev/null
+exit 0

@@ -27,7 +27,7 @@ find "$build" -type f -exec chmod 0644 {} +
 # initramfs-tools SILENTLY skips a non-executable hook, which is how the
 # first initramfs shipped without rescue/mainline-init.
 chmod 0755 "$build"/DEBIAN/postinst "$build"/usr/libexec/* \
-	"$build"/etc/initramfs-tools/hooks/* 2>/dev/null || true
+	"$build"/etc/initramfs-tools/hooks/* "$build"/etc/initramfs-tools/scripts/init-top/* 2>/dev/null || true
 
 # dpkg-deb refuses stray editor droppings and so should we.
 find "$build" -name '*~' -o -name '*.swp' | grep -q . && {
