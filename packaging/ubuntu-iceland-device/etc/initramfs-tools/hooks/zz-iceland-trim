@@ -29,10 +29,10 @@ for f in \
 	usr/bin/loadkeys \
 	usr/share/consolefonts \
 	usr/share/keymaps \
+	usr/sbin/mount.fuse3 \
 	usr/sbin/dmsetup \
 	usr/lib/aarch64-linux-gnu/libdevmapper.so.1.02.1 \
-	usr/lib/aarch64-linux-gnu/libfuse3.so.3 \
-	usr/lib/aarch64-linux-gnu/libfuse3.so.3.*; do
+	usr/lib/aarch64-linux-gnu/libfuse3.so.*; do
 	rm -rf "${DESTDIR:?}/$f"
 done
 exit 0
