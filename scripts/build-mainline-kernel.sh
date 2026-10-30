@@ -66,9 +66,13 @@ mkdir -p "$build_dir"
 (cd "$kernel_tree" && ARCH=arm64 LLVM=1 devices/config "$device" "$build_dir")
 
 our_fragments=("$repo"/kernel/config/*.fragment)
-(cd "$kernel_tree" && KCONFIG_CONFIG="$build_dir/.config" \
-	scripts/kconfig/merge_config.sh -O "$build_dir" \
-	"$build_dir/.config" "${our_fragments[@]}" >/dev/null)
+# Append + olddefconfig, deliberately NOT scripts/kconfig/merge_config.sh:
+# merge_config re-resolves through alldefconfig, which re-defaults symbols
+# the fragments never mention — observed dropping CONFIG_DRM_MSM (and with
+# it DRM_KMS_HELPER=y), which made the vmlinux link fail on undefined DRM
+# helper symbols. Appending lets the later assignment win per Kconfig's
+# own rules, and olddefconfig resolves only what actually changed.
+cat "${our_fragments[@]}" >> "$build_dir/.config"
 make -C "$kernel_tree" ARCH=arm64 LLVM=1 O="$build_dir" olddefconfig
 
 # The same promise devices/config makes, extended to our fragments: every
