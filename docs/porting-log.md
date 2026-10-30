@@ -165,3 +165,19 @@ NOPASSWD sudo on dev images, and the DRM-streaming roadmap row.
 
 Next: checkpoint 2 (minimal rootfs, sudo), then initramfs, test image,
 tablet prep, RAM boot.
+
+## 2026-10-29 (late night) — tablet unlocked; every live assumption confirmed
+
+Pre-unlock snapshot banked (1,783 props, work/). Live fastboot contact:
+**product: canoe** (assumption 5 closed on hardware), current-slot b,
+unlocked: no → `fastboot flashing unlock` → confirmed on-device → wipe →
+verifiedbootstate **orange**, vbmeta.device_state **unlocked**, still
+slot _b. Active slot B means the unit has OTA'd and both slots are
+populated: the empty-slot EDL hazard is retired for this device. Unit
+serial 2fe096b5 (future factory-capture label). ColorOS 17 note: the
+catalog offer came via Oxygen Updater only; stock's staged rollout has
+not reached this unit; auto-update disabled regardless (and the wipe
+removed Oxygen Updater itself).
+
+Remaining before the RAM boot: rootfs (checkpoint 2) → initramfs →
+test image. The tablet side is done.
