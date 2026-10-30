@@ -92,9 +92,69 @@ old_args = ('bootargs = "rdinit=/rescue/mainline-init panic=0 '
 # include something the secure world or the memory path still needs, and
 # the result is a hard reset on a constant ~5 s fuse with no panic path
 # (the attempt 4-6 signature: gadget pulls up at T+1 s, dead by T+6 s).
+# console=tty0 FIRST: with the splash framebuffer node below and
+# DRM_SIMPLEDRM, the kernel log is readable ON THE PANEL inside the
+# 5-second death window; ttyGS0 stays last so the rescue shell lands on
+# USB when the boot survives.
 new_args = old_args.replace(
-    'panic=0', 'panic=10 console=ttyGS0 initcall_debug '
+    'panic=0', 'panic=10 console=tty0 console=ttyGS0 initcall_debug '
     'clk_ignore_unused pd_ignore_unused')
+
+# ABL's live splash as a framebuffer console (the Fedora port's measured
+# recipe: MDP at 650 MHz needs MMCX TURBO, dispcc is fed by MX/MXC, and
+# dispcc's sync_state drops the INT2 GDSC whatever pd_ignore_unused says;
+# DSI byte/pixel clocks deliberately omitted — their parents are PHY PLLs
+# unknown until the PHYs probe).
+# dtc demands properties before subnodes: the cell/ranges properties go
+# right after "chosen {", and the framebuffer subnode is inserted just
+# ahead of the fdt-handoff subnode (anchored on its comment line).
+props = ('\tchosen {\n\t\t#address-cells = <2>;\n'
+         '\t\t#size-cells = <2>;\n\t\tranges;\n')
+assert '\tchosen {\n' in text, 'chosen block drifted'
+text = text.replace('\tchosen {\n', props, 1)
+
+anchor = ('\t\t/* The bootloader ramdisk carries the rescue and boot '
+          'userspace. */\n')
+assert anchor in text, 'fdt-handoff comment anchor drifted'
+fb_node = '''
+		framebuffer@fc800000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0xfc800000 0x0 0x2b00000>;
+			width = <3392>;
+			height = <2400>;
+			stride = <(3392 * 4)>;
+			format = "a8r8g8b8";
+			clocks = <&gcc GCC_DISP_HF_AXI_CLK>,
+				 <&dispcc DISP_CC_MDSS_AHB_CLK>,
+				 <&dispcc DISP_CC_MDSS_MDP_CLK>,
+				 <&dispcc DISP_CC_MDSS_MDP_LUT_CLK>,
+				 <&dispcc DISP_CC_MDSS_VSYNC_CLK>,
+				 <&dispcc DISP_CC_MDSS_ESC0_CLK>,
+				 <&dispcc DISP_CC_MDSS_ESC1_CLK>;
+			power-domains = <&rpmhpd RPMHPD_MMCX>,
+					<&rpmhpd RPMHPD_MX>,
+					<&rpmhpd RPMHPD_MXC>,
+					<&dispcc DISP_CC_MDSS_CORE_GDSC>,
+					<&dispcc DISP_CC_MDSS_CORE_INT2_GDSC>;
+			required-opps = <&rpmhpd_opp_turbo>,
+					<&rpmhpd_opp_turbo>,
+					<&rpmhpd_opp_turbo>;
+			memory-region = <&cont_splash_mem>;
+		};
+
+'''
+text = text.replace(anchor, fb_node + anchor, 1)
+
+splash_mem = '''	reserved-memory {
+		cont_splash_mem: splash-region@fc800000 {
+			reg = <0x0 0xfc800000 0x0 0x2b00000>;
+			no-map;
+		};
+
+'''
+assert '\treserved-memory {\n' in text, 'reserved-memory block drifted'
+text = text.replace('\treserved-memory {\n', splash_mem, 1)
+print('DTS: splash framebuffer console node added')
 assert old_args in text, 'bootargs line drifted; refit the diagnostic edit'
 text = text.replace(old_args, new_args)
 
@@ -121,14 +181,23 @@ PYEOF
 # few seconds in (the attempt-4/5 hard resets).  Built in, it probes at once
 # and WATCHDOG_HANDLE_BOOT_ENABLED keeps it fed.  Also in the release
 # fragment; set here too because this build reuses the existing .config.
-"$kernel_tree/scripts/config" --file "$build_dir/.config" -e USB_G_SERIAL -e QCOM_WDT
+# DRM_SIMPLEDRM drives the splash framebuffer node; DRM_MSM is DISABLED in
+# the diag build so nothing resets ABL's live scanout (the Fedora port
+# needed two driver patches to keep the splash through a dpu probe — the
+# diagnostic sidesteps that entirely).
+"$kernel_tree/scripts/config" --file "$build_dir/.config" \
+	-e USB_G_SERIAL -e QCOM_WDT -e DRM_SIMPLEDRM -d DRM_MSM
 make -C "$kernel_tree" ARCH=arm64 LLVM=1 O="$build_dir" olddefconfig
-for sym in CONFIG_USB_G_SERIAL=y CONFIG_QCOM_WDT=y; do
+for sym in CONFIG_USB_G_SERIAL=y CONFIG_QCOM_WDT=y CONFIG_DRM_SIMPLEDRM=y; do
 	grep -q "^$sym\$" "$build_dir/.config" || {
 		echo "$sym did not take; check its Kconfig dependencies" >&2
 		exit 1
 	}
 done
+if grep -q '^CONFIG_DRM_MSM=y' "$build_dir/.config"; then
+	echo 'CONFIG_DRM_MSM is still enabled; the splash console would die' >&2
+	exit 1
+fi
 
 make -C "$kernel_tree" ARCH=arm64 LLVM=1 O="$build_dir" -j"$jobs" Image
 
