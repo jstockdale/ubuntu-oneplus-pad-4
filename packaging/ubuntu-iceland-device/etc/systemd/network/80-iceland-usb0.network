@@ -1,0 +1,9 @@
+# The USB gadget network: the tablet is 192.168.7.2, the host side is
+# conventionally 192.168.7.1 (assign it there; no DHCP on this link).
+# First-boot access path: ssh ubuntu@192.168.7.2 over the cable.
+[Match]
+Name=usb0
+
+[Network]
+Address=192.168.7.2/24
+ConfigureWithoutCarrier=yes

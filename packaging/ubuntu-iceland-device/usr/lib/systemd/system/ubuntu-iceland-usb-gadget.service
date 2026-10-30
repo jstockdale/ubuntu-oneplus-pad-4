@@ -1,0 +1,13 @@
+[Unit]
+Description=USB gadget access (ACM getty + ECM network)
+DefaultDependencies=no
+After=systemd-modules-load.service sys-kernel-config.mount
+Before=systemd-networkd.service serial-getty@ttyGS0.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/ubuntu-iceland-usb-gadget
+
+[Install]
+WantedBy=multi-user.target

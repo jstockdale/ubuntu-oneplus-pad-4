@@ -20,3 +20,8 @@ case "$1" in
 esac
 
 exit 0
+# The gadget unit, its getty, and networkd for usb0: the only access
+# path on a headless first boot.
+systemctl enable ubuntu-iceland-usb-gadget.service >/dev/null 2>&1 || true
+systemctl enable serial-getty@ttyGS0.service >/dev/null 2>&1 || true
+systemctl enable systemd-networkd.service >/dev/null 2>&1 || true

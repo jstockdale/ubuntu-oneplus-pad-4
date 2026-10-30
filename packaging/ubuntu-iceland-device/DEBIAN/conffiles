@@ -2,4 +2,5 @@
 /etc/initramfs-tools/hooks/iceland-rescue-init
 /etc/initramfs-tools/hooks/zz-iceland-trim
 /etc/initramfs-tools/scripts/init-top/iceland-usb-debug
+/etc/systemd/network/80-iceland-usb0.network
 /etc/systemd/zram-generator.conf.d/iceland.conf

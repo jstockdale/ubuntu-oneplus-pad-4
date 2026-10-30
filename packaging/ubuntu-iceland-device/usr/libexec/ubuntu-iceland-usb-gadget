@@ -1,0 +1,42 @@
+#!/bin/sh
+# Bring up the USB gadget that makes a headless iceland reachable: one
+# composite device with an ACM serial port (a login getty binds to
+# ttyGS0) and an ECM network interface (usb0, 192.168.7.2/24, the host
+# side conventionally 192.168.7.1, with sshd listening as everywhere).
+# This is the only access path on first boot: the panel has no driver
+# yet and Wi-Fi needs credentials nobody has typed.
+#
+# The UDC registers asynchronously (dwc3), so the bind polls. Every step
+# tolerates failure: an access aid must never be the reason a boot
+# fails.
+set -u
+
+G=/sys/kernel/config/usb_gadget/iceland
+mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
+
+[ -d "$G" ] && exit 0
+mkdir -p "$G" || exit 0
+echo 0x1d6b > "$G/idVendor"
+echo 0x0104 > "$G/idProduct"
+mkdir -p "$G/strings/0x409"
+serial=$(cat /proc/device-tree/serial-number 2>/dev/null | tr -d '\0')
+echo "${serial:-iceland}" > "$G/strings/0x409/serialnumber"
+echo Ubuntu-iceland > "$G/strings/0x409/manufacturer"
+echo "OnePlus Pad 4 (Ubuntu)" > "$G/strings/0x409/product"
+mkdir -p "$G/configs/c.1/strings/0x409"
+echo "acm+ecm" > "$G/configs/c.1/strings/0x409/configuration"
+mkdir -p "$G/functions/acm.GS0"
+mkdir -p "$G/functions/ecm.usb0"
+ln -sf "$G/functions/acm.GS0" "$G/configs/c.1/acm.GS0"
+ln -sf "$G/functions/ecm.usb0" "$G/configs/c.1/ecm.usb0"
+
+n=0
+while [ "$n" -lt 30 ]; do
+	UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+	[ -n "$UDC" ] && break
+	sleep 1
+	n=$((n + 1))
+done
+[ -n "${UDC:-}" ] || exit 0
+echo "$UDC" > "$G/UDC" 2>/dev/null || exit 0
+exit 0
