@@ -185,6 +185,11 @@ Notes:
 Then, with the tablet in the bootloader (`adb reboot bootloader` or
 Power+VolDown from off):
 
+> Escape hatch, confirmed on this unit: **power + volume-up held ~10-15 s**
+> forces a PMIC-level reset from any state, hung kernels included (volume-up
+> is wired to the PMIC's RESIN line in the device tree). A RAM boot leaves
+> nothing behind, so this always returns the tablet to stock Android.
+
 ```bash
 fastboot boot "$UBUNTU_WORKDIR/out/test-boot.img"
 ```
