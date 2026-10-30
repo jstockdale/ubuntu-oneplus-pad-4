@@ -87,8 +87,14 @@ old_args = ('bootargs = "rdinit=/rescue/mainline-init panic=0 '
 # printk replays its backlog to it — an early panic trace reaches the host
 # if the panic falls after dwc3 comes up.
 # initcall_debug: names the exact initcall that dies.
+# clk_ignore_unused pd_ignore_unused: skip the late-init sweep that gates
+# every unclaimed clock and power domain — on a new variant that list can
+# include something the secure world or the memory path still needs, and
+# the result is a hard reset on a constant ~5 s fuse with no panic path
+# (the attempt 4-6 signature: gadget pulls up at T+1 s, dead by T+6 s).
 new_args = old_args.replace(
-    'panic=0', 'panic=10 console=ttyGS0 initcall_debug')
+    'panic=0', 'panic=10 console=ttyGS0 initcall_debug '
+    'clk_ignore_unused pd_ignore_unused')
 assert old_args in text, 'bootargs line drifted; refit the diagnostic edit'
 text = text.replace(old_args, new_args)
 
