@@ -280,7 +280,7 @@ initramfs (first persistent write, stock image retained for restore),
 then `fastboot boot` a kernel-only image of our kernel — the full
 Ubuntu chain with still nothing permanent on boot_b.
 
-## 2026-10-30 (later still) — RAM-boot ramdisk delivery: every path closed
+## 2026-10-30 (later still) — RAM-boot ramdisk delivery: v4 ignores, default refused, v3 pending clean retest
 
 Confirming the control-pair finding against every delivery variant this
 ABL offers:
@@ -290,10 +290,12 @@ ABL offers:
 - `fastboot boot <kernel> <ramdisk>` (client-constructed, default
   header): accepted for download, refused at boot, silent fall-back to
   the fastboot screen;
-- the same with --header-version 3: explicit
-  "Failed to load/authenticate boot image: Load Error" and the oplus
-  failure screen (winking mascot, CN text) — still serving the fastboot
-  protocol; `fastboot reboot` returns to Android cleanly.
+- the same with --header-version 3: returned
+  "Failed to load/authenticate boot image: Load Error" — but the command
+  was issued while the ABL sat on its failure screen (winking mascot,
+  CN text) left by the previous attempt, so this is NOT a valid v3
+  verdict; retest from clean fastboot. The failure screen still serves
+  the fastboot protocol and `fastboot reboot` returns to Android.
 
 Corroboration from the wild: cfig/Android_boot_image_editor
 discussion #144 reports a Pixel ignoring the merged-in ramdisk on
