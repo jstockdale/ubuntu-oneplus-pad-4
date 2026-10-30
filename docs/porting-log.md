@@ -422,3 +422,28 @@ now replaces rescue/mainline-init with a wrapper that disarms/feeds
 /dev/watchdog* within ~2 s of kernel start, stamps kmsg markers, then
 execs /init. New diag initrd + stock-templated init_boot rebuilt and
 cross-verified.
+
+## 2026-10-30 (evening) — The real killer: a usr-merge symlink losing to the vendor ramdisk
+
+The panel console (v8, apps-SMMU left alone) finally showed the death in
+writing: "Failed to execute /rescue/mainline-init (error -2)" → "No
+working init found" at 0.65 s — with the whole UFS enumerated and
+g_serial bound above it. Reproduced on the desk in qemu with the real
+vendor blob prepended; our archive alone boots fine. An automated qemu
+bisect over the vendor archive's 509 entries pinned the trigger to
+entry 4, lib/modules — and with init/initramfs.c in hand the mechanism
+is exact: the vendor ramdisk extracts first and owns a non-empty real
+lib/; our usr-merge `lib -> usr/lib` symlink then silently loses
+(rmdir of a non-empty directory, errors deliberately ignored), and
+every dynamic executable afterwards fails ENOENT on
+/lib/ld-linux-aarch64.so.1. PID 1 never existed; under panic=0 that
+hang-then-forced-reset, under panic=10 the quick reset — every flight
+of the flashed era, and the stock-kernel 4-second loop, were this one
+bug. The SMMU only ever killed the screen that would have shown it.
+
+Fix in scripts/repack-initramfs.py, shared by make-initramfs.sh and the
+diag builder: the lib entry becomes a real directory carrying loader
+symlinks (ld-linux-aarch64.so.1, klibc-*.so) that resolve through
+usr/lib — it merges over the vendor's lib/ instead of fighting it.
+Verified: the full vendor00+archive chain boots in qemu to the wrapper
+(6.6 s), /init, and the 30 s beacon.

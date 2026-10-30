@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Repack an initramfs as ONE LZ4-legacy frame, vendor-chain-proof.
+
+Two transforms, both required by the GKI boot chain on iceland:
+
+1. Single LZ4-legacy frame over the concatenated raw cpio bytes: ABL
+   prepends the stock vendor ramdisk (LZ4-legacy), and the kernel's
+   LZ4-legacy decoder reads straight through frame boundaries — only
+   another LZ4 frame may follow it (a leading plain cpio segment fails
+   the whole unpack: lib/decompress_unlz4.c has no end-of-stream mark).
+
+2. The usr-merge `lib -> usr/lib` SYMLINK becomes a real DIRECTORY with
+   per-loader symlinks. The vendor ramdisk extracts first and owns a
+   non-empty real lib/ (lib/modules/*.ko); the kernel's extractor then
+   silently fails to replace that directory with our symlink (rmdir of a
+   non-empty dir, errors deliberately ignored in init/initramfs.c), and
+   every dynamic executable afterwards dies with ENOENT on
+   /lib/ld-linux-aarch64.so.1 — measured on the tablet as
+   "Failed to execute /rescue/mainline-init (error -2)" and bisected to
+   the vendor's lib/modules entry.  A real lib/ merges instead, and the
+   loader symlinks inside resolve through usr/lib.
+
+Usage: repack-initramfs.py INPUT OUTPUT
+"""
+import struct
+import subprocess
+import sys
+
+
+def walk_segments(data):
+    """Yield the raw cpio bytes of every segment, decompressing LZ4."""
+    i = 0
+    while i < len(data):
+        if data[i:i+4] == b'\x02\x21\x4c\x18':
+            p = subprocess.run(['lz4', '-dc'], input=data[i:],
+                               capture_output=True)
+            if not p.stdout:
+                sys.exit('LZ4 segment failed to decompress')
+            yield p.stdout
+            return
+        if data[i:i+6] in (b'070701', b'070702'):
+            j = i
+            while j < len(data):
+                hdr = data[j:j+110]
+                if hdr[:6] not in (b'070701', b'070702'):
+                    break
+                ns = int(hdr[94:102], 16)
+                fs = int(hdr[54:62], 16)
+                name = data[j+110:j+110+ns-1].decode(errors='replace')
+                j = (j + 110 + ns + 3) // 4 * 4
+                j = (j + fs + 3) // 4 * 4
+                if name == 'TRAILER!!!':
+                    break
+            while j < len(data) and data[j:j+1] == b'\x00':
+                j += 1
+            yield data[i:j]
+            i = j
+            continue
+        sys.exit(f'segment at offset {i} is neither plain cpio nor LZ4 '
+                 f'legacy (magic {data[i:i+4].hex()})')
+
+
+def entries(raw):
+    """Yield (name, mode, record_bytes) for each cpio record."""
+    i = 0
+    while i < len(raw):
+        if raw[i:i+1] == b'\x00':
+            i += 1
+            continue
+        hdr = raw[i:i+110]
+        if hdr[:6] not in (b'070701', b'070702'):
+            sys.exit(f'junk inside cpio at {i}')
+        ns = int(hdr[94:102], 16)
+        fs = int(hdr[54:62], 16)
+        mode = int(hdr[14:22], 16)
+        name = raw[i+110:i+110+ns-1].decode(errors='replace')
+        end = (i + 110 + ns + 3) // 4 * 4
+        end = (end + fs + 3) // 4 * 4
+        yield name, mode, raw[i:end]
+        i = end
+        if name == 'TRAILER!!!':
+            while i < len(raw) and raw[i:i+1] == b'\x00':
+                i += 1
+
+
+_ino = [9000000]
+
+
+def record(name, mode, body=b''):
+    """Build one newc record."""
+    _ino[0] += 1
+    nb = name.encode() + b'\x00'
+    hdr = ('070701' + f'{_ino[0]:08X}' + f'{mode:08X}' + '0' * 16 +
+           '00000001' + '0' * 8 + f'{len(body):08X}' + '0' * 32 +
+           f'{len(nb):08X}' + '0' * 8).encode()
+    out = hdr + nb
+    out += b'\x00' * (-len(out) % 4)
+    out += body
+    out += b'\x00' * (-len(out) % 4)
+    return out
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    data = open(sys.argv[1], 'rb').read()
+    segments = [list(entries(seg)) for seg in walk_segments(data)]
+
+    loaders = []
+    for seg in segments:
+        for name, mode, _ in seg:
+            if (name.startswith('usr/lib/klibc-') and name.endswith('.so')) \
+               or name == 'usr/lib/ld-linux-aarch64.so.1':
+                loaders.append(name)
+    out = bytearray()
+    fixed = 0
+    for seg in segments:
+        for name, mode, rec in seg:
+            if name == 'lib' and (mode & 0o170000) == 0o120000:
+                out += record('lib', 0o040755)
+                for target in loaders:
+                    out += record('lib/' + target.rsplit('/', 1)[1],
+                                  0o120777, ('../' + target).encode())
+                fixed += 1
+                continue
+            out += rec
+    if not fixed:
+        sys.exit('no lib symlink found: input layout drifted')
+    if not loaders:
+        sys.exit('no loaders found for lib/: input layout drifted')
+
+    p = subprocess.run(['lz4', '-l', '-12'], input=bytes(out),
+                       capture_output=True)
+    if p.returncode or not p.stdout:
+        sys.exit('lz4 compression failed')
+    open(sys.argv[2], 'wb').write(p.stdout)
+    print(f'repacked: single LZ4 frame, lib/ directory with '
+          f'{len(loaders)} loader links')
+
+
+main()

@@ -55,55 +55,17 @@ chroot "$rootfs" update-initramfs -c -k "$kernel_release" >&2
 initramfs=$rootfs/boot/initrd.img-$kernel_release
 test -f "$initramfs" || { echo 'update-initramfs produced nothing' >&2; exit 1; }
 
-# Repack as a single LZ4-legacy frame.  Ubuntu 26.04's initramfs-tools emits
-# a SEGMENTED archive: plain cpio segment(s) first, then the compressed main
-# body.  On its own the kernel unpacks that fine — but ABL prepends the stock
-# vendor_boot ramdisk, which is LZ4-legacy, and the kernel's LZ4-legacy
-# decoder has no end-of-stream marker: after the vendor frame it reads the
-# next four bytes as a chunk size.  Another LZ4 frame's magic is the one
-# value it takes as "a new frame follows"; a plain cpio segment decodes as an
-# absurd chunk length and fails the WHOLE unpack before PID 1
-# (lib/decompress_unlz4.c, init/initramfs.c) — observed as a dark panel with
-# dead USB on RAM-boot attempts 1-3.  So: concatenate every segment's raw
-# cpio bytes, decompressing the main body, and compress the whole as one
-# LZ4-legacy frame.  Entry bytes are preserved exactly, and the kernel parses
-# the decoded stream as successive cpio archives — the same way it parses
-# stock Android's vendor+generic ramdisk pair.
-python3 - "$initramfs" <<'PYEOF' | lz4 -l -12 > "$initramfs.single"
-import subprocess, sys
-data = open(sys.argv[1], 'rb').read()
-out = sys.stdout.buffer
-i = 0
-while i < len(data):
-    magic4 = data[i:i+4]
-    if magic4 == b'\x02\x21\x4c\x18':
-        p = subprocess.run(['lz4', '-dc'], input=data[i:], capture_output=True)
-        if not p.stdout:
-            sys.exit('the LZ4 main body failed to decompress')
-        out.write(p.stdout)
-        break
-    if data[i:i+6] in (b'070701', b'070702'):
-        j = i
-        while j < len(data):
-            hdr = data[j:j+110]
-            if hdr[:6] not in (b'070701', b'070702'):
-                break
-            namesize = int(hdr[94:102], 16)
-            filesize = int(hdr[54:62], 16)
-            name = data[j+110:j+110+namesize-1].decode(errors='replace')
-            j = (j + 110 + namesize + 3) // 4 * 4
-            j = (j + filesize + 3) // 4 * 4
-            if name == 'TRAILER!!!':
-                break
-        while j < len(data) and data[j:j+1] == b'\x00':
-            j += 1
-        out.write(data[i:j])
-        i = j
-        continue
-    sys.exit(f'segment at offset {i} is neither plain cpio nor LZ4 legacy '
-             f'(magic {magic4.hex()}): check COMPRESS=lz4 in '
-             '/etc/initramfs-tools/initramfs.conf')
-PYEOF
+# Repack via the shared helper: one LZ4-legacy frame over the segments
+# (ABL prepends the stock vendor ramdisk, which is LZ4-legacy, and the
+# kernel's LZ4-legacy decoder reads straight through frame boundaries —
+# a leading plain cpio segment fails the whole unpack), and the usr-merge
+# lib symlink rewritten as a real directory with loader links (the
+# vendor ramdisk owns a non-empty real lib/ at extraction time, so the
+# symlink silently loses and every dynamic exec dies with ENOENT on the
+# loader; measured on hardware, bisected to the vendor lib/modules
+# entry).  scripts/repack-initramfs.py holds both transforms.
+repo=$(cd "$(dirname "$0")/.." && pwd)
+python3 -I "$repo/scripts/repack-initramfs.py" "$initramfs" "$initramfs.single"
 mv -- "$initramfs.single" "$initramfs"
 
 # Verify the invariant the boot chain actually needs: LZ4 legacy from byte 0

@@ -234,42 +234,11 @@ revert_dts
 # Diagnostic initramfs: single LZ4 frame + beacon overlay segment
 # ---------------------------------------------------------------------------
 
-# Concatenate every segment's raw cpio bytes (decompressing the LZ4 main
-# body), exactly preserving entries, then compress the whole as ONE
-# LZ4-legacy frame.  Handles both the segmented layout and an already
-# repacked single-frame one.
-python3 - "$initramfs" <<'PYEOF' | lz4 -l -12 > "$base/out/initrd-diag.base" || exit 1
-import subprocess, sys
-data = open(sys.argv[1], 'rb').read()
-out = sys.stdout.buffer
-i = 0
-while i < len(data):
-    if data[i:i+4] == b'\x02\x21\x4c\x18':
-        p = subprocess.run(['lz4', '-dc'], input=data[i:], capture_output=True)
-        if p.returncode and not p.stdout:
-            sys.exit('LZ4 segment failed to decompress')
-        out.write(p.stdout)
-        break
-    if data[i:i+6] in (b'070701', b'070702'):
-        j = i
-        while j < len(data):
-            hdr = data[j:j+110]
-            if hdr[:6] not in (b'070701', b'070702'):
-                break
-            namesize = int(hdr[94:102], 16)
-            filesize = int(hdr[54:62], 16)
-            name = data[j+110:j+110+namesize-1].decode(errors='replace')
-            j = (j + 110 + namesize + 3) // 4 * 4
-            j = (j + filesize + 3) // 4 * 4
-            if name == 'TRAILER!!!':
-                break
-        while j < len(data) and data[j:j+1] == b'\x00':
-            j += 1
-        out.write(data[i:j])
-        i = j
-        continue
-    sys.exit(f'unknown segment magic at {i}: {data[i:i+4].hex()}')
-PYEOF
+# Repack via the shared helper: single LZ4-legacy frame AND the lib/
+# directory fix (the vendor ramdisk owns a non-empty real lib/, so our
+# usr-merge lib symlink silently loses and every dynamic exec dies with
+# ENOENT on the loader — bisected to the vendor's lib/modules entry).
+python3 -I "$repo/scripts/repack-initramfs.py" "$initramfs" "$base/out/initrd-diag.base"
 
 overlay=$base/build/initrd-diag-overlay
 rm -rf -- "$overlay"
