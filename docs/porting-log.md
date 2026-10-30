@@ -249,3 +249,33 @@ release worktree and reverted after. Outcome map: ACM = read the log;
 reboot ~15–25 s = post-handoff panic; reboot ~35–50 s = userspace ran,
 USB never probed; dark = handoff hang or match still failing. RAM boot
 only; nothing diagnostic is ever flashed.
+
+## 2026-10-30 (later) — The control pair solves it: ABL ignores RAM-boot ramdisks
+
+Flights 4–7 (gadget console, built-in watchdog, clk/pd sweep disabled)
+all died identically: gadget on the bus at T+1 s, dead by ~T+6 s, reset
+with no panic delay. Nothing kernel-side moved the needle — because
+nothing we changed was in the air. The control pair told the truth:
+
+- Stock kernel-only boot.img RAM-boots to full Android → the ABL
+  substitutes flashed init_boot for a missing ramdisk; `fastboot boot`
+  itself is fine.
+- Stock kernel + OUR ramdisk in the image ALSO boots full Android,
+  Android USB up 6 s after handoff → **the ABL never loaded our
+  ramdisk at all**. On this ABL, `fastboot boot` always boots the
+  flashed init_boot + vendor ramdisk.
+
+So attempts 1–7 ran our kernel with Android's ramdisk: handoff fine,
+rdinit=/rescue/mainline-init absent, fallback /init = Android first-
+stage init on a mainline kernel → fatal → its own reboot() → the
+7-s-black / 3-s-logo signature. Not a watchdog, not the clock sweep,
+not TrustZone. The beacon never fired because our initramfs never flew;
+qemu (which does load it) keeps proving the archive itself sound.
+
+Consequences kept: the single-LZ4 repack stands (the FLASHED chain is
+vendor LZ4 + our archive, where the boundary rule is real), QCOM_WDT=y
+stands (a module-less initramfs must feed the dog itself once we are
+actually in the air). Next flight: flash init_boot_b with our wrapped
+initramfs (first persistent write, stock image retained for restore),
+then `fastboot boot` a kernel-only image of our kernel — the full
+Ubuntu chain with still nothing permanent on boot_b.
