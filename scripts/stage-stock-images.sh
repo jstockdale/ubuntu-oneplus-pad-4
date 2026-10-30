@@ -51,15 +51,13 @@ device=$(printf '%s' "$post_build" | cut -d/ -f3 | cut -d: -f1)
 out=$stock_root/$build_id
 mkdir -p "$out"
 
-# --- extract the payload ------------------------------------------------------
-tmp=$(mktemp -d "$base/stock-payload.XXXXXX")
-cleanup() { rm -rf -- "$tmp"; }
-trap cleanup EXIT
-
-echo "extracting payload.bin from ${ota##*/}"
-unzip -q "$ota" payload.bin -d "$tmp"
-payload-dumper-go -partitions "$partitions" -output "$out" \
-	"$tmp/payload.bin" >/dev/null
+# --- extract the partitions ---------------------------------------------------
+# payload-dumper-go reads the payload from inside the OTA zip directly (the
+# payload is stored uncompressed, so the zip is seekable); extracting a
+# ~7 GiB payload.bin first doubles the disk cost for nothing — and on a
+# tmpfs /tmp it simply does not fit.
+echo "extracting partitions from ${ota##*/}"
+payload-dumper-go -partitions "$partitions" -output "$out" "$ota" >/dev/null
 
 for img in boot init_boot; do
 	test -f "$out/$img.img" || {
