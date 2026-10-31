@@ -476,3 +476,25 @@ pattern must never reboot once a console exists.
 Next: Phase B — rootfs image, release boot+init_boot pair via
 android-gki, userdata (sda15) flash, first boot, factory-data capture
 first, then the desktop profile.
+
+## 2026-10-30 (late) — The rehearsal boots to login; three archive bugs dead
+
+The qemu full-system rig (diag kernel + release initramfs + the flashed
+userdata image, snapshot mode) earned its keep three times over before
+the tablet flew B.4:
+
+1. wait-for-root vanishes from the archive silently (mkinitramfs's own
+   unconditional copy_exec loses it in the chroot) — now placed by our
+   last-word zzz hook and gated by make-initramfs.
+2. 26.04's wait-for-root binary links libudev and resolves through
+   udevd — structurally incompatible with the udev-less archive.
+   Replaced with a blkid shim honoring the same contract (wait for
+   spec, print TYPE).
+3. Our own conf.d shipped ROOTFLAGS=rw,noatime — the init script
+   splices ROOTFLAGS verbatim expecting the "-o" form, so the root
+   mount ran as `mount -r -t ext4 rw,noatime /dev/vda /root` and died
+   on usage. Latent since day one; found via the in-guest debug trace.
+   Options for / live in fstab.
+
+Final rehearsal: resolve, mount, switch_root, systemd, zero failed
+units, "ubuntu-iceland login:". Bundle init_boot rebuilt (ad589da5…).
