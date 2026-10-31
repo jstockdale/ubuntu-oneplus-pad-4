@@ -520,3 +520,46 @@ no rebuilds; (2) base services; (3) storage writes — the booted system
 is the only configuration that writes UFS (journal flush, online
 resize), the initramfs flights never wrote a byte; testable with a
 read-only boot if classes 1-2 clear.
+
+## 2026-10-31 — v18/v20 verdicts; v21 scrapped on the pad; v22 is the rig
+
+v18 (udevd + trigger masked) reached multi-user and graphical target,
+only pd-mapper failed, and lived until we stopped watching. Killer
+narrowed to what udev's coldplug does: load every module the DT
+aliases ask for. Two misreadings along the way — the flight was twice
+declared dead while its screen log was still growing. Rule: read the
+whole log; a stall ("waiting for two dev units") is not a death.
+
+v20 (only the trigger masked) stalled on device units: pre-existing
+devices are announced ONLY by the coldplug trigger, so masking it
+starves every dev-*.device — ttyGS0's getty included. Masking udev is
+therefore not a shippable mitigation, just a diagnostic lever.
+
+The parade, computed instead of guessed: 211 DT compatibles from the
+live DTB crossed with modules.alias "of:" entries → 28 loadable
+modules; +ath12k +btqca (non-of paths) → 30 blacklisted.
+
+v21 was built with module_blacklist= and scrapped before flying:
+that list is enforced in the kernel's load_module() — a listed module
+is -EPERM for EVERY caller, our bisect modprobes included. v22 swaps
+in modprobe.blacklist=, the kmod-level list: udev coldplug applies it
+(KMOD_PROBE_APPLY_BLACKLIST), explicit modprobe by name bypasses it.
+Same safety, one-flight interactive bisect.
+
+Bisect ladder (least → most suspect; probe, settle ~20 s, next):
+qcom_rng, leds_qcom_flash, leds_qcom_lpg, pci_pwrctrl_pwrseq,
+pwrseq_qcom_wcn, nt36536_ts, i2c_qcom_cci, phy_qcom_mipi_csi2,
+spi_geni_qcom, pinctrl_sm8650_lpass_lpi, qcom_camss, hci_uart, btqca,
+fastrpc, snd_soc_tfa9865, snd_soc_wcd939x, soundwire_qcom,
+snd_soc_lpass_tx_macro, snd_soc_lpass_rx_macro, snd_soc_lpass_va_macro,
+snd_soc_lpass_wsa_macro, q6prm_clocks, q6prm, q6apm_dai,
+q6apm_lpass_dais, snd_q6apm, snd_soc_sc8280xp, ipa, ath12k, and LAST
+qcom_q6v5_pas — the TZ PAS remoteproc boot, the one class the Fedora
+port keeps out of early boot, and the mechanism that best explains a
+silent secure-side reset. The module whose probe resets the tablet is
+the killer; the durable fix is a rootfs modprobe.d blacklist until its
+bring-up phase.
+
+Also landed: device 0.2.10 drops serial-getty@ttyGS0's BindsTo on the
+udev device unit and waits for the node itself — v18 was a live system
+nobody could type into; never again.
