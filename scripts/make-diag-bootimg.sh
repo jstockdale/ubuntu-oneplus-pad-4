@@ -120,7 +120,7 @@ new_args = old_args.replace(
     'clk_ignore_unused pd_ignore_unused '
     'initcall_blacklist=clk_disable_unused,genpd_power_off_unused,'
     'regulator_init_complete,of_platform_sync_state_init fw_devlink=off '
-    'arm-smmu.disable_bypass=0 loglevel=7')
+    'arm-smmu.disable_bypass=0 systemd.mask=NetworkManager.service systemd.mask=wpa_supplicant.service systemd.mask=pd-mapper.service systemd.mask=qrtr-ns.service systemd.mask=snapd.service systemd.mask=snapd.seeded.service systemd.mask=avahi-daemon.service loglevel=7')
 
 # ABL's live splash as a framebuffer console (the Fedora port's measured
 # recipe: MDP at 650 MHz needs MMCX TURBO, dispcc is fed by MX/MXC, and
