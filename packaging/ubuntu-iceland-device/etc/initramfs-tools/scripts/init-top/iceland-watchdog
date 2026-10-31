@@ -9,12 +9,17 @@ prereqs() { echo "$PREREQ"; }
 case "$1" in
 	prereqs) prereqs; exit 0 ;;
 esac
+# The exact pattern flights 15-18 survived on for minutes: the magic
+# character every two seconds (each open-V-close asks the core to stop
+# the dog; where the hardware refuses, it still counts as a ping).
+# printf-1 every 5 s plus a systemd RuntimeWatchdogSec were both tried
+# and measurably died earlier; stay with what the hardware accepts.
 (
 	while :; do
 		for w in /dev/watchdog0 /dev/watchdog; do
-			[ -e "$w" ] && printf 1 > "$w" 2>/dev/null
+			[ -e "$w" ] && printf V > "$w" 2>/dev/null
 		done
-		sleep 5
+		sleep 2
 	done
 ) 2>/dev/null &
 exit 0
