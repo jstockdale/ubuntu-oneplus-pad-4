@@ -1,0 +1,40 @@
+From: Ubuntu iceland port <jstockdale@gmail.com>
+Subject: [PATCH] watchdog: qcom: stop a bootloader-armed watchdog at probe
+
+The OnePlus Pad 4's ABL hands off with the (hypervisor-emulated) APSS
+watchdog armed. The existing probe path re-arms it and relies on the
+core to keep it fed, but on this platform the deadline still expires
+~30 s later, and userspace open/ping/close cycles shorten the fuse
+further. Upstream U-Boot took the same decision for Snapdragon
+("watchdog: qcom: stop watchdog by default"): stop a running watchdog
+at probe; anything that wants one running can open the device and own
+it on purpose.
+
+diff --git a/drivers/watchdog/qcom-wdt.c b/drivers/watchdog/qcom-wdt.c
+index 4eb1bf979012..72993d34a712 100644
+--- a/drivers/watchdog/qcom-wdt.c
++++ b/drivers/watchdog/qcom-wdt.c
+@@ -340,15 +340,15 @@ static int qcom_wdt_probe(struct platform_device *pdev)
+ 	watchdog_init_timeout(&wdt->wdd, 0, dev);
+ 
+ 	/*
+-	 * If WDT is already running, call WDT start which
+-	 * will stop the WDT, set timeouts as bootloader
+-	 * might use different ones and set running bit
+-	 * to inform the WDT subsystem to ping the WDT
++	 * The bootloader can leave the WDT running (measured on the
++	 * OnePlus Pad 4: ABL arms it and the hypervisor-emulated timer
++	 * bites ~30 s after the re-arm below, with userspace pings only
++	 * making it worse). Do what U-Boot does on Snapdragon since
++	 * 2026: stop it outright; userspace that wants a watchdog can
++	 * open and own it deliberately.
+ 	 */
+-	if (qcom_wdt_is_running(&wdt->wdd)) {
+-		qcom_wdt_start(&wdt->wdd);
+-		set_bit(WDOG_HW_RUNNING, &wdt->wdd.status);
+-	}
++	if (qcom_wdt_is_running(&wdt->wdd))
++		qcom_wdt_stop(&wdt->wdd);
+ 
+ 	ret = devm_watchdog_register_device(dev, &wdt->wdd);
+ 	if (ret)
