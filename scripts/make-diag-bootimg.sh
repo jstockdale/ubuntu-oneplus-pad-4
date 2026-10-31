@@ -185,6 +185,12 @@ print('DTS: splash framebuffer console node added')
 # alone entirely; consumers fall back to direct DMA.
 text += '\n&apps_smmu {\n\tstatus = "disabled";\n};\n'
 print('DTS: apps_smmu disabled for the diag')
+
+# v17: the NT36536 TDDI touch driver probes against a panel that never
+# comes (display driver off in the diag), retrying exactly where every
+# post-boot death lands; disable it for the single-variable test.
+text += '\n&spi19 {\n\tstatus = "disabled";\n};\n'
+print('DTS: spi19/touch disabled for the diag')
 assert old_args in text, 'bootargs line drifted; refit the diagnostic edit'
 text = text.replace(old_args, new_args)
 
