@@ -563,3 +563,43 @@ bring-up phase.
 Also landed: device 0.2.10 drops serial-getty@ttyGS0's BindsTo on the
 udev device unit and waits for the node itself — v18 was a live system
 nobody could type into; never again.
+
+## 2026-10-31 — Flight v22: alive, loginless; the T+60 link bounce
+
+v22 booted clean in ~8 s: full udev, coldplug done, zero failed units,
+getty on ttyGS0, prompt on the host. It then LIVED — from boot to the
+deliberate unplug five minutes later. Two independent proofs now stand
+(v18, v22): the coldplug module parade kills the box; everything else
+is innocent.
+
+Nobody could type into the prompt. Audit of the whole serial path
+against known good: u_serial.c (gs_open / gs_start_io / gs_start_rx /
+gserial_connect / gserial_disconnect) is mainline-identical; config
+carries U_SERIAL_CONSOLE + G_SERIAL + F_ACM correctly; the DT pins
+dr_mode="peripheral" and deletes usb-role-switch (so no UCSI role
+flip is possible); the prompt itself proves gs_start_io succeeded —
+RX was armed on the first attach. No code defect found.
+
+The host journal held the real event: the gadget link BOUNCED once at
+T+~60 s (13:54:04 disconnect, 13:54:06 re-enumerate; no reboot — the
+same boot continued). The first screen died with its port; a second
+listener attached to the new port and never received a byte. On
+disconnect u_serial calls tty_hangup(), so agetty was restarted by
+systemd — its reprinted prompt SHOULD have reached attach #2. Its
+absence is the one genuine device-side anomaly. Whether typing was
+also dead before the bounce is unknown (the two screens are
+indistinguishable to the operator). Host-side injection probes never
+reached the wire (sandbox EACCES; screen holds the port), so they
+exonerate nothing.
+
+Attach #2 then stayed up 4.5 min: the bounce is ONE-SHOT, not
+periodic. Candidates, ranked: deferred-probe-timeout cleanup at T+60;
+gadget-side suspend mishandling; host autosuspend escalation;
+pmic_glink aux probing (role flip excluded by DT). The tablet kept a
+persistent journal (journal-flush ran) — the previous-boot kernel log
+on sda15 names the culprit next login.
+
+Next flight re-flies the same v22 image with a reattaching listener,
+types within 30 s of the prompt (pre-bounce RX test), and tests again
+after the bounce; if even pre-bounce typing is dead, a raw tee/cat
+split test isolates host vs device without screen in the path.
