@@ -66,11 +66,25 @@ test -f "$beacon" || { echo "missing $beacon" >&2; exit 1; }
 # Diagnostic kernel: edit the worktree DTS, build incrementally, revert
 # ---------------------------------------------------------------------------
 
-[ -z "$(git -C "$kernel_tree" status --porcelain)" ] || {
-	echo "kernel worktree is not pristine: $kernel_tree" >&2
-	echo 'rerun scripts/build-mainline-kernel.sh to reset it' >&2
-	exit 1
-}
+# Recreate the worktree at the pinned commit and apply the RELEASE
+# patches, exactly as build-mainline-kernel.sh does — the diag edits go
+# on top, so the diag kernel always carries the release fixes too.
+commit=$(git -C "$kernel_src" rev-parse HEAD)
+if [ -d "$kernel_tree" ]; then
+	git -C "$kernel_src" worktree remove --force "$kernel_tree" 2>/dev/null || \
+		rm -rf -- "$kernel_tree"
+fi
+git -C "$kernel_src" worktree prune
+git -C "$kernel_src" worktree add --detach "$kernel_tree" "$commit"
+shopt -s nullglob
+for patch in "$repo"/kernel/patches/*.patch; do
+	echo "applying ${patch##*/}"
+	git -C "$kernel_tree" apply --index "$patch" || {
+		echo "${patch##*/} no longer applies" >&2
+		exit 1
+	}
+done
+shopt -u nullglob
 revert_dts() { git -C "$kernel_tree" checkout -- "$dts" 2>/dev/null || true; }
 trap revert_dts EXIT
 
@@ -79,7 +93,7 @@ import sys
 path = sys.argv[1]
 text = open(path).read()
 
-old_args = ('bootargs = "rdinit=/rescue/mainline-init panic=0 '
+old_args = ('bootargs = "rdinit=/rescue/mainline-init '
             'loglevel=7 log_buf_len=2M bootconfig";')
 # panic=10: a post-handoff panic becomes a visible reboot.
 # console=ttyGS0: the serial-gadget console (USB_G_SERIAL + the already-set
@@ -102,11 +116,11 @@ old_args = ('bootargs = "rdinit=/rescue/mainline-init panic=0 '
 # them whatever pd_ignore_unused says, and the live splash scanout (and
 # whatever else ABL left running) dies with it.
 new_args = old_args.replace(
-    'panic=0', 'console=tty0 console=ttyGS0 initcall_debug '
+    'loglevel=7', 'console=tty0 console=ttyGS0 initcall_debug '
     'clk_ignore_unused pd_ignore_unused '
     'initcall_blacklist=clk_disable_unused,genpd_power_off_unused,'
     'regulator_init_complete,of_platform_sync_state_init fw_devlink=off '
-    'arm-smmu.disable_bypass=0 break=mount')
+    'arm-smmu.disable_bypass=0 loglevel=7')
 
 # ABL's live splash as a framebuffer console (the Fedora port's measured
 # recipe: MDP at 650 MHz needs MMCX TURBO, dispcc is fed by MX/MXC, and
@@ -225,8 +239,10 @@ install -m 0644 "$build_dir/.config" "$diag_out/kernel.config"
 printf '%s\n' "$diag_release" > "$diag_out/kernel.release"
 
 revert_dts
-[ -z "$(git -C "$kernel_tree" status --porcelain)" ] || {
-	echo "worktree still dirty after revert: $kernel_tree" >&2
+# After reverting the diag DTS edits the worktree holds exactly the
+# applied release patches (staged); unstaged changes mean a bad revert.
+[ -z "$(git -C "$kernel_tree" diff --name-only)" ] || {
+	echo "worktree has unstaged changes after revert: $kernel_tree" >&2
 	exit 1
 }
 

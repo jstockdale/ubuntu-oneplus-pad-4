@@ -13,7 +13,7 @@
 # Everything removed here is still present in the real root filesystem.
 # The udev removal is the big one, and it is by design, verified against
 # the shipped scripts: wait_for_udev() no-ops when udevadm is absent,
-# resolve_device() maps LABEL= through blkid directly, devtmpfs provides
+# root resolution needs wait-for-root (klibc, kept), devtmpfs provides
 # the nodes, and local_device_setup's polling loop is the documented
 # fallback when wait-for-root is not there. kmod goes with it: a
 # zero-module initramfs loads nothing, and kmod was libcrypto's other
@@ -56,7 +56,6 @@ for f in \
 	usr/bin/kmod \
 	usr/sbin/modprobe usr/sbin/depmod usr/sbin/insmod \
 	usr/sbin/rmmod usr/sbin/lsmod usr/sbin/modinfo \
-	usr/sbin/wait-for-root \
 	scripts/init-top/udev \
 	scripts/init-bottom/udev; do
 	rm -rf "${DESTDIR:?}/$f"
