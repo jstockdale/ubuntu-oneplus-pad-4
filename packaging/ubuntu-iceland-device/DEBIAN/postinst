@@ -12,6 +12,9 @@ case "$1" in
 		# also runs inside mmdebstrap's chroot, where systemctl enable works
 		# but start would not.
 		if command -v systemctl >/dev/null 2>&1; then
+			# Pick up unit drop-ins (serial-getty@ttyGS0) on a live
+			# system; fails harmlessly in a build chroot (no pid 1).
+			systemctl daemon-reload >/dev/null 2>&1 || true
 			systemctl enable ubuntu-iceland-grow-rootfs.service >/dev/null 2>&1 || true
 			# The gadget unit, its getty, and networkd for usb0: the only
 			# access path on a headless first boot.
