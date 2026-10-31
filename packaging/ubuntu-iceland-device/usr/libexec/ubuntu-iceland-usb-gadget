@@ -14,6 +14,15 @@ set -u
 G=/sys/kernel/config/usb_gadget/iceland
 mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
 
+# The initramfs debug gadget survives switch_root still bound to the one
+# UDC; take the controller over or our bind below fails silently.
+D=/sys/kernel/config/usb_gadget/iceland-dbg
+if [ -d "$D" ]; then
+	echo "" > "$D/UDC" 2>/dev/null || true
+	rm -f "$D/configs/c.1/acm.GS0" 2>/dev/null || true
+	rmdir "$D/configs/c.1/strings/0x409" "$D/configs/c.1" 		"$D/functions/acm.GS0" "$D/strings/0x409" "$D" 2>/dev/null || true
+fi
+
 [ -d "$G" ] && exit 0
 mkdir -p "$G" || exit 0
 echo 0x1d6b > "$G/idVendor"
