@@ -9,12 +9,41 @@ case "$1" in
 	prereqs) prereqs; exit 0 ;;
 esac
 
-if [ ! -e "${DESTDIR}/usr/sbin/wait-for-root" ] && \
-   [ ! -e "${DESTDIR}/sbin/wait-for-root" ]; then
-	mkdir -p "${DESTDIR}/usr/sbin"
-	cp -p /usr/lib/initramfs-tools/bin/wait-for-root \
-		"${DESTDIR}/usr/sbin/wait-for-root" 2>/dev/null || true
-fi
+# initramfs-tools' own wait-for-root binary is linked against libudev
+# and resolves through udevd — neither exists in this udev-less
+# archive (measured: "error while loading shared libraries:
+# libudev.so.1", then an empty FSTYPE feeds mount a malformed -t).
+# Replace it outright with a blkid shim honoring the same contract:
+# wait up to $2 seconds for $1 (LABEL=/UUID=/PARTUUID=//dev/...),
+# print the filesystem TYPE on stdout, exit 0; print nothing and
+# exit 1 on timeout.
+mkdir -p "${DESTDIR}/usr/sbin"
+rm -f "${DESTDIR}/usr/sbin/wait-for-root" "${DESTDIR}/sbin/wait-for-root" 2>/dev/null || true
+cat > "${DESTDIR}/usr/sbin/wait-for-root" <<'SHIM'
+#!/bin/sh
+spec="$1"
+slumber="${2:-30}"
+n=0
+while [ "$n" -lt "$slumber" ]; do
+	case "$spec" in
+	/dev/*)
+		dev="$spec"
+		[ -b "$dev" ] || dev=
+		;;
+	*)
+		dev=$(blkid -l -t "$spec" -o device 2>/dev/null)
+		;;
+	esac
+	if [ -n "$dev" ] && [ -b "$dev" ]; then
+		blkid -o value -s TYPE "$dev" 2>/dev/null
+		exit 0
+	fi
+	sleep 1
+	n=$((n + 1))
+done
+exit 1
+SHIM
+chmod 0755 "${DESTDIR}/usr/sbin/wait-for-root"
 
 {
 	echo "== zzz-iceland-ensure $(date -u +%H:%M:%S)"
