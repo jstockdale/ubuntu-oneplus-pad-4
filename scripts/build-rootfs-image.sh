@@ -33,6 +33,21 @@ test -n "$kernel_release" || {
 	exit 1
 }
 test -d "$rootfs/etc" || { echo "missing rootfs: $rootfs" >&2; exit 1; }
+
+# Stale chroot mounts stack: every past regen mounted over any leftover and
+# removed only its own layer, so peel ALL layers before anything (the size
+# walk included) touches the tree.  A busy mount here is a hard stop.
+for m in proc dev sys; do
+	n=0
+	while mountpoint -q "$rootfs/$m" 2>/dev/null; do
+		umount "$rootfs/$m" 2>/dev/null || { sleep 1; umount "$rootfs/$m" 2>/dev/null; } || {
+			echo "$rootfs/$m is mounted and busy; resolve before imaging" >&2
+			exit 1
+		}
+		n=$((n + 1))
+		[ "$n" -gt 32 ] && { echo "$rootfs/$m: unmount loop stuck" >&2; exit 1; }
+	done
+done
 test -d "$rootfs/usr/lib/modules/$kernel_release" || \
 	test -d "$rootfs/lib/modules/$kernel_release" || {
 	echo "rootfs has no modules for $kernel_release" >&2
@@ -99,15 +114,6 @@ trap release_mount EXIT
 # instead (observed: a lazily-detached /proc from an earlier regen fed the
 # host's procfs to this tar).  --one-file-system below is the belt to this
 # suspender.
-for m in proc dev sys; do
-	if mountpoint -q "$rootfs/$m"; then
-		umount "$rootfs/$m" 2>/dev/null || { sleep 2; umount "$rootfs/$m" 2>/dev/null; } || {
-			echo "$rootfs/$m is still mounted and busy; resolve before imaging" >&2
-			exit 1
-		}
-	fi
-done
-
 echo 'copying the rootfs'
 # --xattrs-include='*': GNU tar otherwise drops security.capability in
 # silence, and the image ships a ping without cap_net_raw (the gts9u port
