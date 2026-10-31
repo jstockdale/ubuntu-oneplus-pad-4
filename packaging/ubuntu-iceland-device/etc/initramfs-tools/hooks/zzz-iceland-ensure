@@ -1,0 +1,24 @@
+#!/bin/sh
+# Last-word hook (zzz- sorts after every other hook): guarantee the
+# pieces the boot cannot live without are in the staging tree, whatever
+# earlier stages did, and leave a staging snapshot in the build
+# environment's /tmp for post-mortems.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+if [ ! -e "${DESTDIR}/usr/sbin/wait-for-root" ] && \
+   [ ! -e "${DESTDIR}/sbin/wait-for-root" ]; then
+	mkdir -p "${DESTDIR}/usr/sbin"
+	cp -p /usr/lib/initramfs-tools/bin/wait-for-root \
+		"${DESTDIR}/usr/sbin/wait-for-root" 2>/dev/null || true
+fi
+
+{
+	echo "== zzz-iceland-ensure $(date -u +%H:%M:%S)"
+	ls -la "${DESTDIR}/usr/sbin/" 2>&1
+	ls -la "${DESTDIR}/sbin" 2>&1
+} > /tmp/iceland-staging-snapshot.txt 2>&1 || true
+exit 0
