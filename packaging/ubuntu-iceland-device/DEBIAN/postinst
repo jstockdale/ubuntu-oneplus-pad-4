@@ -3,6 +3,10 @@ set -e
 
 case "$1" in
 	configure)
+		# 0.2.7..0.2.8 shipped a watchdog feeder as a conffile; dpkg
+		# leaves dropped conffiles on disk, and an obsolete feeder in
+		# the hook dir would ride into every initramfs. Remove it.
+		rm -f /etc/initramfs-tools/scripts/init-top/iceland-watchdog
 		# The grow service is enabled by the rootfs build for images; this
 		# covers an apt (re)install on a running device.  Guarded: postinst
 		# also runs inside mmdebstrap's chroot, where systemctl enable works
