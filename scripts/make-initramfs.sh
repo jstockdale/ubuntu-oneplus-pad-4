@@ -104,6 +104,9 @@ while i < len(raw):
     while i < len(raw) and raw[i:i+1] == b'\x00':
         i += 1
 print(f'single LZ4-legacy frame, {len(names)} entries decoded')
+if not any(n.endswith('sbin/wait-for-root') for n in names):
+    sys.exit('the initramfs lacks wait-for-root; root resolution would '
+             'mount an empty device (the full-system rehearsal failure)')
 if 'rescue/mainline-init' not in names:
     sys.exit('the initramfs lacks rescue/mainline-init; the '
              'iceland-rescue-init hook from ubuntu-iceland-device did not '

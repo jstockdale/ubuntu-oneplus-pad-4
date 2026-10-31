@@ -14,3 +14,16 @@ esac
 
 mkdir -p "${DESTDIR}/rescue"
 ln -sf /init "${DESTDIR}/rescue/mainline-init"
+
+# 26.04's mkinitramfs is supposed to install wait-for-root itself but has
+# been observed losing it silently (klibc-linked; copy_exec's ldd walk).
+# The local boot flow resolves root THROUGH it — without it the root
+# device never resolves and mount runs empty — so copy it here,
+# deliberately and loudly.  make-initramfs.sh gates on its presence.
+copy_exec /usr/lib/initramfs-tools/bin/wait-for-root /sbin || true
+if [ ! -e "${DESTDIR}/sbin/wait-for-root" ] && \
+   [ ! -e "${DESTDIR}/usr/sbin/wait-for-root" ]; then
+	mkdir -p "${DESTDIR}/usr/sbin"
+	cp -p /usr/lib/initramfs-tools/bin/wait-for-root \
+		"${DESTDIR}/usr/sbin/wait-for-root"
+fi
