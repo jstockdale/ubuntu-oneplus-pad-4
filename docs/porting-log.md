@@ -498,3 +498,25 @@ the tablet flew B.4:
 
 Final rehearsal: resolve, mount, switch_root, systemd, zero failed
 units, "ubuntu-iceland login:". Bundle init_boot rebuilt (ad589da5…).
+
+## 2026-10-31 — The post-boot reset: evidence table and suspect ladder
+
+Constant: every boot that reaches the full system dies 17-33 s after
+kernel start; every boot held in the initramfs lives indefinitely; the
+bootloader-era hangs (attempts 1-3) sat 90+ s without reset, so no
+bootloader-armed fuse is in play. The killer is a booted-system actor.
+
+Cleared by single-variable flights: the watchdog (v16/v17 carry a
+probe-time stop patch; deaths unchanged), the NT36536 TDDI touch probe
+(v17 disables its SPI; died on schedule — despite a seductive
+mechanism: the module-only-in-booted-system timing, and a probe that
+resets the live panel IC before deferring), every watchdog feeder
+variant (all shortened life or changed nothing), and the first
+service-mask flight (confounded by a feeder, rerun pending).
+
+Remaining classes: (1) udev's module parade — v18 masks udev entirely;
+if it lives, the bisect is interactive modprobe over the serial login,
+no rebuilds; (2) base services; (3) storage writes — the booted system
+is the only configuration that writes UFS (journal flush, online
+resize), the initramfs flights never wrote a byte; testable with a
+read-only boot if classes 1-2 clear.
