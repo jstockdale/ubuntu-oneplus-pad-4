@@ -95,11 +95,22 @@ release_mount() {
 }
 trap release_mount EXIT
 
+# A leftover chroot mount would get copied into the image: refuse loudly
+# instead (observed: a lazily-detached /proc from an earlier regen fed the
+# host's procfs to this tar).  --one-file-system below is the belt to this
+# suspender.
+for m in proc dev sys; do
+	if mountpoint -q "$rootfs/$m"; then
+		echo "$rootfs/$m is still mounted; umount it before imaging" >&2
+		exit 1
+	fi
+done
+
 echo 'copying the rootfs'
 # --xattrs-include='*': GNU tar otherwise drops security.capability in
 # silence, and the image ships a ping without cap_net_raw (the gts9u port
 # shipped exactly that for months before noticing).
-tar -C "$rootfs" --numeric-owner --acls \
+tar -C "$rootfs" --numeric-owner --acls --one-file-system \
 	--xattrs --xattrs-include='*' -cf - . \
 	| tar -C "$mnt" --numeric-owner --acls \
 	--xattrs --xattrs-include='*' -xf -
