@@ -7,4 +7,12 @@
 # a contract.
 ROOT=LABEL=UBPAD4_ROOT
 ROOTFSTYPE=ext4
-ROOTFLAGS=rw,noatime
+# No ROOTFLAGS: the init script injects it VERBATIM into the mount
+# command, expecting the "-o ..." form (the cmdline parser adds it:
+# rootflags=X becomes "-o X").  A bare option list becomes a stray
+# positional argument and the root mount fails with a usage error —
+# measured in the full-system rehearsal, trace line:
+#   mount -r -t ext4 rw,noatime /dev/vda /root
+# Mount options for / belong in the image's /etc/fstab, which already
+# carries noatime; the initramfs mounts read-only and systemd remounts
+# per fstab.
