@@ -1,0 +1,20 @@
+#!/bin/sh
+# Feed the ABL-armed, probe-re-armed watchdog from the first second of
+# userspace until systemd takes ownership (RuntimeWatchdogSec, shipped
+# alongside): the kernel's auto-feed worker does not engage on this
+# hardware. Each open-write-close is a ping; once systemd holds the
+# device our open fails EBUSY and the loop idles harmlessly.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+(
+	while :; do
+		for w in /dev/watchdog0 /dev/watchdog; do
+			[ -e "$w" ] && printf 1 > "$w" 2>/dev/null
+		done
+		sleep 5
+	done
+) 2>/dev/null &
+exit 0
