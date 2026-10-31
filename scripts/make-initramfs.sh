@@ -44,9 +44,14 @@ mount --bind /dev "$rootfs/dev"
 mount -t proc proc "$rootfs/proc"
 mount -t sysfs sys "$rootfs/sys"
 unmount_pseudo() {
-	umount -l "$rootfs/sys" 2>/dev/null || true
-	umount -l "$rootfs/proc" 2>/dev/null || true
-	umount -l "$rootfs/dev" 2>/dev/null || true
+	# Plain umount first: a lazy detach leaves the mount visible to the
+	# next step's tree walk (observed poisoning the image tar), and by
+	# trap time the chroot has exited so plain umount normally succeeds.
+	for m in sys proc dev; do
+		umount "$rootfs/$m" 2>/dev/null && continue
+		sleep 1
+		umount "$rootfs/$m" 2>/dev/null || umount -l "$rootfs/$m" 2>/dev/null || true
+	done
 }
 trap unmount_pseudo EXIT
 

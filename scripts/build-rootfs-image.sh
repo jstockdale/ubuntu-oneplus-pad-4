@@ -101,8 +101,10 @@ trap release_mount EXIT
 # suspender.
 for m in proc dev sys; do
 	if mountpoint -q "$rootfs/$m"; then
-		echo "$rootfs/$m is still mounted; umount it before imaging" >&2
-		exit 1
+		umount "$rootfs/$m" 2>/dev/null || { sleep 2; umount "$rootfs/$m" 2>/dev/null; } || {
+			echo "$rootfs/$m is still mounted and busy; resolve before imaging" >&2
+			exit 1
+		}
 	fi
 done
 
