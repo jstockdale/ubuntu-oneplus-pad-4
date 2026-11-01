@@ -763,3 +763,15 @@ issued — first standalone boot pending verification (battery pause).
 Restore at arm's reach: factory/fcap/part-boot_b.img. From here the
 tablet boots Ubuntu on power-on; fastboot boot remains for diag
 kernels, and slot flags are re-marked by qbootctl.service each boot.
+
+## 2026-10-31 — Phase B complete: standalone Ubuntu verified
+
+First flashed boot, on battery at 1%: power-on to Ubuntu with no PC.
+Zero failed units; slot _b re-marked Active/Successful/Bootable by
+qbootctl.service after the flash's flag reset — the protection loop
+closed exactly as designed. Gadget (fixed MAC enx026963656c68), getty
+and ssh all up; kernel console on the panel; battery telemetry live
+via ADSP battmgr. Three access paths, one write, full restore kit
+banked on Drive. Next: Phase C — display proper (GPU firmware, DSI
+PHY probe order), WLAN (pwrseq split-node XPU hunt), touch driver,
+audio, then GNOME/Wayland and Waydroid.
