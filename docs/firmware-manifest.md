@@ -50,3 +50,18 @@ Never stage a blob without recording sha256 + source here first.
 Prefer our own stock extraction; third-party copies only with
 published-hash corroboration from at least two independent sources
 (the AQE/vendor-pair standard).
+
+## Bluetooth (WCN7860 BT = "Brahma", staged 2026-11-01)
+
+Source: OUR unit's captured bluetooth_a partition
+(factory/fcap/part-bluetooth_a.img, vfat, image/ dir) — 26 brh* files
+staged verbatim to /lib/firmware/qca/ and banked in the overlay.
+Key hashes:
+- brhbtfw20.mbn bd2532555b88982cb9d0c24dfbe9224b57ae9e9d6c1c3d9b2b95af565334e5dd
+- brhbtnv20.bin 3b5e9f7ccb2999e811a4c34e4d3272c85a9f1645c4df6e14338c67de135b5b9d
+Loads verified on-device: BTFW.BRAHMA.2.0.1-00204, "QCA setup on UART
+is completed", bluez controller registered. Kernel patch 0006 renames
+the btqca WCN7860 request strings gng→brh to match stock (the infiniti
+0084 lineage uses brh; the chip's own firmware label says BRAHMA).
+Note: BT MAC currently a derived default; per-unit address lives in
+persist (excluded data) — wire later like the Fedora installer does.

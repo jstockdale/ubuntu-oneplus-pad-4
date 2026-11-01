@@ -1,0 +1,22 @@
+diff --git a/drivers/bluetooth/btqca.c b/drivers/bluetooth/btqca.c
+index 7f3358acaa50..4226b204b07d 100644
+--- a/drivers/bluetooth/btqca.c
++++ b/drivers/bluetooth/btqca.c
+@@ -850,7 +850,7 @@ int qca_uart_setup(struct hci_dev *hdev, uint8_t baudrate,
+ 		case QCA_WCN7860:
+ 			config.type = ELF_TYPE_PATCH;
+ 			snprintf(config.fwname, sizeof(config.fwname),
+-				 "qca/gngbtfw%02x.mbn", rom_ver);
++				 "qca/brhbtfw%02x.mbn", rom_ver);
+ 			break;
+ 		default:
+ 			snprintf(config.fwname, sizeof(config.fwname),
+@@ -948,7 +948,7 @@ int qca_uart_setup(struct hci_dev *hdev, uint8_t baudrate,
+ 			break;
+ 		case QCA_WCN7860:
+ 			qca_get_nvm_name_by_board(config.fwname, sizeof(config.fwname),
+-				 "gngbtnv", soc_type, ver, rom_ver, boardid);
++				 "brhbtnv", soc_type, ver, rom_ver, boardid);
+ 			break;
+ 		default:
+ 			snprintf(config.fwname, sizeof(config.fwname),
