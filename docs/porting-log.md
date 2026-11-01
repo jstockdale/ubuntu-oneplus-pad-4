@@ -728,3 +728,20 @@ earlier deaf-RX entries stand corrected. Discipline: exactly one
 listener; audit with lsof /dev/ttyACM0 before each flight. Still
 open and unrelated: the validation boot's missing enumeration, and
 flight A's one-shot T+60 re-enumeration.
+
+## 2026-10-31 — Validation-boot verdict: one chmod; 0.2.12
+
+The unreachable validation boot was healthy end to end: multi-user at
+T+1 s, all 27 freed modules coldplugged in parallel cleanly, DSP stack
+active (32 remoteproc/adsp lines, PDR avs/audio lookup -6 expected).
+The only failure: ubuntu-iceland-usb-gadget.service died at EXEC —
+the 0.2.11 deb shipped /usr/libexec/ubuntu-iceland-usb-gadget mode
+644 (status 203/EXEC, "Permission denied"). Latent packaging-tree
+regression, never caught because no package since 0.2.1 had been
+installed on-device until today. Tree audit found a second 644
+executable: hooks/zzz-iceland-ensure — the wait-for-root ensure hook,
+which mkinitramfs would have SILENTLY SKIPPED on the next on-device
+regen. Both fixed; 0.2.12 built with all six executables verified
+rwxr-xr-x inside the archive; on-device chmod issued over serial for
+the already-installed copies. Net: the parallel-coldplug gate PASSED;
+access fixed; next release boot is the B.5 go/no-go.
