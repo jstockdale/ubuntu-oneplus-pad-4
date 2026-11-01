@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 21:07:14 +0300
+Subject: [PATCH] arm64: dts: qcom: kaanapali-oneplus-iceland: fix the WCN7860
+ PMU supplies
+
+The WCN7860 power sequencer takes VDD_IO_1P2, VDD_ANT, VDD_AON,
+VDD_DIG, VDD_RFA_1P8, VDD_RFA_1P2 and VDD_CX. The node still used the
+WCN7850 names: it described a vddio supply that the WCN7860 sequencer
+never requests, fed VDD_AON from S1J and had no VDD_CX, so the boot log
+showed "supply vddcx not found, using dummy regulator" and Linux never
+voted for L2G.
+
+Wire the inputs as the vendor tree of this tablet does: VDD_AON from
+L2G (1.8 V) and VDD_CX from S1J, and drop the unused vddio supply. The
+board has no antenna-share supply, so VDD_ANT stays undescribed.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index 23d085e8762b..ccae84bf9513 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -466,12 +466,16 @@ wcn7860-pmu {
+ 		wlan-enable-gpios = <&tlmm 16 GPIO_ACTIVE_HIGH>;
+ 		bt-enable-gpios = <&pmh0104_j_e1_gpios 5 GPIO_ACTIVE_HIGH>;
+ 
+-		vddio-supply = <&vreg_l2g_1p8>;
++		/*
++		 * As stock's Wi-Fi node: AON from L2G (1.8 V), CX from S1J; the
++		 * board has no antenna-share supply (vddant).
++		 */
+ 		vddio1p2-supply = <&vreg_l3g_1p2>;
+-		vddaon-supply = <&vreg_s1j_0p8>;
++		vddaon-supply = <&vreg_l2g_1p8>;
+ 		vdddig-supply = <&vreg_s2j_0p8>;
+ 		vddrfa1p2-supply = <&vreg_s7f_1p2>;
+ 		vddrfa1p8-supply = <&vreg_s8f_1p8>;
++		vddcx-supply = <&vreg_s1j_0p8>;
+ 
+ 		clocks = <&rpmhcc RPMH_RF_CLK1>;
+ 
+-- 
+2.43.0
+
