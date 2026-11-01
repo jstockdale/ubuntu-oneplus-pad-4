@@ -41,7 +41,6 @@ vpu40_2v.mbn, adspr.jsn. Sourced from our stock extraction in Phase A.
 - WCN786x WLAN firmware + board files (ath12k) — blocked behind the
   pwrseq_qcom_wcn pin hunt (C3).
 - BT: ship stock blob under the kernel's requested gngbtfw20.mbn name.
-- Touch: novatek/novatek_nt36536_fw.bin (DTS names it) — C2.
 - Audio: LPASS topology + UCM2 profiles — C4.
 
 ## Rules
@@ -65,3 +64,14 @@ the btqca WCN7860 request strings gng→brh to match stock (the infiniti
 0084 lineage uses brh; the chip's own firmware label says BRAHMA).
 Note: BT MAC currently a derived default; per-unit address lives in
 persist (excluded data) — wire later like the Fedora installer does.
+
+## Touch (NT36536 TDDI, verified staged 2026-11-01, C2 T0)
+
+novatek/novatek_nt36536_fw.bin —
+5e9d96517199ce11d44db90436e5835fed7982031102f52a74b7230ad64d83e2
+(258048 B). Source: OUR odm.img /firmware/tp/25926/FW_NT36536_HUAXING.img
+("FwUp!" container, 80-byte header + 128-byte trailer stripped —
+transform recorded in configs/firmware/iceland.toml:165). Byte-identical
+to the Fedora repo copy and the phonewave port's pinned hash (triple
+corroboration). Already in out/rootfs-overlay and on the tablet; no
+per-unit calibration exists for this part (persist checked).
