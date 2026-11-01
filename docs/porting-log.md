@@ -712,3 +712,19 @@ exists (bytes sent before attach are gone), and enumeration timing
 varies boot to boot. Candidate fixes: larger gs_console buffer or
 log_buf replay via the beacon on connect; listener pre-arm via udev
 rule instead of poll loop.
+
+## 2026-10-31 — Deaf-RX "lottery" solved: concurrent host readers
+
+Operator-found: multiple listener loops/screen sessions (each restart
+left the prior one alive under its orphaned sudo shell) were attached
+to /dev/ttyACM0 simultaneously. Competing readers split the
+device-to-host byte stream: typed input reached the tablet and agetty
+echoed, but the echo was consumed by a hidden session, so the visible
+one looked deaf and its -L log stayed frozen. Fits every observation
+(usbmon showed host-to-device bulk completing; injected CRs never
+appeared in the watched log; "per-boot" pattern tracked which stale
+sessions existed at attach time). The USB PHY is exonerated; the
+earlier deaf-RX entries stand corrected. Discipline: exactly one
+listener; audit with lsof /dev/ttyACM0 before each flight. Still
+open and unrelated: the validation boot's missing enumeration, and
+flight A's one-shot T+60 re-enumeration.
