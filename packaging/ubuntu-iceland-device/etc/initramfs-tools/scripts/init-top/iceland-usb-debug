@@ -13,6 +13,12 @@ esac
 # registers its UDC asynchronously), so the setup polls for the UDC for up
 # to 30 seconds without ever delaying the boot itself.
 (
+	# Opt-in only (bootargs marker "iceland-dbg"): on release boots the
+	# composite gadget follows ~2 s later and the panel console exists,
+	# while this early bind caused a visible disconnect/reconnect when
+	# the access service replaced it (the host's NetworkManager dropped
+	# its profile on the bounce). Diag kernels carry g_serial anyway.
+	grep -q iceland-dbg /proc/cmdline 2>/dev/null || exit 0
 	mount -t configfs none /sys/kernel/config 2>/dev/null
 	G=/sys/kernel/config/usb_gadget/iceland-dbg
 	mkdir -p "$G" || exit 0

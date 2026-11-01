@@ -1,9 +1,19 @@
 # The USB gadget network: the tablet is 192.168.7.2, the host side is
 # conventionally 192.168.7.1 (assign it there; no DHCP on this link).
 # First-boot access path: ssh ubuntu@192.168.7.2 over the cable.
+#
+# The default route and DNS make the host's NAT usable the moment the
+# link exists, surviving reboots. Metric 1024 keeps this the fallback:
+# once WLAN lands, its lower-metric default route wins automatically.
 [Match]
 Name=usb0
 
 [Network]
 Address=192.168.7.2/24
 ConfigureWithoutCarrier=yes
+DNS=9.9.9.9
+DNS=1.1.1.1
+
+[Route]
+Gateway=192.168.7.1
+Metric=1024
