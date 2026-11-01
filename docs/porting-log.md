@@ -788,3 +788,26 @@ PD wall charger negotiates properly for real charge rates; pre-boot
 (off) charging is charger-firmware-handled below the OS. Known
 cosmetic: boot-time power_supply synthetic uevent EAGAIN; battmgr
 input current_now reads slightly above its advertised current_max.
+
+## 2026-11-01 — C0 complete; first Wayland desktop on glass
+
+C0 gate met: host NAT (wlo1 masquerade) + tablet default route/DNS →
+apt self-sufficient; first apt pass exposed a clock trap (epoch-pinned
+Sep 16 made resolute-security Release files "not valid yet" — always
+sync clock before judging apt); chrony kicked (online/burst/makestep)
+→ Stratum 3 NTS, true time; update clean (22 suites), upgrade applied,
+toolkit installed (weston kmscube mesa-utils evtest i2c-tools
+stress-ng); mDNS works (ubuntu-iceland.local); MM ignore rule in;
+single-listener discipline held.
+
+Then, same boot, no reboot: Weston 14 on KMS. Launch lore: needs
+XDG_RUNTIME_DIR provided, --tty is gone in 14, embedded-seatd builtin
+seat works headless, --continue-without-input required while touch is
+blacklisted, --renderer=pixman for the no-GPU path. Output DSI-1
+enabled (SDR, sRGB), desktop visible on the panel, and weston-flower
+runs as a live client — full pipeline client→compositor→KMS→DSI
+proven on CPU rendering. Bonus input inventory for C2: pmic_pwrkey
+(event0), pmic_resin (event1), gpio-keys (event2) — hardware buttons
+already deliver input events. Battery net-positive under desktop load
+(+364 mA at 2%, 28.0 C). Next: C1 proper — DSI lottery census once
+charged, then GPU firmware for real rendering.
