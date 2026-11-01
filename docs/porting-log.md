@@ -848,3 +848,13 @@ a high metric in 80-iceland-usb0.network so route/DNS survive reboots.
 
 C1 remaining: DSI PHY lottery census + probe-order fix (battery >20%
 first), backlight sweep. Then C2 (touch) is the road to GNOME.
+
+## 2026-11-01 — 0.2.14 installed: networking survives reboots
+
+Route (proto static, metric 1024) + DNS now ship in the .network file
+and applied live via postinst networkctl reload; internet verified
+with no manual steps. Beacon gadget now opt-in (iceland-dbg bootargs
+marker) in the packaged initramfs script — the flashed init_boot keeps
+the old beacon until its next refresh, covered meanwhile by host NM
+autoconnect-retries 0. Battery note: hours on the PC port still reads
+1-2% — PD wall charger overnight before the census.
