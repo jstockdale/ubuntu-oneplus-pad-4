@@ -624,3 +624,18 @@ bring-up. Mechanism TBD; identity confirmed.
 suspect). Next boot: write the 30-module modprobe.d blacklist onto
 the rootfs (makes the blacklist-less release kernel safe for the
 capture pull), then run the remainder ladder without pwrseq_qcom_wcn.
+
+## 2026-10-31 — Deaf-RX boot lottery, characterized
+
+The serial-input failure is decided once per boot: a bad boot is deaf
+(host->device) on its first attach, on the T+60 re-attach, after cable
+replug and after direct writes to the port, while device->host streams
+perfectly; a good boot hears from the first byte and stays good for
+hours. Replug re-runs usb_ep_enable + gs_start_io (fresh requests both
+sides), so connect-cycle state is exonerated — the poison lives below
+that, per boot. Suspects: HS-PHY init vs dwc3 ordering races under the
+diag cmdline (fw_devlink=off, initcall_blacklist, clk/pd_ignore), PHY
+tuning/efuse application. Mitigation tonight: press Enter at the
+prompt; deaf boot -> power-press (logind clean shutdown works
+loginless) and re-fly. May not reproduce on the release kernel's
+untouched cmdline; dedicated hunt after the parade is mapped.
