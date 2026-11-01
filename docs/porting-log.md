@@ -926,3 +926,35 @@ not missing evidence.
 Patches now permanent: 0003 (0167 DT supplies), 0004 (vendor 7860
 role list), 0005 (S1J 892 mV floor). The preserved flashed image:
 bundle/boot-e362bcf4-flashed-b5.img.
+
+## 2026-11-01 — WIFI WORKS: hypothesis 2 confirmed, chain complete
+
+Flight R2: release kernel #31 (bundle dd3de7d0…, patches 0001-0005),
+RAM-booted, normal environment. modprobe pwrseq_qcom_wcn over ssh:
+SURVIVED. The parked pwrctrl completed the chain: PCIe trained, WCN7860
+enumerated, staged firmware booted (WLAN.GNG.2.0-01536, fw 0x200b7fff),
+MHI mission mode, wlan0→wlp1s0. Scan saw the neighborhood (AP at 99%),
+explicit NM profile associated (nmcli inline-password over ssh needs
+the con-add form — no tty to prompt), DHCP 192.168.1.250, wifi default
+route (metric 600) beat usb0 (1024) by design, internet over air at
+22 ms, and ssh INTO the tablet over wifi works.
+
+Resolution: the diag cmdline WAS the killer context — the identical
+power-on that hard-reset four diag flights runs clean under the normal
+boot. The S1J-vote discriminator was real but environment-bound
+(pd/clk_ignore_unused + suppressed late regulator/genpd init turn a
+legal RPMh sequence lethal; exact interaction left as a documented
+open question — we ship the normal environment). Patches 0003-0005
+remain: correct supplies, correct roles, correct floor.
+
+Surfaced in the same flight: BT half now powers up and requests its
+firmware (gngbtfw20.mbn) — the known naming debt, queued; ath12k
+country-code warnings (sibling queue has fixes); wifi powersave is
+real on this firmware (pin tip commit) — inbound latency until tuned;
+iw not installed.
+
+CRITICAL SEQUENCING RULE until the new kernel is flashed: the rootfs
+blacklist MUST keep pwrseq_qcom_wcn — the flashed boot_b still runs
+the old #17 kernel whose DT would power the radio wrong at coldplug.
+Order: flash the new bundle to boot_b (after soak) → only then ship
+0.2.15 dropping the pwrseq blacklist for automatic wifi every boot.
