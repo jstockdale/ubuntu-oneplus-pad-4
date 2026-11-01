@@ -320,3 +320,46 @@ userdata.
 
 Every session ends with a `porting-log.md` entry: what was observed, which
 assumption it answered, what the next session starts with.
+
+## 9. Operating the flashed tablet (Phase B complete, 2026-11-01)
+
+The tablet now boots Ubuntu from power-on; fastboot is only for diag
+RAM boots and future kernel updates (RAM-boot gate first, always).
+
+- Access, in order of preference: ssh ubuntu@192.168.7.2 (or
+  ubuntu-iceland.local) over the gadget network; the serial getty on
+  /dev/ttyACM0; the panel console (when the DSI lottery wins — census
+  pending). Host side is automatic: fixed gadget MAC → iface
+  enx026963656c68 → NM profile "iceland-usb" (autoconnect-retries 0).
+- ONE serial listener only. Before any flight:
+  `sudo lsof /dev/ttyACM0` and kill extras — concurrent readers eat
+  the echo and look exactly like a dead console (the "deaf-RX"
+  false mystery of 2026-10-31).
+- Clean shutdown from any state: single short power press (logind).
+  Hard reset: hold power+vol-up. On a charger the tablet auto-boots
+  after poweroff.
+- Internet on the tablet: host NAT (ip_forward + MASQUERADE out the
+  uplink, FORWARD accepts for 192.168.7.0/24) — not yet persistent on
+  the host; tablet side ships in 0.2.14 (route metric 1024 + DNS).
+- Clock: syncs via NTP once internet is up. If apt says Release files
+  are "not valid yet", the clock has not synced — fix time first
+  (chronyc online/burst/makestep), never force apt.
+- Slot discipline: qbootctl.service re-marks _b each boot. Slot _a is
+  factory-flagged unbootable: there is NO automatic fallback. Recovery
+  is button-combo fastboot + `fastboot flash boot_b
+  /srv/ubuntu-iceland/factory/fcap/part-boot_b.img` (sha-verified
+  stock copy; init_boot_b restore per section 7).
+- Factory restore kit: /srv/ubuntu-iceland/factory/fcap (169 images +
+  SHA256SUMS) and the 723 MB tarball on Drive
+  (oneplus-pad4-iceland-2fe096b5-factory-2026-10-31.tar.zst,
+  sha256 25749ef9…).
+- Module policy lives in /usr/lib/modprobe.d/iceland.conf (package):
+  pwrseq_qcom_wcn (probe hard-resets the SoC — XPU pin suspicion,
+  split-node hunt in C3) and nt36536_ts (probe resets the panel IC —
+  C2). Manual modprobe bypasses blacklists by design: that is the
+  bisect lever, use it deliberately.
+- GPU: firmware per docs/firmware-manifest.md. Weston launch for
+  tests: mkdir/export XDG_RUNTIME_DIR, --continue-without-input while
+  touch is blacklisted (no --tty in weston 14); stop with
+  `pkill -x weston` (never pkill -f from an ssh one-liner — it
+  matches itself).
