@@ -878,3 +878,51 @@ transcribed from the Fedora MANIFEST.tsv). New rail from the research:
 never dump whole-TLMM pinctrl/gpio debugfs on this device. Caveat for
 the matrix: flight patches live in kernel/patches/ which release
 builds also apply — remove 90-flight.patch before any release build.
+
+## 2026-11-01 — The WLAN power-on hunt: a day of falsifications
+
+F0/F1 (diag, zero-change): all four bind-time writes ran under trace,
+probe returned 0, boot lived — probe-time theory dead, dbd674 revert
+(v23) obsolete before flying. The deferred PCIe bridge then probed,
+found the WCN alive on bootloader-leftover power, ath12k_wifi7 auto
+loaded (cmdline blacklist says "ath12k"; the driver is ath12k_wifi7 —
+gap noted), MHI powered on, and the SoC reset — at that time with no
+firmware staged.
+
+Supply archaeology: our DT and 7860 driver support both descend from
+map220v (vddio-flavored, self-consistent); the Fedora port pairs the
+infiniti driver list (vddcx-flavored) with their 0167 DT remap. We
+adopted 0167 alone (v24) — wrong: our driver ignores vddcx, so S1J
+(the radio's core rail) was never enabled; chip half-alive, link
+trains nothing ("Device not found"), system lives. v25 same (module
+trap: make-diag builds Image+dtbs only — the 0004 driver fix compiled
+into nothing; rootfs module replaced by hand afterwards, original
+kept at /root/pwrseq-qcom-wcn.ko.zst.orig). v25B (true pair, full
+power-off first): instant silent reset at the pwrctrl modprobe.
+
+The discriminator, 4/4 across flights: every configuration that votes
+S1J from Linux resets instantly and silently; every one that leaves
+S1J alone survives (v24, v25 alive; original map, v25B dead). S2J on
+the same PMIC votes fine — it is S1J itself, not the PMIC path.
+
+Verification pass (user-ordered) killed my favorite mechanism: the
+rpmh readback feature is IN v7.3-rc7 (merge-base proof) — the working
+Fedora stack shares it, and their S1J floor is the same 400 mV. The
+mode-order fix (9561d678) is in our pin and absent from theirs.
+Mechanism: unproven. v26 (S1J floor raised to the OnePlus-15 family
+value, 892 mV — patch 0005, correct regardless): reset anyway.
+Falsified as the trigger.
+
+Standing hypothesis: the diag cmdline environment itself
+(pd_ignore_unused, clk_ignore_unused, suppressed regulator/genpd late
+init, fw_devlink=off) — every S1J conviction ran under it; no sibling
+ever powers this radio under such a configuration. Test in flight:
+release kernel rebuilt with 0003+0004+0005, RAM-booted (nothing
+flashed), chain completed over ssh in the normal environment. Dying
+diag boots leave no journal of the death (first-second flush only)
+and no serial bytes — the reset outruns all I/O; this is expected,
+not missing evidence.
+
+Patches now permanent: 0003 (0167 DT supplies), 0004 (vendor 7860
+role list), 0005 (S1J 892 mV floor). The preserved flashed image:
+bundle/boot-e362bcf4-flashed-b5.img.
