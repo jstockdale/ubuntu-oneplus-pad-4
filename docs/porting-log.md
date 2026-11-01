@@ -700,3 +700,15 @@ cosmetic; ignore-rule filed for the hardening pass.
 
 Remaining unknown before B.5, by design: parallel coldplug of the 27
 freed modules under the release kernel — the next validation flight.
+
+## 2026-10-31 — Tracked: early serial output loss on some boots
+
+Operator-observed: some boots show less early console output than
+others on the host listener. Known contributors to fold into the
+hardening pass alongside the deaf-RX lottery: the u_serial console
+buffer is bounded (early lines overrun and drop until the host
+enumerates and drains), the listener attaches only once /dev/ttyACM0
+exists (bytes sent before attach are gone), and enumeration timing
+varies boot to boot. Candidate fixes: larger gs_console buffer or
+log_buf replay via the beacon on connect; listener pre-arm via udev
+rule instead of poll loop.
