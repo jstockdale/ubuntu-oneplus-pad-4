@@ -603,3 +603,24 @@ Next flight re-flies the same v22 image with a reattaching listener,
 types within 30 s of the prompt (pre-bounce RX test), and tests again
 after the bounce; if even pre-bounce typing is dead, a raw tee/cat
 split test isolates host vs device without screen in the path.
+
+## 2026-10-31 — The bisect convicts pwrseq_qcom_wcn (twice)
+
+Factory capture first: 167 images + SHA256SUMS in /var/fcap on the
+tablet (6.3 GB) — GPTs of all six LUNs, full lun-sd[b-f] images, every
+partition <= 2 GiB including persist, devinfo, nonmodemst1/2, both
+slots' whole boot chain. super (14.6 G) skipped: stock-ROM restorable.
+Pull plan: scp over usb0 on the release-kernel flight.
+
+The ladder then walked, hands off: qcom_rng, leds_qcom_flash,
+leds_qcom_lpg, pci_pwrctrl_pwrseq all SURVIVED; pwrseq_qcom_wcn's
+insmod printed at 14:58:29 and the log ends mid-settle. Identical
+death one run earlier (confounded then by a Ctrl-C; not this time).
+pwrseq_qcom_wcn powers the WCN radio rails and unblocks the deferred
+qcom-pcie bridge, so the reset fires at rail-enable / PCIe link
+bring-up. Mechanism TBD; identity confirmed.
+
+25 rungs remain untested (qcom_q6v5_pas still the top remaining
+suspect). Next boot: write the 30-module modprobe.d blacklist onto
+the rootfs (makes the blacklist-less release kernel safe for the
+capture pull), then run the remainder ladder without pwrseq_qcom_wcn.
