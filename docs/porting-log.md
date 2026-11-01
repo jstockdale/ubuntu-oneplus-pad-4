@@ -958,3 +958,22 @@ blacklist MUST keep pwrseq_qcom_wcn — the flashed boot_b still runs
 the old #17 kernel whose DT would power the radio wrong at coldplug.
 Order: flash the new bundle to boot_b (after soak) → only then ship
 0.2.15 dropping the pwrseq blacklist for automatic wifi every boot.
+
+## 2026-11-01 — C3 COMPLETE: radios flashed, automatic, wireless
+
+boot_b flashed with the R2-gated bundle (dd3de7d0…, kernel #31,
+patches 0001-0005; verified five ways pre-flash — operator lesson:
+`fastboot boot` from shell history is not `fastboot flash boot_b`;
+the "Writing" line is the tell). 0.2.15 installed: pwrseq freed from
+the blacklist (nt36536_ts alone remains, with the pwrseq tombstone
+comment), NM wifi.powersave=2 shipped as policy. Finale reboot,
+hands off: kernel #31 from flash, all three radio modules coldplugged
+automatically, wifi self-connected (sloth, 192.168.1.250), BT
+controller registered, zero failed units. The tablet is now a
+self-booting, self-connecting wireless Ubuntu device.
+
+Next: C2 touch per docs/touch-plan.md (T0 firmware verify, T1
+unpatched modprobe on the live desktop, then the 0007/0008 ordering
+patches). Queued behind it: ath12k patch-queue adoption at the next
+kernel refresh (regdomain + RX-burst + power-save set), per-unit BT
+MAC from persist, formal iperf, the DSI census, backlight sweep.
