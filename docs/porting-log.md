@@ -745,3 +745,21 @@ regen. Both fixed; 0.2.12 built with all six executables verified
 rwxr-xr-x inside the archive; on-device chmod issued over serial for
 the already-installed copies. Net: the parallel-coldplug gate PASSED;
 access fixed; next release boot is the B.5 go/no-go.
+
+## 2026-10-31 — B.5: boot_b flashed
+
+Final release re-flight: zero failed units (pd-mapper green now that
+the ADSP boots), 63 modules in parallel coldplug, qbootctl auto-marked
+_b at T+1 s, gadget/getty active — and the panel lit: msm_dpu bound
+both DSI controllers, DP and GPU, "Initialized msm 1.13.0", fb0
+msmdrmfb — kernel console on glass (gen80200_sqe.fw still missing, no
+acceleration; DSI PHY probe order still lottery-ish; display phase
+will finish the job). 0.2.13 installed (fixed ECM MACs; host iface
+becomes enx026963656c68 permanently).
+
+Then the write: fastboot flash boot_b with bundle/boot.img
+(e362bcf4…, the image that flew clean twice), 45 ms. fastboot reboot
+issued — first standalone boot pending verification (battery pause).
+Restore at arm's reach: factory/fcap/part-boot_b.img. From here the
+tablet boots Ubuntu on power-on; fastboot boot remains for diag
+kernels, and slot flags are re-marked by qbootctl.service each boot.
