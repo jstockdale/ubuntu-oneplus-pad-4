@@ -639,3 +639,32 @@ tuning/efuse application. Mitigation tonight: press Enter at the
 prompt; deaf boot -> power-press (logind clean shutdown works
 loginless) and re-fly. May not reproduce on the release kernel's
 untouched cmdline; dedicated hunt after the parade is mapped.
+
+## 2026-10-31 — Parade fully mapped: one killer; 0.2.11 ships the policy
+
+The remainder ladder (24 rungs, pwrseq_qcom_wcn excluded) walked end
+to end and SURVIVED — qcom_q6v5_pas, the whole audio stack, ipa and
+ath12k included. The coldplug parade holds exactly one killer:
+pwrseq_qcom_wcn.
+
+Root-cause picture: the nubia kaanapali board wires its WCN PMU
+identically (TLMM 16 wlan-enable, PMH0104 gpio5 bt-enable, same
+supplies) and works; our board dies at driver BIND, where the
+pinctrl-0 default states write both pins' config. Classic signature
+of an XPU-protected pin write under OPLUS firmware. Confirmation plan
+(WLAN phase): split the pmu node — BT half deleted, then WLAN half —
+one flight names the guilty block, and the DT then reserves the pin
+instead of blacklisting the driver.
+
+Sequencing, one variable per flight: the gate flight keeps the full
+30-line on-device parade file (its job is the capture pull + qbootctl,
+minimal risk). Installing 0.2.11 over ssh during that session swaps in
+the packaged 2-line policy (/usr/lib/modprobe.d/iceland.conf:
+pwrseq_qcom_wcn + nt36536_ts, the latter because the release kernel
+re-enables the touch SPI and the TDDI probe resets the live panel).
+The NEXT release boot then validates full parallel coldplug of the
+remaining 27 under the real config — apps_smmu live, no diag cmdline.
+
+Also characterized today: the deaf-RX boot lottery (separate entry)
+and the T+60 one-shot USB bounce (flight A only; never recurred).
+Both filed for the hardening pass, neither blocks Phase B.

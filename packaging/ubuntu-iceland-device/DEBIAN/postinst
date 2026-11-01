@@ -7,6 +7,10 @@ case "$1" in
 		# leaves dropped conffiles on disk, and an obsolete feeder in
 		# the hook dir would ride into every initramfs. Remove it.
 		rm -f /etc/initramfs-tools/scripts/init-top/iceland-watchdog
+		# The 30-module parade blacklist was hand-written on-device
+		# during the 2026-10-31 bisect; the packaged 2-line policy in
+		# /usr/lib/modprobe.d/iceland.conf replaces it.
+		rm -f /etc/modprobe.d/iceland-parade.conf
 		# The grow service is enabled by the rootfs build for images; this
 		# covers an apt (re)install on a running device.  Guarded: postinst
 		# also runs inside mmdebstrap's chroot, where systemctl enable works
