@@ -1,0 +1,20 @@
+diff --git a/drivers/power/sequencing/pwrseq-qcom-wcn.c b/drivers/power/sequencing/pwrseq-qcom-wcn.c
+index 97692c4de340..b3f06aacc604 100644
+--- a/drivers/power/sequencing/pwrseq-qcom-wcn.c
++++ b/drivers/power/sequencing/pwrseq-qcom-wcn.c
+@@ -402,12 +402,13 @@ static const struct pwrseq_qcom_wcn_pdata pwrseq_wcn7850_of_data = {
+ };
+ 
+ static const char *const pwrseq_wcn7860_vregs[] = {
+-	"vddio",
+ 	"vddio1p2",
++	"vddant",
+ 	"vddaon",
+ 	"vdddig",
+-	"vddrfa1p2",
+ 	"vddrfa1p8",
++	"vddrfa1p2",
++	"vddcx",
+ };
+ 
+ static const struct pwrseq_qcom_wcn_pdata pwrseq_wcn7860_of_data = {
