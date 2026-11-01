@@ -977,3 +977,11 @@ unpatched modprobe on the live desktop, then the 0007/0008 ordering
 patches). Queued behind it: ath12k patch-queue adoption at the next
 kernel refresh (regdomain + RX-burst + power-save set), per-unit BT
 MAC from persist, formal iperf, the DSI census, backlight sweep.
+
+C4 doorbell, observed post-C3: with the audio modules coldplugging,
+qcom-apm requests qcom/kaanapali/OnePlus-Pad4-tplg.bin and the
+snd-sc8280xp card cleanly fails to instantiate (-2). The topology is
+in NO local source (not in the Fedora clone, not in stock — Android
+does not use ALSA topology): C4 starts by building it from the
+audioreach-topology project or a newer sibling drop. First ops over
+wifi today: dmesg pulled via 192.168.1.250.
