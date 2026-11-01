@@ -775,3 +775,16 @@ via ADSP battmgr. Three access paths, one write, full restore kit
 banked on Drive. Next: Phase C — display proper (GPU firmware, DSI
 PHY probe order), WLAN (pwrseq split-node XPU hunt), touch driver,
 audio, then GNOME/Wayland and Waydroid.
+
+## 2026-10-31 — Charging chain verified operational
+
+On the standalone boot, measured not assumed: battery Charging
+(charge_type Fast), +164→176 mA into the cell at 3.48 V / 27.0 °C,
+USB input ~1.1 A @ 4.66 V from a PC SDP port, UCSI/Type-C stack live
+(port0 + partner; no PD contract — source is a PC port). Charge
+control is ADSP-autonomous as on stock; kernel side is telemetry +
+Type-C only, all present. Net-positive even with SoC + panel running;
+PD wall charger negotiates properly for real charge rates; pre-boot
+(off) charging is charger-firmware-handled below the OS. Known
+cosmetic: boot-time power_supply synthetic uevent EAGAIN; battmgr
+input current_now reads slightly above its advertised current_max.
