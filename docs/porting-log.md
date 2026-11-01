@@ -668,3 +668,35 @@ remaining 27 under the real config — apps_smmu live, no diag cmdline.
 Also characterized today: the deaf-RX boot lottery (separate entry)
 and the T+60 one-shot USB bounce (flight A only; never recurred).
 Both filed for the hardening pass, neither blocks Phase B.
+
+## 2026-10-31 — Gate flight: capture pulled, fixes installed, qbootctl proven
+
+Release-kernel RAM boot (the exact flash-candidate configuration: same
+kernel payload, same flashed init_boot_b initramfs). ACM+ECM composite
+enumerated clean; host NetworkManager got a persistent iceland-usb
+profile (192.168.7.1/24) after its DHCP attempt was found starving the
+link. Pull: 169 files, 6.3 GB, zero bad checksums; tarballed as
+oneplus-pad4-iceland-2fe096b5-factory-2026-10-31.tar.zst (723 MB,
+sha256 25749ef9…) — serial 2fe096b5 from androidboot.serialno.
+
+Surprises worth remembering: the flashed rootfs was still running
+device package 0.2.1 (not 0.2.9 as assumed — the image predated the
+late packages); 0.2.11 + qbootctl 0.2.2 now installed over ssh, old
+parade file auto-removed, 2-line policy and getty drop-in verified on
+disk. Slot dump: _b active/successful/bootable, _a flagged UNBOOTABLE
+(OPLUS post-OTA state) — so no automatic Android fallback: a failing
+boot_b ends at button-combo fastboot + stock reflash, not a slot
+switch. qbootctl -m exercised live: exit 0, idempotent, table intact;
+its service (multi-user) is the post-flash retry protection, needed
+because flashing boot_b resets slot flags.
+
+Gate-boot baseline archived to factory/gate-boot/ (journal, lsmod=20
+under the parade file, cmdline "rdinit=… loglevel=7 … bootconfig" with
+no blacklist, failed=pd-mapper only). dmesg errors all known classes:
+UFS attr idn 13 noise, DSI PLL no-lock + missing gen80200_sqe.fw (the
+display debt, probing without SMMU faults), battmgr uevent EAGAIN.
+ModemManager AT-probes the gadget's login prompt from the host —
+cosmetic; ignore-rule filed for the hardening pass.
+
+Remaining unknown before B.5, by design: parallel coldplug of the 27
+freed modules under the release kernel — the next validation flight.
