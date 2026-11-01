@@ -858,3 +858,23 @@ marker) in the packaged initramfs script — the flashed init_boot keeps
 the old beacon until its next refresh, covered meanwhile by host NM
 autoconnect-retries 0. Battery note: hours on the PC port still reads
 1-2% — PD wall charger overnight before the census.
+
+## 2026-11-01 — Overnight research: the WLAN reset has a prime suspect
+
+Deep-research pass (agent, ~30 min) wrote docs/wifi-plan.md (674
+lines, committed). Headlines: our captured dtbo/vendor_boot decompile
+proves downstream uses the SAME pins as our DT (TLMM16 / PMIC-J gpio5
+/ TLMM18 sw_ctrl) — wrong-pins hypothesis dead; Android's own cnss2
+drives these pins, so static XPU is nearly excluded. Prime suspect
+(~55%): upstream dbd674ccf30f ("power off WLAN at probe", post-rc7)
+changed wlan-enable gpiod_get from GPIOD_ASIS to GPIOD_OUT_LOW — and
+deleted a FIXME comment warning against exactly that — so v7.3-final
+yanks a bootloader-live WCN low at bind; the working Fedora port runs
+rc7 (no write). Flight matrix F0-F4 in the plan (F0 = devmem reads,
+method-checked on a safe pin first); fix #1 = local ASIS revert +
+upstream regression report (the line has flip-flopped twice before).
+Firmware staging block ready (WCN7860/hw2.0, 6 files, hashes
+transcribed from the Fedora MANIFEST.tsv). New rail from the research:
+never dump whole-TLMM pinctrl/gpio debugfs on this device. Caveat for
+the matrix: flight patches live in kernel/patches/ which release
+builds also apply — remove 90-flight.patch before any release build.
