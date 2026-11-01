@@ -1,0 +1,13 @@
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index 193a4a669b66..e3737a80aee7 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -877,7 +877,7 @@ regulators-5 {
+ 
+ 		vreg_s1j_0p8: smps1 {
+ 			regulator-name = "vreg_s1j_0p8";
+-			regulator-min-microvolt = <400000>;
++			regulator-min-microvolt = <892000>;
+ 			regulator-max-microvolt = <1000000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+ 		};
