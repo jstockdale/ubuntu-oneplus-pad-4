@@ -811,3 +811,40 @@ proven on CPU rendering. Bonus input inventory for C2: pmic_pwrkey
 already deliver input events. Battery net-positive under desktop load
 (+364 mA at 2%, 28.0 C). Next: C1 proper — DSI lottery census once
 charged, then GPU firmware for real rendering.
+
+## 2026-11-01 — The Adreno 840 lives: GPU firmware landed, GL desktop up
+
+The hunt took one evening because everything was already in reach. The
+driver's manifest (a6xx_catalog): gen80200_sqe.fw + gen80200_gmu.bin +
+gen80200_aqe.fw, zap at qcom/kaanapali/iceland/gen80200_zap.mbn (DTS).
+The loader is strict (adreno_load_fw returns on any missing file), so
+all four were required. Sources, every byte verified:
+- SQE e2d4e742… + GMU 06f4484f… — the "vendor pair" (GMU v5.3.33,
+  SQE 0x094) from the Fedora port's firmware repo clone, hashes
+  matching its MANIFEST.tsv, itself triple-corroborated
+  (SuperTurtleDev = map220v = Lenovo TB323FU stock). Chosen over
+  stock's pair (GMU 5.3.39/SQE 0x103), which per that README resets
+  the tablet early in boot unless GPU preemption is off.
+- AQE ed7916ca… — extracted from OUR stock vendor.img (EROFS,
+  fsck.erofs --extract; full tree now at stock/vendor-extracted/),
+  byte-identical to SuperTurtleDev's published copy.
+- Zap d185bfc9… — already shipped by our overlay; tablet copy =
+  overlay = stock vendor extraction, three-way match.
+
+Result on reboot: all three request_fw loads "from new location",
+"[drm] Loaded GMU firmware v5.3.33", renderD128 appears; kmscube: 400
+frames, exit 0, "renderer: Adreno (TM) 840", GLES 3.2, no faults;
+weston relaunched WITHOUT pixman: "Using GL renderer" on DSI-1 — an
+accelerated Wayland desktop on glass. Firmware banked into
+out/rootfs-overlay/lib/firmware/qcom/ so every future image ships it.
+Watch item: gcc/gxclkctl/gpucc report sync_state pending on the GMU —
+benign so far, revisit if clock gating misbehaves.
+
+Papercuts for device 0.2.14: access script should not tear down and
+recreate an existing gadget (the 1 s bounce makes host NetworkManager
+drop the profile; it also replayed an old interface-name into the
+profile once via shell history); ship Gateway=192.168.7.1 + DNS with
+a high metric in 80-iceland-usb0.network so route/DNS survive reboots.
+
+C1 remaining: DSI PHY lottery census + probe-order fix (battery >20%
+first), backlight sweep. Then C2 (touch) is the road to GNOME.
