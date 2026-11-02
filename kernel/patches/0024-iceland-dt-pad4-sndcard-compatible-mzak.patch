@@ -1,0 +1,30 @@
+From 92c6e0da357e29e0778219a8d5f663664ea6ded8 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 12:51:42 +0000
+Subject: [PATCH 14/14] arm64: dts: qcom: kaanapali-oneplus-iceland: use the
+ Pad 4 sound card
+
+Use the "oneplus,iceland-sndcard" compatible, so the stereo stream is
+spread over all six speaker amplifiers; keep the Kaanapali fallback.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+---
+ arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index eec25cf16075..e69555186103 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -243,7 +243,7 @@ llcc_lpi_mem: llcc-lpi@ff800000 {
+ 	};
+ 
+ 	sound {
+-		compatible = "qcom,kaanapali-sndcard", "qcom,sm8450-sndcard";
++		compatible = "oneplus,iceland-sndcard", "qcom,kaanapali-sndcard", "qcom,sm8450-sndcard";
+ 		pinctrl-0 = <&i2s0_default>;
+ 		pinctrl-names = "default";
+ 
+-- 
+2.53.0
+

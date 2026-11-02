@@ -1,0 +1,80 @@
+From 71c7e7d3ffa9575a833f494f18ab831f4377d678 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 12:51:40 +0000
+Subject: [PATCH 06/14] ASoC: qcom: sc8280xp: spread stereo over the OnePlus
+ Pad 4's six amplifiers
+
+The Pad 4 speaker port is an 8-slot TDM port with six amplifiers, each
+playing one slot: left in slots 0/2/4 and right in slots 1/3/5 (from the
+stock tfa98xx container). With the default 8-channel map, only slots 0
+and 1 carried the stereo stream, so four amplifiers stayed silent.
+
+Add the Pad 4 card with a channel map of FL FR FL FR FL FR FL FR on
+PRIMARY_TDM_RX_0, set in prepare as on the Ayaneo Pocket S2. Otherwise it
+is the same as the Kaanapali card.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+---
+ sound/soc/qcom/sc8280xp.c | 32 ++++++++++++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/sound/soc/qcom/sc8280xp.c b/sound/soc/qcom/sc8280xp.c
+index 11d0b6bc857f..ef957e2c55cb 100644
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -344,6 +344,28 @@ static const unsigned int ayaneo_ps2_channels_mapping[] = {
+ 	PCM_CHANNEL_FR		/* WSA2 Ch2 */
+ };
+ 
++/*
++ * OnePlus Pad 4: six amplifiers on an 8-slot TDM port, stereo spread as left = slots 0/2/4 (top, bottom, middle
++ * left) and right = slots 1/3/5 (stock tfa98xx container); slots 6/7 have no amplifier.
++ */
++static const unsigned int oneplus_iceland_tdm_channels_mapping[] = {
++	PCM_CHANNEL_FL, PCM_CHANNEL_FR, PCM_CHANNEL_FL, PCM_CHANNEL_FR,
++	PCM_CHANNEL_FL, PCM_CHANNEL_FR, PCM_CHANNEL_FL, PCM_CHANNEL_FR,
++};
++
++static int oneplus_iceland_snd_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
++	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
++
++	if (cpu_dai->id != PRIMARY_TDM_RX_0)
++		return 0;
++
++	return snd_soc_dai_set_channel_map(cpu_dai, 0, NULL,
++					   ARRAY_SIZE(oneplus_iceland_tdm_channels_mapping),
++					   oneplus_iceland_tdm_channels_mapping);
++}
++
+ static int ayaneo_ps2_snd_prepare(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+@@ -524,6 +546,15 @@ static struct qcom_snd_soc_common ayaneo_ps2_priv_data = {
+ 	.wcd_jack = true,
+ };
+ 
++static struct qcom_snd_soc_common oneplus_iceland_priv_data = {
++	.driver_name = "kaanapali",
++	.dapm_widgets = sc8280xp_dapm_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(sc8280xp_dapm_widgets),
++	.mi2s_bclk_enable = true,
++	.snd_prepare = oneplus_iceland_snd_prepare,
++	.wcd_jack = true,
++};
++
+ static const struct qcom_snd_soc_common eliza_priv_data = {
+ 	.driver_name = "eliza",
+ 	.dapm_widgets = sc8280xp_dapm_widgets,
+@@ -650,6 +681,7 @@ static const struct of_device_id snd_sc8280xp_dt_match[] = {
+ 	{ .compatible = "qcom,eliza-sndcard", .data = &eliza_priv_data },
+ 	{ .compatible = "qcom,hawi-sndcard", .data = &hawi_priv_data },
+ 	{ .compatible = "qcom,kaanapali-sndcard", .data = &kaanapali_priv_data },
++	{ .compatible = "oneplus,iceland-sndcard", .data = &oneplus_iceland_priv_data },
+ 	{ .compatible = "qcom,maili-sndcard", .data = &hawi_priv_data },
+ 	{ .compatible = "qcom,qcm6490-idp-sndcard", .data = &qcm6490_priv_data },
+ 	{ .compatible = "qcom,qcs615-sndcard", .data = &qcs615_priv_data },
+-- 
+2.53.0
+

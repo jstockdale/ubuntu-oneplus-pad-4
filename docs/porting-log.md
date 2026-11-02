@@ -1100,3 +1100,54 @@ Known-benign, filed for polish: one-shot WARN
 splash→DPU handoff, t=0.39s, taints 512/W); arm-smmu context faults
 SID 0x800 in the same handoff window; ath12k regulatory grumbles;
 OnePlus-Pad4-tplg.bin request (that one is C4's whole job).
+
+## 2026-11-01 (later night) — C4 opens: topology built (A0), card
+## instantiates (A1), TDM chain ported (A2 build)
+
+Three research agents landed plans for every outstanding subsystem
+(docs/audio-plan.md, sensors-plan.md, media-misc-plan.md — each checked
+file-by-file against the Fedora port). Headlines beyond audio: the
+IMU/sensors live behind the ADSP sensor hub (BMI3x0+AK09919+STK36C01+
+hall, factory cal in persist; fastrpc/libssc/iio-sensor-proxy-3.9
+route, /sys/bus/iio stays empty by design); VPU is near-free (~8
+patches, our vpu40_2v.mbn byte-identical to Fedora's); haptics and
+GNSS are NOT FITTED (no motor, modemless SoC — both close as paper);
+suspend is a de-risked C6 (Fedora ships s2idle at 0.35%/h; our DTS
+carries their known instant-wake wake-gpios bug).
+
+A0: OnePlus-Pad4-tplg.bin BUILT on the host — linux-msm/
+audioreach-topology @993a17d + the Fedora Pad-4 overlay (vendored
+verbatim in configs/audio/topology/), VOL_CTRL_MAX forced to 2056
+(-12 dB bring-up cap) at build time by scripts/build-audio-topology.sh.
+Bit-reproducible: f9bfb173…; 8192 reference d8f4b5f3… (≠ phonewave's
+prebuilt 11b78ff1 — their provenance still open). Banked in overlay +
+manifest row.
+
+A1 (one variable: the file appears): staged to /lib/firmware/qcom/
+kaanapali/, asound.state wiped, reboot. GATE PASSED — card 0
+"OnePlus-Pad4" registers, zero tplg errors, kernel-side PCMs all
+present (MM1/2 playback, MM3/4 capture, MM6 DP, compr4); the only
+ASoC line is a benign bind deferral at 7.7s. aplay absent = alsa-utils
+not on the minimal rootfs (now installed). No regressions (touch/
+wifi/BT clean).
+
+A2 port: Fedora's TDM speaker chain adopted as kernel/patches/
+0011-0024 (14 patches; their 0041/0042/0045/0048/0044/0049/0046/0047/
+0104/0290/0051 + DT 0038/0043/0050, authorship preserved). Their 0059
+(tx-macro ADPT disable) turned out FULLY absorbed in perpetua already
+(POST_PMU write included, lpass-tx-macro.c:1066) — the parity table's
+"partial" was stale; skipped. One real conflict: 0041's GRAPH_OPEN
+error hunk collided with perpetua's superset handling (cleanup +
+ERR_PTR); kept ours, folded their dev_err into the existing error
+path. tfa9865.c verified BYTE-IDENTICAL to Fedora's final after the
+four amp patches (plan's transcription rule). Port method: git am
+onto a scratch worktree over our 0001-0010 baseline, then format-patch
+regenerated — all 24 apply clean under build-mainline-kernel.sh's own
+git apply --index. Rebuild running (build-a2.log); bundle will embed
+the post-0.2.16 initrd (ac042cf4) directly from out/ — the canonical
+rootfs/boot copy still awaits the user's sudo cp.
+
+Flight plan next (plan §4): A2 bundle = RAM boot + hand-installed
+modules, SILENT gate (six "Found TFA9865", EINVAL above 2056 on the
+stream volume, routes read 0). First sound only at A3: 1 s, -30 dBFS,
+440 Hz, hand on chassis, MANSTATE operating on all six.

@@ -1,0 +1,68 @@
+From 9604b62c97c5421c35e128111757b0331acad7b2 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 11:21:27 +0300
+Subject: [PATCH 09/14] ASoC: codecs: tfa9865: OnePlus Pad 4: charge-pump
+ divider and sense mapping from stock
+
+Two registers of the Pad 4's six amplifiers differed from the stock
+container: the charge-pump clock divider in follower mode (0x62 bits 3:0:
+stock 4, here 6) and the mapping of the sensed values onto the
+amplifier's return slots (0x68: stock 0x0914, here the chip default
+0x0820).
+
+Write stock's values. Playback levels are unchanged: the attenuation and
+the maximum boost voltage of the tables are not touched.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ sound/soc/codecs/tfa9865.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/codecs/tfa9865.c b/sound/soc/codecs/tfa9865.c
+index 906dfc2d40e1..e77e69704852 100644
+--- a/sound/soc/codecs/tfa9865.c
++++ b/sound/soc/codecs/tfa9865.c
+@@ -114,7 +114,8 @@ static const struct tfa9865_reg_data tfa9865_iceland_regs_0__34_36[] = {
+ 	{ .reg = 0x67, .val = 0x0621 },
+ 	{ .reg = 0x7c, .val = 0x50f2 },
+ 	{ .reg = 0x63, .val = 0x90d4 },
+-	{ .reg = 0x62, .val = 0x05c6 },
++	{ .reg = 0x62, .val = 0x05c4 },
++	{ .reg = 0x68, .val = 0x0914 },
+ 	{ .reg = 0x5a, .val = 0x2d8e },
+ 	{ .reg = 0x74, .val = 0x6120 },
+ 	{ .reg = 0x08, .val = 0x0042 },
+@@ -132,7 +133,8 @@ static const struct tfa9865_reg_data tfa9865_iceland_regs_0__37[] = {
+ 	{ .reg = 0x67, .val = 0x0616 },
+ 	{ .reg = 0x7c, .val = 0x50f2 },
+ 	{ .reg = 0x63, .val = 0x90d4 },
+-	{ .reg = 0x62, .val = 0x05c6 },
++	{ .reg = 0x62, .val = 0x05c4 },
++	{ .reg = 0x68, .val = 0x0914 },
+ 	{ .reg = 0x5a, .val = 0x2d8e },
+ 	{ .reg = 0x74, .val = 0x6120 },
+ 	{ .reg = 0x08, .val = 0x0042 },
+@@ -152,7 +154,8 @@ static const struct tfa9865_reg_data tfa9865_iceland_regs_22__34_36[] = {
+ 	{ .reg = 0x67, .val = 0x0621 },
+ 	{ .reg = 0x7c, .val = 0x50f2 },
+ 	{ .reg = 0x63, .val = 0x90d4 },
+-	{ .reg = 0x62, .val = 0x05c6 },
++	{ .reg = 0x62, .val = 0x05c4 },
++	{ .reg = 0x68, .val = 0x0914 },
+ 	{ .reg = 0x5a, .val = 0x2d8e },
+ 	{ .reg = 0x74, .val = 0x6120 },
+ 	{ .reg = 0x08, .val = 0x0042 },
+@@ -170,7 +173,8 @@ static const struct tfa9865_reg_data tfa9865_iceland_regs_22__37[] = {
+ 	{ .reg = 0x67, .val = 0x0616 },
+ 	{ .reg = 0x7c, .val = 0x50f2 },
+ 	{ .reg = 0x63, .val = 0x90d4 },
+-	{ .reg = 0x62, .val = 0x05c6 },
++	{ .reg = 0x62, .val = 0x05c4 },
++	{ .reg = 0x68, .val = 0x0914 },
+ 	{ .reg = 0x5a, .val = 0x2d8e },
+ 	{ .reg = 0x74, .val = 0x6120 },
+ 	{ .reg = 0x08, .val = 0x0042 },
+-- 
+2.53.0
+

@@ -1,0 +1,50 @@
+From dcaeb04e45a1232850aa417432fce32a9ebadfec Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Sun, 11 Oct 2026 17:07:43 +0300
+Subject: [PATCH 10/14] ASoC: codecs: tfa9865: OnePlus Pad 4: middle
+ amplifiers' gain and boost from stock
+
+The two middle amplifiers (0x37 on both buses) ran below the stock
+container: the TDM speaker attenuation (0x5f bits 9:5) at 7 where stock
+has 5, and the maximum boost voltage (0x76 bits 15:8) at 0xd7 where stock
+has 0xf0. The four outer amplifiers already run at the stock values.
+
+Write stock's values. Every amplifier field the container sets now
+matches stock; nothing is raised past it.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+(cherry picked from commit 5a30d72164bcec1c15b36a31aafac15dbff7b1ae)
+---
+ sound/soc/codecs/tfa9865.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/codecs/tfa9865.c b/sound/soc/codecs/tfa9865.c
+index e77e69704852..a3dece37f89d 100644
+--- a/sound/soc/codecs/tfa9865.c
++++ b/sound/soc/codecs/tfa9865.c
+@@ -141,8 +141,8 @@ static const struct tfa9865_reg_data tfa9865_iceland_regs_0__37[] = {
+ 	{ .reg = 0x5b, .val = 0x6095 },
+ 	{ .reg = 0x5c, .val = 0x330b },
+ 	{ .reg = 0x01, .val = 0x0084 },
+-	{ .reg = 0x76, .val = 0xd700 },
+-	{ .reg = 0x5f, .val = 0x00e0 },
++	{ .reg = 0x76, .val = 0xf000 },
++	{ .reg = 0x5f, .val = 0x00a0 },
+ 	{ .reg = 0x00, .val = 0xf251 },
+ };
+ 
+@@ -181,8 +181,8 @@ static const struct tfa9865_reg_data tfa9865_iceland_regs_22__37[] = {
+ 	{ .reg = 0x5b, .val = 0x6095 },
+ 	{ .reg = 0x5c, .val = 0x330b },
+ 	{ .reg = 0x01, .val = 0x0084 },
+-	{ .reg = 0x76, .val = 0xd700 },
+-	{ .reg = 0x5f, .val = 0x00e0 },
++	{ .reg = 0x76, .val = 0xf000 },
++	{ .reg = 0x5f, .val = 0x00a0 },
+ 	{ .reg = 0x00, .val = 0xf251 },
+ };
+ 
+-- 
+2.53.0
+

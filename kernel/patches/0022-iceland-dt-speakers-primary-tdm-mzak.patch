@@ -1,0 +1,44 @@
+From 07bbbbb18cc9fc8c45662f61ad52971cbb7ca324 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 01:31:37 +0300
+Subject: [PATCH 12/14] arm64: dts: qcom: kaanapali-oneplus-iceland: speakers
+ on the primary TDM port
+
+Stock drives the six TFA9865 from TDM-LPAIF-RX-PRIMARY (8 slots x 32 bit, 48 kHz); the mainline DT used
+Primary MI2S, which the amplifiers never sync to. Move the link to PRIMARY_TDM_RX_0 with the stock slot layout
+(dai-tdm-slot-*; the q6apm TDM DAI takes them through set_tdm_slot). The matching topology puts an Audio
+Interface sink in TDM mode on that port (audioreach-topology: module_audio_if.m4).
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ .../arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index e3737a80aee7..2018d08e5ecd 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -256,11 +256,16 @@ sound {
+ 				"TX SWR_INPUT1", "ADC2_OUTPUT",
+ 				"TX SWR_INPUT2", "ADC3_OUTPUT";
+ 
+-		primary-i2s-dai-link {
+-			link-name = "Primary MI2S Playback";
++		primary-tdm-dai-link {
++			link-name = "Primary TDM Playback";
+ 
+ 			cpu {
+-				sound-dai = <&q6apmbedai PRIMARY_MI2S_RX>;
++				sound-dai = <&q6apmbedai PRIMARY_TDM_RX_0>;
++				/* stock's speaker back end: TDM, 8 slots x 32 bit, 48 kHz, all slots active */
++				dai-tdm-slot-num = <8>;
++				dai-tdm-slot-width = <32>;
++				dai-tdm-slot-tx-mask = <1 1 1 1 1 1 1 1>;
++				dai-tdm-slot-rx-mask = <1 1 1 1 1 1 1 1>;
+ 			};
+ 
+ 			codec {
+-- 
+2.53.0
+

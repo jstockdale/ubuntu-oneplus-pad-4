@@ -1,0 +1,63 @@
+From e65d93d52b17fc3f4d9075962fb877514579e25e Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 07:35:50 +0300
+Subject: [PATCH 02/14] ASoC: qcom: q6prm: add the TDM interface bit clocks
+
+The classic TDM endpoints need their interface bit clock voted through the PRM like the MI2S ones (the
+machine driver sets the back end's "bclk" in its TDM hw_params); the PRM's clock ids for the TDM interfaces
+are the AFE ones (0x200 for the primary internal bit clock, shared with the PCM interfaces). Add the ids to
+q6prm and the entries to the q6prm clock table; the q6dsp-lpass-ports binding header already names them.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ sound/soc/qcom/qdsp6/q6prm-clocks.c | 10 ++++++++++
+ sound/soc/qcom/qdsp6/q6prm.h        | 11 +++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/sound/soc/qcom/qdsp6/q6prm-clocks.c b/sound/soc/qcom/qdsp6/q6prm-clocks.c
+index b4f9abbe02cb..bdf47fe14852 100644
+--- a/sound/soc/qcom/qdsp6/q6prm-clocks.c
++++ b/sound/soc/qcom/qdsp6/q6prm-clocks.c
+@@ -92,6 +92,16 @@ static const struct q6dsp_clk_init q6prm_clks[] = {
+ 	Q6PRM_CLK(LPASS_CLK_ID_QAIF_IF12_EBIT),
+ 	Q6PRM_CLK(LPASS_CLK_ID_VA_QAIF_IF0_IBIT),
+ 	Q6PRM_CLK(LPASS_CLK_ID_VA_QAIF_IF0_EBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_PRI_TDM_IBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_PRI_TDM_EBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_SEC_TDM_IBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_SEC_TDM_EBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_TER_TDM_IBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_TER_TDM_EBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_QUAD_TDM_IBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_QUAD_TDM_EBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_QUIN_TDM_IBIT),
++	Q6PRM_CLK(LPASS_CLK_ID_QUIN_TDM_EBIT),
+ 	Q6DSP_VOTE_CLK(LPASS_HW_MACRO_VOTE, Q6PRM_HW_CORE_ID_LPASS,
+ 		       "LPASS_HW_MACRO"),
+ 	Q6DSP_VOTE_CLK(LPASS_HW_DCODEC_VOTE, Q6PRM_HW_CORE_ID_DCODEC,
+diff --git a/sound/soc/qcom/qdsp6/q6prm.h b/sound/soc/qcom/qdsp6/q6prm.h
+index cf619ef6561a..4aae7bd1af18 100644
+--- a/sound/soc/qcom/qdsp6/q6prm.h
++++ b/sound/soc/qcom/qdsp6/q6prm.h
+@@ -10,6 +10,17 @@
+ #define Q6PRM_LPASS_CLK_ID_PRI_MI2S_IBIT                          0x100
+ /* Clock ID for Primary I2S EBIT */
+ #define Q6PRM_LPASS_CLK_ID_PRI_MI2S_EBIT                          0x101
++/* Clock IDs for the TDM interfaces (shared with the PCM ones) */
++#define Q6PRM_LPASS_CLK_ID_PRI_TDM_IBIT			0x200
++#define Q6PRM_LPASS_CLK_ID_PRI_TDM_EBIT			0x201
++#define Q6PRM_LPASS_CLK_ID_SEC_TDM_IBIT			0x202
++#define Q6PRM_LPASS_CLK_ID_SEC_TDM_EBIT			0x203
++#define Q6PRM_LPASS_CLK_ID_TER_TDM_IBIT			0x204
++#define Q6PRM_LPASS_CLK_ID_TER_TDM_EBIT			0x205
++#define Q6PRM_LPASS_CLK_ID_QUAD_TDM_IBIT			0x206
++#define Q6PRM_LPASS_CLK_ID_QUAD_TDM_EBIT			0x207
++#define Q6PRM_LPASS_CLK_ID_QUIN_TDM_IBIT			0x208
++#define Q6PRM_LPASS_CLK_ID_QUIN_TDM_EBIT			0x209
+ /* Clock ID for Secondary I2S IBIT */
+ #define Q6PRM_LPASS_CLK_ID_SEC_MI2S_IBIT                          0x102
+ /* Clock ID for Secondary I2S EBIT */
+-- 
+2.53.0
+

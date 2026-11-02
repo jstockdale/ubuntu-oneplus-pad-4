@@ -1,0 +1,119 @@
+From 44a6bccfdfaadb50ef30a4cd4d03ddd20662dcb0 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 12:08:39 +0000
+Subject: [PATCH 07/14] ASoC: codecs: tfa9865: stock TDM setup for the OnePlus
+ Pad 4 amplifiers
+
+The Pad 4's six amplifiers were configured for the 2-slot I2S-like frame
+of the MI2S wiring the tables were written for. The speaker port now runs
+stock's 8 x 32-bit TDM frame, which the amplifiers can't lock to (clock
+out of range, manager state 1): silent.
+
+Program each amplifier's TDM frame and slots with stock's values, taken
+from the stock container (/odm/firmware/tfa98xx.cnt, 11.A.38): reg 0x20 =
+0x6f91 on all six, and per amplifier the speaker slot and the sense-data
+slot (regs 0x21/0x22; slots 0-5). They're written after the base tables,
+while the amplifier is still powered down.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+---
+ sound/soc/codecs/tfa9865.c | 68 ++++++++++++++++++++++++--------------
+ 1 file changed, 44 insertions(+), 24 deletions(-)
+
+diff --git a/sound/soc/codecs/tfa9865.c b/sound/soc/codecs/tfa9865.c
+index 97d1db2e7a44..76a31369f420 100644
+--- a/sound/soc/codecs/tfa9865.c
++++ b/sound/soc/codecs/tfa9865.c
+@@ -93,6 +93,9 @@ struct tfa9865_reg_data {
+ struct tfa9865_device_config {
+ 	unsigned int reg_count;
+ 	const struct tfa9865_reg_data *reg_data;
++	/* written after reg_data, with the amplifier still powered down: its TDM frame and slot setup */
++	unsigned int tdm_count;
++	const struct tfa9865_reg_data *tdm_data;
+ };
+ 
+ struct tfa9865_static_config {
+@@ -176,31 +179,39 @@ static const struct tfa9865_reg_data tfa9865_iceland_regs_22__37[] = {
+ 	{ .reg = 0x00, .val = 0xf251 },
+ };
+ 
++/*
++ * The OnePlus Pad 4 speaker port runs stock's 8 x 32-bit TDM frame (48 kHz). TDM setup of each amplifier from the
++ * stock container (/odm/firmware/tfa98xx.cnt, 11.A.38; decoded with the TFA986x field map): all six TDMNBCK 6,
++ * TDMSLOTS 2, TDMSLLN 3, TDMSSIZE 3, TDMFSPOL 0, TDMCLINV 1, TDMSRC0E 1, TDMDCE 1 (reg 0x20 = 0x6f91), and per
++ * amplifier the speaker slot TDMSPKS, the sense-data slot TDMDCS / TDMSRC0S (regs 0x21, 0x22):
++ * TopLeft 0/1/0, TopRight 1/0/1, BottomLeft 2/3/2, BottomRight 3/2/3, MiddleLeft 4/5/4, MiddleRight 5/4/5.
++ */
++#define TFA9865_ICELAND_TDM(r21, r22)					\
++	{ .reg = 0x20, .val = 0x6f91 },					\
++	{ .reg = 0x21, .val = (r21) },					\
++	{ .reg = 0x22, .val = (r22) }
++
++static const struct tfa9865_reg_data tfa9865_iceland_tdm_tl[] = { TFA9865_ICELAND_TDM(0x101f, 0x0210) };
++static const struct tfa9865_reg_data tfa9865_iceland_tdm_bl[] = { TFA9865_ICELAND_TDM(0x321f, 0x0212) };
++static const struct tfa9865_reg_data tfa9865_iceland_tdm_ml[] = { TFA9865_ICELAND_TDM(0x541f, 0x0214) };
++static const struct tfa9865_reg_data tfa9865_iceland_tdm_tr[] = { TFA9865_ICELAND_TDM(0x011f, 0x0211) };
++static const struct tfa9865_reg_data tfa9865_iceland_tdm_br[] = { TFA9865_ICELAND_TDM(0x231f, 0x0213) };
++static const struct tfa9865_reg_data tfa9865_iceland_tdm_mr[] = { TFA9865_ICELAND_TDM(0x451f, 0x0215) };
++
++#define TFA9865_ICELAND_DEV(base, tdm)					\
++	{								\
++		.reg_count = ARRAY_SIZE(base), .reg_data = base,	\
++		.tdm_count = ARRAY_SIZE(tdm), .tdm_data = tdm,		\
++	}
++
++/* in tfa,devindex order: i2c0 0x34 / 0x36 / 0x37, then the second bus 0x34 / 0x36 / 0x37 */
+ static const struct tfa9865_device_config tfa9865_iceland_devices[] = {
+-	{
+-		.reg_count = ARRAY_SIZE(tfa9865_iceland_regs_0__34_36),
+-		.reg_data = tfa9865_iceland_regs_0__34_36,
+-	},
+-	{
+-		.reg_count = ARRAY_SIZE(tfa9865_iceland_regs_0__34_36),
+-		.reg_data = tfa9865_iceland_regs_0__34_36,
+-	},
+-	{
+-		.reg_count = ARRAY_SIZE(tfa9865_iceland_regs_0__37),
+-		.reg_data = tfa9865_iceland_regs_0__37,
+-	},
+-	{
+-		.reg_count = ARRAY_SIZE(tfa9865_iceland_regs_22__34_36),
+-		.reg_data = tfa9865_iceland_regs_22__34_36,
+-	},
+-	{
+-		.reg_count = ARRAY_SIZE(tfa9865_iceland_regs_22__34_36),
+-		.reg_data = tfa9865_iceland_regs_22__34_36,
+-	},
+-	{
+-		.reg_count = ARRAY_SIZE(tfa9865_iceland_regs_22__37),
+-		.reg_data = tfa9865_iceland_regs_22__37,
+-	},
++	TFA9865_ICELAND_DEV(tfa9865_iceland_regs_0__34_36, tfa9865_iceland_tdm_tl),
++	TFA9865_ICELAND_DEV(tfa9865_iceland_regs_0__34_36, tfa9865_iceland_tdm_bl),
++	TFA9865_ICELAND_DEV(tfa9865_iceland_regs_0__37, tfa9865_iceland_tdm_ml),
++	TFA9865_ICELAND_DEV(tfa9865_iceland_regs_22__34_36, tfa9865_iceland_tdm_tr),
++	TFA9865_ICELAND_DEV(tfa9865_iceland_regs_22__34_36, tfa9865_iceland_tdm_br),
++	TFA9865_ICELAND_DEV(tfa9865_iceland_regs_22__37, tfa9865_iceland_tdm_mr),
+ };
+ 
+ static const struct tfa9865_static_config tfa9865_iceland_config = {
+@@ -548,6 +559,15 @@ static int tfa9865_i2c_probe(struct i2c_client *i2c)
+ 				return ret;
+ 			}
+ 		}
++
++		for (i = 0; i < config->dev_config[devindex].tdm_count; i++) {
++			const struct tfa9865_reg_data *reg_data =
++				&config->dev_config[devindex].tdm_data[i];
++			ret = regmap_write(tfa9865->regmap, reg_data->reg, reg_data->val);
++			if (ret)
++				return dev_err_probe(tfa9865->dev, ret,
++						     "failed to write TDM reg 0x%x\n", reg_data->reg);
++		}
+ 	}
+ 
+ 	return devm_snd_soc_register_component(tfa9865->dev, &tfa9865_component,
+-- 
+2.53.0
+

@@ -1,0 +1,44 @@
+From 8f14f9c7ca44b04e06113d1fae8d89bdf71ff1bd Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 07:49:47 +0300
+Subject: [PATCH 05/14] ASoC: qcom: sc8280xp: run the TDM back ends at 32 bit,
+ one channel per slot
+
+The TDM back ends drive 32-bit slots with every slot active (dai-tdm-slot-*), codecs such as the TFA9865
+program their slot length and sample size from the stream width, and the DSP's TDM endpoint expects one
+channel per active slot; the default 16-bit stereo fixup leaves the amplifiers expecting 16-bit slots on a
+32-bit bus and the endpoint with two channels for eight slots. Fix the TDM back ends up to S32_LE and eight
+channels - the stock endpoint format on the OnePlus Pad 4 (48 kHz, 32 bit, 8 channels); the front ends stay
+16-bit stereo, the DSP widens the samples and spreads the channels.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ sound/soc/qcom/sc8280xp.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/sound/soc/qcom/sc8280xp.c b/sound/soc/qcom/sc8280xp.c
+index b991586689c0..11d0b6bc857f 100644
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -244,6 +244,17 @@ static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+ 			snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
+ 		}
+ 		break;
++	case PRIMARY_TDM_RX_0 ... QUINARY_TDM_TX_7:
++		/*
++		 * The TDM ports run 32-bit slots with every slot active (dai-tdm-slot-*);
++		 * codecs derive their slot length from the stream width, and the DSP's
++		 * TDM endpoint wants one channel per active slot.
++		 */
++		snd_mask_none(fmt);
++		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
++		channels->min = 8;
++		channels->max = 8;
++		break;
+ 	default:
+ 		break;
+ 	}
+-- 
+2.53.0
+

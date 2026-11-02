@@ -1,0 +1,46 @@
+From f6c5514889a12b68166d9e0a07cf9a14f02da93a Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 07:52:58 +0300
+Subject: [PATCH 03/14] ASoC: qcom: audioreach: default channel maps for 6 and
+ 8 channels
+
+audioreach_set_default_channel_mapping() knew mono, stereo and four channels; a back end with six or eight
+channels (a TDM port with one channel per slot) sent an all-zero channel map in its endpoint media format
+and its MFC configuration. Add the 5.1 and 7.1 orders.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ sound/soc/qcom/qdsp6/audioreach.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/sound/soc/qcom/qdsp6/audioreach.c b/sound/soc/qcom/qdsp6/audioreach.c
+index 86102394cb15..39d3631cc04a 100644
+--- a/sound/soc/qcom/qdsp6/audioreach.c
++++ b/sound/soc/qcom/qdsp6/audioreach.c
+@@ -356,6 +356,22 @@ void audioreach_set_default_channel_mapping(u8 *ch_map, int num_channels)
+ 		ch_map[1] =  PCM_CHANNEL_FR;
+ 		ch_map[2] =  PCM_CHANNEL_LS;
+ 		ch_map[3] =  PCM_CHANNEL_RS;
++	} else if (num_channels == 6) {
++		ch_map[0] =  PCM_CHANNEL_FL;
++		ch_map[1] =  PCM_CHANNEL_FR;
++		ch_map[2] =  PCM_CHANNEL_FC;
++		ch_map[3] =  PCM_CHANNEL_LFE;
++		ch_map[4] =  PCM_CHANNEL_LS;
++		ch_map[5] =  PCM_CHANNEL_RS;
++	} else if (num_channels == 8) {
++		ch_map[0] =  PCM_CHANNEL_FL;
++		ch_map[1] =  PCM_CHANNEL_FR;
++		ch_map[2] =  PCM_CHANNEL_FC;
++		ch_map[3] =  PCM_CHANNEL_LFE;
++		ch_map[4] =  PCM_CHANNEL_LS;
++		ch_map[5] =  PCM_CHANNEL_RS;
++		ch_map[6] =  PCM_CHANNEL_LB;
++		ch_map[7] =  PCM_CHANNEL_RB;
+ 	}
+ }
+ EXPORT_SYMBOL_GPL(audioreach_set_default_channel_mapping);
+-- 
+2.53.0
+

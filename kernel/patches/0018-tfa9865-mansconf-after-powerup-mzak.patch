@@ -1,0 +1,75 @@
+From b04f37d133cb18a08c75588d7e28704d7092491b Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 12:34:40 +0000
+Subject: [PATCH 08/14] ASoC: codecs: tfa9865: set MANSCONF after every
+ power-up
+
+The amplifier's manager waits in state 1 ("wait for source settings")
+until MANSCONF (SYS_CONTROL1 bit 2, "I2C configured") is set. The board
+tables write it at probe, but the manager clears it by itself when the
+TDM setup doesn't match the incoming frame, and nothing set it again, so
+an amplifier could stay powered, enabled and unmuted, but silent.
+
+Set MANSCONF again whenever the amplifier powers up, once its registers
+are in place, as the vendor driver does, and clear it before powering
+down. With the correct TDM setup it is normally already set; this keeps
+the start-up robust.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+---
+ sound/soc/codecs/tfa9865.c | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/codecs/tfa9865.c b/sound/soc/codecs/tfa9865.c
+index 76a31369f420..906dfc2d40e1 100644
+--- a/sound/soc/codecs/tfa9865.c
++++ b/sound/soc/codecs/tfa9865.c
+@@ -38,6 +38,9 @@
+ #define TFA9865_FS_MASK			0x000f
+ #define TFA9865_FS_SHIFT		0
+ 
++#define TFA9865_SYS_CONTROL1		0x01
++#define TFA9865_MANSCONF_MASK		0x0004	/* "I2C configured": releases the manager from state 1 */
++
+ #define TFA9865_PRODUCT			0x03
+ 
+ #define TFA9865_CLK_CONTROL		0x04
+@@ -312,13 +315,34 @@ static int tfa9865_mute_stream(struct snd_soc_dai *dai, int mute, int direction)
+ 	return 0;
+ }
+ 
++/*
++ * The manager waits in state 1 ("wait for source settings") until the host sets MANSCONF, and it clears
++ * MANSCONF itself when the TDM setup doesn't match the incoming frame. Set it after every power-up, once the TDM
++ * and tuning registers are in place, as the vendor driver does, and clear it before powering down.
++ */
++static int tfa9865_power_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *kcontrol, int event)
++{
++	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
++
++	switch (event) {
++	case SND_SOC_DAPM_POST_PMU:
++		return snd_soc_component_update_bits(component, TFA9865_SYS_CONTROL1,
++						     TFA9865_MANSCONF_MASK, TFA9865_MANSCONF_MASK) < 0 ? -EIO : 0;
++	case SND_SOC_DAPM_PRE_PMD:
++		return snd_soc_component_update_bits(component, TFA9865_SYS_CONTROL1,
++						     TFA9865_MANSCONF_MASK, 0) < 0 ? -EIO : 0;
++	}
++
++	return 0;
++}
++
+ static const struct snd_soc_dapm_widget tfa9865_dapm_widgets[] = {
+ SND_SOC_DAPM_AIF_IN("AIFINL", "Playback", 0, SND_SOC_NOPM, 0, 0),
+ SND_SOC_DAPM_AIF_IN("AIFINR", "Playback", 1, SND_SOC_NOPM, 0, 0),
+ SND_SOC_DAPM_OUT_DRV("AMP", TFA9865_DEVICE_CONTROL, TFA9865_ENBLAMP_SHIFT, 0, NULL, 0),
+ SND_SOC_DAPM_OUTPUT("LINEOUT"),
+ SND_SOC_DAPM_SUPPLY("POWER", TFA9865_DEVICE_CONTROL, TFA9865_POWERDOWN_SHIFT, 1,
+-		    NULL, 0),
++		    tfa9865_power_event, SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+ };
+ 
+ static const struct snd_soc_dapm_route tfa9865_dapm_routes[] = {
+-- 
+2.53.0
+

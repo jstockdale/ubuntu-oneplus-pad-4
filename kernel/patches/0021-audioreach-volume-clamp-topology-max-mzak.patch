@@ -1,0 +1,81 @@
+From 81837cdc8e51682a60248b6d8f1b2399283a9ad5 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Tue, 29 Sep 2026 09:36:32 +0000
+Subject: [PATCH 11/14] ASoC: qcom: audioreach: keep the volume control within
+ the topology's maximum
+
+The volume module's control stores any value written to it and every
+volume widget starts at unity gain, whatever maximum the topology gives
+the control. A board that limits the stream gain in its topology, for
+example because its speakers have no protection yet, can't rely on that
+limit: writes above it are accepted, and the unity default may already
+be above it.
+
+Reject values outside the control's range, report no change when the
+value is the same, and never apply more than the control's maximum when
+the widget powers up.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+---
+ sound/soc/qcom/qdsp6/topology.c | 29 +++++++++++++++++++++++++++--
+ 1 file changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/qcom/qdsp6/topology.c b/sound/soc/qcom/qdsp6/topology.c
+index 656723218bb3..7a931fb798f3 100644
+--- a/sound/soc/qcom/qdsp6/topology.c
++++ b/sound/soc/qcom/qdsp6/topology.c
+@@ -967,6 +967,19 @@ static int audioreach_widget_load_mixer(struct snd_soc_component *component,
+ 	return 0;
+ }
+ 
++/* the topology's maximum for a volume widget's control, or the module's full range if it has none */
++static unsigned int audioreach_pga_max_gain(struct snd_soc_dapm_widget *w)
++{
++	struct soc_mixer_control *mc;
++
++	if (w->num_kcontrols < 1 || !w->kcontrols[0])
++		return U16_MAX;
++
++	mc = (struct soc_mixer_control *)w->kcontrols[0]->private_value;
++
++	return mc ? mc->max : U16_MAX;
++}
++
+ static int audioreach_pga_event(struct snd_soc_dapm_widget *w,
+ 				struct snd_kcontrol *kcontrol, int event)
+ 
+@@ -978,7 +991,11 @@ static int audioreach_pga_event(struct snd_soc_dapm_widget *w,
+ 
+ 	switch (event) {
+ 	case SND_SOC_DAPM_POST_PMU:
+-		/* apply gain after power up of widget */
++		/*
++		 * apply gain after power up of widget, never above the topology's maximum (the default
++		 * gain is unity, which a board may limit, e.g. unprotected speakers)
++		 */
++		mod->gain = min(mod->gain, audioreach_pga_max_gain(w));
+ 		audioreach_gain_set_vol_ctrl(apm, mod, mod->gain);
+ 		break;
+ 	default:
+@@ -1306,9 +1323,17 @@ static int audioreach_put_vol_ctrl_audio_mixer(struct snd_kcontrol *kcontrol,
+ 					       struct snd_ctl_elem_value *ucontrol)
+ {
+ 	struct snd_soc_dapm_widget *dw = snd_soc_dapm_kcontrol_to_widget(kcontrol);
++	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+ 	struct audioreach_module *mod = dw->dobj.private;
++	long gain = ucontrol->value.integer.value[0];
++
++	if (gain < 0 || gain > mc->max)
++		return -EINVAL;
++
++	if (mod->gain == gain)
++		return 0;
+ 
+-	mod->gain = ucontrol->value.integer.value[0];
++	mod->gain = gain;
+ 
+ 	return 1;
+ }
+-- 
+2.53.0
+

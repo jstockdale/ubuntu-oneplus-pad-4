@@ -75,3 +75,21 @@ transform recorded in configs/firmware/iceland.toml:165). Byte-identical
 to the Fedora repo copy and the phonewave port's pinned hash (triple
 corroboration). Already in out/rootfs-overlay and on the tablet; no
 per-unit calibration exists for this part (persist checked).
+
+## Audio (AudioReach topology, built 2026-11-01, C4 A0)
+
+qcom/kaanapali/OnePlus-Pad4-tplg.bin —
+f9bfb173aa8791527b218220b2c774b1b96feea94b0e58308ac9338bb13d0cb1
+(39040 B). BUILT, not extracted: linux-msm/audioreach-topology @
+993a17dcb672357998a463a73f120064d6c74f4f (BSD-3-Clause, Linaro — the
+same project linux-firmware ships sibling *-tplg.bin builds from) +
+the Pad 4 overlay from mzakamin-hub/iceland-mainline @ a7aab9f
+(audio/topology/, vendored verbatim in configs/audio/topology/ with
+LICENSE). Rebuild: scripts/build-audio-topology.sh (bit-reproducible;
+VOL_CTRL_MAX=2056 = -12 dB bring-up cap — the 8192 stock-ceiling raise
+is rung A7 of docs/audio-plan.md, only after the PipeWire limiter
+chain is default). Reference build at 8192: sha d8f4b5f3e304cd2b7162
+ba37d49aeba91e216d5008736936944ebc3a2da3e325 (not shipped; phonewave's
+prebuilt 11b78ff1… provenance still open, audio-plan Q1). Loads as
+card "OnePlus-Pad4" via q6apm topology request (qcom/<driver>/<model>
+path, topology.c:1422).
