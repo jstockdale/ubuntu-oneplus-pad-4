@@ -985,3 +985,34 @@ in NO local source (not in the Fedora clone, not in stock — Android
 does not use ALSA topology): C4 starts by building it from the
 audioreach-topology project or a newer sibling drop. First ops over
 wifi today: dmesg pulled via 192.168.1.250.
+
+## 2026-11-01 — C2 session one: the probe is tamed, the INT line is the war
+
+T0 green (firmware hash on device, blacklist, panel, tools). T1: the
+v17 ghost is exorcised — unpatched modprobe on the live mainline panel
+registered NVTCapacitiveTouchScreen + NVTCapacitivePen and the panel
+survived; but zero touch events, zero IRQs. Analysis per the plan's
+stop-and-analyze branch, in order of elimination:
+- Probe-time download skipped (panel already prepared at registration)
+  → the 0007/0008 fix pair built, module-swapped, verified: download
+  now runs at panel-enabled time ("Update firmware success", fw_ver
+  0x15, PID 0x5F9A) — the fix works as designed.
+- INT line (gpio158): pull-down in TLMM, parked low. Live pull-up via
+  devmem: still low — actively held, not floating.
+- Trigger experiment (level-low test module): 2.4 kHz interrupt storm,
+  IC never releases, and the decisive twist — the storm is a free
+  polling mode, and evtest during 43k polls while tapping produced
+  NOTHING. The IC's touch engine is not running, despite healthy
+  firmware dialogue over SPI.
+- Eliminated against the working Fedora stack: firmware (hash), DT
+  node/pins (downstream dtbo), pin bias (tested), panel reset sequence
+  (absorbed upstream), panel DSI init tables (byte-identical, 114
+  sequences), driver patches (0174/0180 adopted as 0007/0008).
+- Found and adopted: their 0103 — our 144 Hz front porch is 68 (their
+  pre-fix arithmetic slip); stock is 64. Ported as 0009 (panel is
+  builtin → kernel+bundle rebuild in flight). Long shot for the
+  symptom, correct regardless; fbcon likely runs the 144 Hz mode.
+Rails held throughout: no rmmod ever (UAF), reboots swap modules,
+hash-verified installs, one variable per flight. Rootfs currently
+carries the LEVEL-LOW TEST module — restore the edge build before the
+next flight.
