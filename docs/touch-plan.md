@@ -642,3 +642,22 @@ deliberately not shipped. Overlay copy
   diag spi19-off `scripts/make-diag-bootimg.sh:189-193`; firmware pipeline
   `configs/firmware/iceland.toml:165-171`; C2 gate `docs/bringup-plan.md:59-69`;
   v17 record `docs/porting-log.md:509-514, 663-664`.
+
+## 9. Outcome (2026-11-01) — ladder complete
+
+T0–T3: root cause (probe eng-reset on live panel) fixed by 0007/0008;
+the real wall was bonded-DSI command-sync orientation, fixed by 0010
+(with 0009 porch correction along the way). T4: 30-min soak clean,
+full 10-slot multitouch at the coordinate extremes, 60 Hz reports,
+fw 0x15 / PID 0x5F9A. T5 (as flown): the RAM rehearsal turned out
+never to have exercised udev (manual modprobe in the journal;
+blacklist comment postdated the boot) — the flashed boots became the
+true test: auto-load at t≈2.06s/2.08s, zero manual modprobes, 2/2.
+The §4 boot-time-dormant quirk self-resolved via 0007's deferral:
+probe at t≈2s predates panel enable, so the download rides the
+panel-enable path and the engine starts live. T6: ship bundle
+(7fa88c2e…) flashed to boot_b, partition sha verified, taps = 689 IRQ
+edges, 0.2.16 retired the blacklist (tombstones remain in
+iceland.conf). Pen reports as NVTCapacitivePen; BTN_STYLUS caps
+(mzak 0036/0037 adaptation) remain the next touch-adjacent item,
+then coordinate-orientation validation under a desktop.

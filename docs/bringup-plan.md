@@ -10,6 +10,16 @@ resets panel IC), pwrseq_qcom_wcn blacklisted (probe resets SoC; XPU
 suspicion), audio untested, suspend untested, T+60 USB bounce +
 early-console-loss filed, fwupd UFS guard owed before desktop.
 
+Status 2026-11-01: C0–C3 done, flashed, all-automatic. boot_b carries
+the ten-patch ship bundle (boot.img 7fa88c2e…, kernel #33 built 18:47
+PST); 0.2.16 installed — zero blacklists remain. Cold boot brings up
+panel+GPU (Adreno 840/Mesa 26), 10-pt touch (udev coldplug t≈2s),
+wifi (wlp1s0, NM auto-join), BT, battery telemetry, dual consoles,
+slot re-marked each boot. Opens now: C4 audio (tplg), sensors/IMU,
+pen caps (0036/0037), camera/VPU/GNSS, C5 desktop prereqs, C6
+suspend; cosmetics logged (dsi0 pll WARN, smmu handoff faults,
+ath12k regulatory).
+
 Standing rails, unchanged: never set_active / vbmeta / dtbo /
 vendor_boot / GPT edits / EDL. One variable per flight. Any kernel
 change flies as a RAM boot before it is flashed. Restore: boot_b ←
@@ -133,11 +143,15 @@ shared-kernel Android apps. Scoped when C5 lands.
 
 ## Master test order (one line each)
 
-C0: NAT → apt → clock → hygiene.
+C0: NAT → apt → clock → hygiene.                      [done 10-31]
 C1: lottery census → probe fix (5/5) → weston/pixman → GPU fw
-    (kmscube) → backlight.
+    (kmscube) → backlight.                             [done 10-31]
 C2: touch modprobe-with-panel → soak → coldplug 3/3 → unblacklist.
+    [done 11-01: 0007–0010 flashed; coldplug 2/2 on boot_b, taps
+    verified (689 IRQ edges); blacklist retired by 0.2.16]
 C3: pwrseq split v23 → v24 → pin fix → ath12k → BT (keyboard).
+    [done 11-01: 0003–0006 flashed; wifi+BT coldplug automatic;
+    BT pairing test still owed]
 C4: audio PD → topology/UCM → low-volume amp test.
 C5: fwupd guard + suspend-off → desktop install → GDM on glass →
     orientation/scale → soak.

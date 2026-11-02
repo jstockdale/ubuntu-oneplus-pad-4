@@ -1043,3 +1043,60 @@ cycle; coldplug's deferral path (0007) should take the clean
 enabled-time route naturally — T5 verifies, else a one-shot fix.
 Next: T4 soak, T5 coldplug 3/3, T6 flash + 0.2.16 retiring the final
 blacklist line.
+
+## 2026-11-01 (night) — T6 flashed. C2 closed; the tablet is
+## self-contained
+
+Session-restart interlude first: the desktop session died mid
+ship-build (background task orphaned), and a forked session's rerun
+truncated build-ship.log before being killed in turn. The 18:51:59 PST
+bundle survived intact (boot.img 7fa88c2e…, payload dc42b125…,
+metadata + evidence self-verified). Provenance was re-established two
+independent ways: the tablet was found *running* that exact kernel
+(#33, build-stamp 18:47:09 PST — a fastboot RAM boot from the fork's
+testing), while boot_b still hashed to the radio-era image
+(dd3de7d0…). That settled "RAM or flashed?" decisively: RAM. The
+worktree was left with all ten patches applied (seven files modified);
+the build-dir Image of 20:10 is the killed rerun's orphan — the bundle
+is the artifact of record.
+
+Auditing that RAM boot caught a false T5: the journal showed the touch
+module hand-modprobed at t=22.9s, and the #T5# blacklist comment
+postdated the boot — udev auto-load had never actually been exercised.
+Aliases verified matching (spi:NVT-ts-spi ↔ modules.alias), so the
+first flashed boot became the real coldplug test.
+
+T6 flight: fastboot flash boot_b — a real "Writing 'boot_b' OKAY" this
+time (the fastboot-boot-vs-flash tell earns its keep again) — then
+reboot. Verified: partition sha == bundle sha (7fa88c2e…); kernel
+#33/18:47; touch AUTO-loaded at t=2.06s with zero manual modprobes;
+wifi self-joined (predictable naming renamed wlan0 → wlp1s0;
+192.168.1.250); BT UP; backlight 2047; qbootctl re-marked slot B
+bootable+successful. User taps: IRQ 0 → 689 edges. The
+boot-time-dormant worry dissolved exactly as 0007 predicted: at t≈2s
+the panel is not yet enabled, so probe defers the download to
+panel-enable time and the engine comes up live — no extra panel cycle
+needed.
+
+0.2.16 installed (blacklist file now tombstones only). Its postinst
+triggered an initramfs regen (→ ac042cf4…), staged host-side at
+out/initrd.img-7.3.0+.post-0.2.16 pending a sudo cp into rootfs/boot:
+the flashed boot.img carries the old initrd (inert — real-root udev
+governs), but the NEXT bundle must embed the clean one. depmod warned
+modules.builtin.modinfo missing from the hand-installed module tree —
+cosmetic; copy it from the build dir at the next modules_install.
+
+Finale reboot: everything automatic from cold storage — kernel, panel,
+touch (t=2.08s, zero manual), wifi + IP, BT, serial getty, slot flags
+intact. C2 ledger: coldplug 2/2 on the flashed kernel (the plan's
+3/3 RAM rehearsal was superseded by the flash-first reality; taps
+verified on boot 1; every future boot extends the census). C2 CLOSED.
+Cold power-on now yields a ten-patch Ubuntu with display, GPU,
+10-point touch, wifi, BT, battery telemetry and dual consoles — no PC
+in the loop.
+
+Known-benign, filed for polish: one-shot WARN
+"dsi0_phy_pll_out_dsiclk already disabled" (clk refcount in the
+splash→DPU handoff, t=0.39s, taints 512/W); arm-smmu context faults
+SID 0x800 in the same handoff window; ath12k regulatory grumbles;
+OnePlus-Pad4-tplg.bin request (that one is C4's whole job).
