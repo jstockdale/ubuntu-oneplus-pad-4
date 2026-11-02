@@ -1218,3 +1218,41 @@ So: a capture-only FE->BE DSP-link-formation failure in
 q6routing/q6apm (or a topology capture-graph gap), distinct from the
 working playback path. Handed to a focused debug pass against the
 Fedora tree (which captures cleanly on this exact ADSP image).
+
+## 2026-11-02 (cont.) — A5 round 2: latch DISPROVEN on-device;
+## refined to a TX capture-path data-starvation bug
+
+Tested the debug pass's #1 root cause (perpetua-only topology_uncertain
+graph-open latch) empirically before patching. DISPROVEN for our
+failure. With dynamic debug on soc-pcm + q6apm + q6apm-lpass-dais, an
+`arecord -D hw:0,2` shows the FULL DPCM capture lifecycle SUCCEEDING:
+"connected new DPCM Capture path MultiMedia3 Capture <- WCD Capture",
+BE open, FE open, hw_params (48000/2), prepare, "trigger BE WCD
+Capture cmd 1" then ~0.6s later "cmd 0"/hw_free/close. ZERO
+occurrences of "Failed to open graph", "APM_CMD_GRAPH_OPEN failed",
+EUCLEAN or EBUSY. The q6apm graph opens cleanly; the gate (confirmed
+present at q6apm.c:52-55 etc., absent in v7.3) simply never fires
+here. EIO surfaces at pcm_read = DATA STARVATION, not a setup error.
+
+Refined diagnosis: the capture DSP graph starts but the LPASS TX
+analog/SoundWire leg never powers. Mid-capture: tx-macro decimator
+path-ctl reg 0x400 (6ae0000.codec-tx_macro) never asserts CLK_EN; DAPM
+"TX_AIF1 Capture" = in 2 out 0 Off, "TX SWR_INPUT0" Off, "TX_SWR_CLK"
+Off; the POST_PMU unmute dwork never runs. clk_summary shows no
+tx-macro/swr2 TX mclk enabled during capture (PRI_TDM_IBIT 12.288MHz
+is up = speakers).
+
+Discriminator (SoundWire-wide vs TX-specific): WCD RX playback on swr1
+(MultiMedia2 -> RX_CODEC_DMA_RX_0) links and clocks fine (lpass-rx-mclk
+powers 6ad0000.soundwire). So the SoundWire framework + WCD + macros
+work; the fault is TX-capture-specific (swr2 @7630000 / lpass-tx-macro).
+Prime suspect: the perpetua-only ~180-line tx-macro rework
+(capture_mute/stream_mute/dec_active + mute_lock; dec_active set true
+only in the POST_PMU-queued unmute dwork). Handed back to the loaded
+debug context to pin the exact source edit.
+
+Fix-test loop confirmed: audio set is all =m but tx-macro is locked
+under snd_soc_core (16 users) so no hot-swap; a tx-macro-only fix =
+make modules + rsync + RAM-boot the existing #36 bundle (no Image
+rebuild). DT/core fix = full bundle rebuild. Device held booted +
+instrumented for a one-shot test when the fix lands.
