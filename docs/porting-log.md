@@ -1016,3 +1016,30 @@ Rails held throughout: no rmmod ever (UAF), reboots swap modules,
 hash-verified installs, one variable per flight. Rootfs currently
 carries the LEVEL-LOW TEST module — restore the edge build before the
 next flight.
+
+## 2026-11-01 — TOUCH WORKS: the bonded-DSI orientation was the wall
+
+P1 (porch fix): eliminated — correct timing, fresh verified download,
+engine still dead (0009 kept; stock-correct). P2 (audit's #2): revert
+perpetua's sync-on-DSI0 cherry-pick (5892773b169d) + panel primary
+context dsi[0]→dsi[1] = the Fedora/upstream orientation, one variable.
+Display survived the flip; boot-time probe download still left the
+engine dormant — but the first panel cycle's enabled-time download
+LIT IT: IRQ line pulsing (hundreds then 661+), full multitouch:
+four corners at the four coordinate extremes (X 0..33920,
+Y 0..24000), a mid-line horizontal drag tracking at 60 Hz reports,
+slots and touch-major sane. Promoted as permanent 0010.
+
+The TDDI moral: both ICs must hear their broadcast commands in the
+order the firmware expects — the display tolerated either
+orientation, the touch engine only starts under upstream's. Credit:
+the parity audit's composed-tree diff found it (their port-log had
+deliberately dropped the cherry-pick); the porch red herring fell to
+the same method.
+
+Boot-time-dormant quirk noted for T5: a modprobe-time download on an
+already-enabled panel leaves the engine dormant until one panel
+cycle; coldplug's deferral path (0007) should take the clean
+enabled-time route naturally — T5 verifies, else a one-shot fix.
+Next: T4 soak, T5 coldplug 3/3, T6 flash + 0.2.16 retiring the final
+blacklist line.

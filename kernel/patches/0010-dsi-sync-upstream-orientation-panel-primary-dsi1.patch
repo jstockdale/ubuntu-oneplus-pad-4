@@ -1,0 +1,85 @@
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+index 80dac0b79313..959daa88b1d0 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -496,7 +496,7 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
+ int msm_dsi_manager_cmd_xfer(int id, const struct mipi_dsi_msg *msg)
+ {
+ 	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
+-	struct msm_dsi *msm_dsi1 = dsi_mgr_get_dsi(DSI_1);
++	struct msm_dsi *msm_dsi0 = dsi_mgr_get_dsi(DSI_0);
+ 	struct mipi_dsi_host *host = msm_dsi->host;
+ 	bool is_read = (msg->rx_buf && msg->rx_len);
+ 	bool need_sync = (IS_SYNC_NEEDED() && !is_read);
+@@ -507,14 +507,14 @@ int msm_dsi_manager_cmd_xfer(int id, const struct mipi_dsi_msg *msg)
+ 
+ 	/* In bonded master case, panel requires the same commands sent to
+ 	 * both DSI links. Host issues the command trigger to both links
+-	 * when DSI_0 calls the cmd transfer function, no matter it happens
+-	 * before or after DSI_1 cmd transfer.
++	 * when DSI_1 calls the cmd transfer function, no matter it happens
++	 * before or after DSI_0 cmd transfer.
+ 	 */
+-	if (need_sync && (id == DSI_1))
++	if (need_sync && (id == DSI_0))
+ 		return is_read ? msg->rx_len : msg->tx_len;
+ 
+-	if (need_sync && msm_dsi1) {
+-		ret = msm_dsi_host_xfer_prepare(msm_dsi1->host, msg);
++	if (need_sync && msm_dsi0) {
++		ret = msm_dsi_host_xfer_prepare(msm_dsi0->host, msg);
+ 		if (ret) {
+ 			pr_err("%s: failed to prepare non-trigger host, %d\n",
+ 				__func__, ret);
+@@ -533,8 +533,8 @@ int msm_dsi_manager_cmd_xfer(int id, const struct mipi_dsi_msg *msg)
+ 	msm_dsi_host_xfer_restore(host, msg);
+ 
+ restore_host0:
+-	if (need_sync && msm_dsi1)
+-		msm_dsi_host_xfer_restore(msm_dsi1->host, msg);
++	if (need_sync && msm_dsi0)
++		msm_dsi_host_xfer_restore(msm_dsi0->host, msg);
+ 
+ 	return ret;
+ }
+@@ -542,14 +542,14 @@ int msm_dsi_manager_cmd_xfer(int id, const struct mipi_dsi_msg *msg)
+ bool msm_dsi_manager_cmd_xfer_trigger(int id, u32 dma_base, u32 len)
+ {
+ 	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
+-	struct msm_dsi *msm_dsi1 = dsi_mgr_get_dsi(DSI_1);
++	struct msm_dsi *msm_dsi0 = dsi_mgr_get_dsi(DSI_0);
+ 	struct mipi_dsi_host *host = msm_dsi->host;
+ 
+-	if (IS_SYNC_NEEDED() && (id == DSI_1))
++	if (IS_SYNC_NEEDED() && (id == DSI_0))
+ 		return false;
+ 
+-	if (IS_SYNC_NEEDED() && msm_dsi1)
+-		msm_dsi_host_cmd_xfer_commit(msm_dsi1->host, dma_base, len);
++	if (IS_SYNC_NEEDED() && msm_dsi0)
++		msm_dsi_host_cmd_xfer_commit(msm_dsi0->host, dma_base, len);
+ 
+ 	msm_dsi_host_cmd_xfer_commit(host, dma_base, len);
+ 
+diff --git a/drivers/gpu/drm/panel/panel-oneplus-iceland-nt36536.c b/drivers/gpu/drm/panel/panel-oneplus-iceland-nt36536.c
+index d8212ecef9ad..77018dbfe361 100644
+--- a/drivers/gpu/drm/panel/panel-oneplus-iceland-nt36536.c
++++ b/drivers/gpu/drm/panel/panel-oneplus-iceland-nt36536.c
+@@ -63,7 +63,7 @@ static inline struct panel_info *to_panel_info(struct drm_panel *panel)
+ 
+ static int iceland_csot_init_sequence(struct panel_info *pinfo)
+ {
+-	struct mipi_dsi_multi_context dsi_ctx = { .dsi = pinfo->dsi[0] };
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = pinfo->dsi[1] };
+ 	struct drm_dsc_picture_parameter_set pps;
+ 
+ 	/* Commands sent only to dsi0 here. qcom,sync-dual-dsi in dsi nodes will send them to both dsi ports */
+@@ -348,7 +348,7 @@ static int nt36536_prepare(struct drm_panel *panel)
+ static int nt36536_disable(struct drm_panel *panel)
+ {
+ 	struct panel_info *pinfo = to_panel_info(panel);
+-	struct mipi_dsi_multi_context dsi_ctx = { .dsi = pinfo->dsi[0] };
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = pinfo->dsi[1] };
+ 
+ 	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
+ 
