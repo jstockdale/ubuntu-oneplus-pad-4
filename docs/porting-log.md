@@ -1280,3 +1280,29 @@ samples now reach the LPASS codec-DMA but the q6apm capture read path
 (RD_SHARED_MEM / period completion) isn't filling userspace. Handed to
 the loaded debug context (round 3) to pin the q6apm/q6apm-dai capture
 data-delivery cause vs v7.3/Fedora. Device held on #37 for testing.
+
+## 2026-11-02 — #37 FLASHED (speakers + analog mic fix permanent);
+## mic capture narrowed to LPASS codec-DMA (everything else matches Fedora)
+
+Flashed boot_b with the #37 bundle (891fcb6e, patches 0001-0027:
+touch+wifi+BT+speakers+GPR pair+tx-macro revert). Verified: boot_b sha
+== bundle, slot re-marked bootable+successful, flashed kernel carries
+the fixed tx-macro (5425c7e0), touch/wifi/BT all coldplug, card
+OnePlus-Pad4 registers. Speakers + the analog mic-path fix are now the
+on-storage default (survive power-cycle). Decision (user): flash now,
+keep pushing mics.
+
+Mic capture — further narrowed. On the fixed+flashed kernel the FULL
+2-channel analog chain powers and clocks during capture: BOTH
+decimators (reg 0x400 DEC0 = 0x24 AND reg 0x480 DEC1 = 0x24, CLK_EN on
+both), ADC1/ADC2/ADC1 REQ/ADC2 REQ/TX DEC0&1 MUX/TX SWR_INPUT0&1 all
+On, lpass-tx-mclk clocking swr2. The one-decimator/channel-count
+hypothesis is DISPROVEN. DT confirmed identical to Fedora (wcd_tx
+tx-port-mapping <2 2 3 4>, &swr2 override, base-dtsi port framing).
+Yet capture PCM = RUNNING with hw_ptr frozen at 0, zero read-done, no
+errors. So C source + DT + firmware (adsp.mbn byte-identical) + the
+live analog chain ALL match the working Fedora port; the remaining
+difference must be the LPASS TX codec-DMA transfer, a kernel CONFIG,
+or a runtime/userspace detail. Handed to the loaded debug context
+(round 4) to deep-dive those against Fedora. Device flashed on #37,
+held for testing.
