@@ -1501,3 +1501,27 @@ sound/soc/qcom/qdsp6/q6apm.c (snd_q6apm.ko, module-level test loop).
 All 28 patches apply clean. Flight #39 next: expect READ_DONE ->
 event_handler -> period_elapsed, hw_ptr advancing, real mic samples,
 and WCD headphone playback restored.
+
+## 2026-11-02 — CORRECTION to the #38 entry (test-validity audit)
+
+The adversarial re-check found the #38 "sdw.c revert" flight was not a
+proven test: sound/soc/qcom/sdw.c builds into snd-soc-qcom-SDW.ko
+(Makefile: snd-soc-qcom-sdw-y := sdw.o; sc8280xp imports
+qcom_snd_sdw_startup/shutdown from it), NOT snd-soc-qcom-common.ko as
+the #38 entry stated. The on-tablet sha I verified (qcom-common
+73c82991) is byte-identical across every build since Oct 30 because
+common.c never changed — it proved nothing. The full-tree
+rsync --checksum very likely did carry the changed snd-soc-qcom-sdw.ko
+(211cab73 vs the pre-revert cbb4ccd8), but that was never verified on
+the device, so #38's negative result is unproven. The verifier also
+showed those sdw.c hunks mechanically cannot cause a silent
+RUNNING/hw_ptr=0 stall (the -EBUSY guard runs in link startup before
+the stream is active; the clear loops only on failed open/close), so
+even a valid #38 would have been negative — consistent with the later
+kprobe root cause (q6apm READ_DONE payload-size check). Lesson for the
+runbook: after a module-level fix, verify the sha of the .ko that the
+patched FILE builds into (check the Makefile), on the device, after
+the boot — and that it is actually loaded (lsmod). 0027's #37 test was
+valid (lpass-tx-macro.c -> snd-soc-lpass-tx-macro.ko, sha 5425c7e0 !=
+pre-fix 5a1bf38a, behaviour changed). Initramfs shadowing excluded
+(initrd carries only gpio-sbu-mux + qrtr).
