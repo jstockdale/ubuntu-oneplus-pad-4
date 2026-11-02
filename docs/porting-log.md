@@ -1650,3 +1650,30 @@ reproducible); 0.2.19 with the UCM Speaker pin AND FixedBootSequence at
 8192. Deploy = stage the 8192 tplg to /lib/firmware/qcom/kaanapali/ +
 install 0.2.19 + reboot (rootfs-only; the flashed #39 kernel is
 untouched), then verify control max 8192, chain default, listening.
+
+## 2026-11-02 — A7 deploy hit an unrelated boot race: audio stack
+## deferred when the ADSP GPR services never registered
+
+A7 deployed (8192 tplg d8f4b5f3 staged + 0.2.19 UCM pin 8192, asound.
+state wiped, `sudo reboot`). On that boot: "--- no soundcards ---".
+NOT the display lottery (fb0 up, backlight 2047) and NOT A7 (the 8192
+topology is structurally identical to the proven 2056 one — the
+generated conf differs in exactly three `max` lines; binary
+reproduces). /sys/kernel/debug/devices_deferred told the story:
+7660000.codec (va_macro) "unable to get macro clock" -> 6ae0000/6aa0000/
+6b00000/6ac0000.codec "supplier 7660000.codec not ready" -> 6ad0000/
+7630000.soundwire "wait for supplier pinctrl@7760000 rx/tx-swr-active-
+state" (7760000.pinctrl itself deferred) -> sound "snd-sc8280xp:
+Primary TDM Playback: error getting cpu dai name". Root: the macro
+clock comes from q6prm (DSP PRM clock service over GPR); dmesg on that
+boot had NO "gprsvc:service" registrations at all although remoteproc
+adsp was "running" — the ADSP GPR/APR services did not come up, so
+q6prm never probed and everything audio stayed deferred past the
+deferred-probe window. A plain reboot: card registered at 0 minutes,
+deferred list clean. => intermittent ADSP GPR-registration race.
+TRACKED (A8 hardening): adopt Fedora 0130 (ADSP reserved memory
+0x4c00000 -> 0x5000000, "the signed ADSP image spans 0x5000000") and
+0194 (ADSP remote-heap no-map) — the most plausible fixes for a flaky
+ADSP bring-up; census how often it recurs. Runbook: after any reboot,
+confirm /proc/asound/cards before audio tests; if empty, check
+devices_deferred, then reboot.
