@@ -5,14 +5,15 @@
 # (vendored verbatim in configs/audio/topology/, upstream VOL_CTRL_MAX 8192),
 # with the gain cap applied HERE at build time. docs/audio-plan.md §2.1/§4-A0.
 #
-# VOL_CTRL_MAX: 2056 (-12 dB) for the whole speaker bring-up; the raise to
+# VOL_CTRL_MAX: 8192 = 0 dB = stock's stream ceiling (A7, 2026-11-02) now that the PipeWire
+# protection chain (0.2.18) is the default sink. 2056 (-12 dB) was the bring-up cap; the raise to
 # 8192 (stock's 0 dB stream ceiling) is rung A7, only after the PipeWire
 # limiter chain is the proven default sink. Override: VOL_CTRL_MAX=8192 $0
 set -euo pipefail
 
 BASE_REPO=https://github.com/linux-msm/audioreach-topology
 BASE_PIN=993a17dcb672357998a463a73f120064d6c74f4f   # BSD-3-Clause, Linaro
-VOL_CTRL_MAX="${VOL_CTRL_MAX:-2056}"
+VOL_CTRL_MAX="${VOL_CTRL_MAX:-8192}"
 
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
 OVERLAY="$PROJ/configs/audio/topology"               # mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/

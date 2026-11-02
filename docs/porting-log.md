@@ -1677,3 +1677,28 @@ TRACKED (A8 hardening): adopt Fedora 0130 (ADSP reserved memory
 ADSP bring-up; census how often it recurs. Runbook: after any reboot,
 confirm /proc/asound/cards before audio tests; if empty, check
 devices_deferred, then reboot.
+
+## 2026-11-02 — A7 PASSED: speakers at the STOCK ceiling behind the
+## protection chain. Audio ladder A0-A7 COMPLETE.
+
+On a good boot (card at 0 min, deferred list clean): control
+"stream0.vol_ctrl0 MultiMedia1 Playback Volu" max=8192, value 8192
+(0.2.19 UCM FixedBootSequence + Speaker pin); a write of 9999 pins at
+8192 (amixer client clamp + kernel 0021 clamp). iceland-speaker-default
+active on the fresh boot, @DEFAULT_AUDIO_SINK@ = effect_input.speakers.
+3 s -20 dBFS tone through the chain at the stock ceiling: effect_output
+-> raw sink linked, ALL SIX TFA9865 reg 0x12 = 0x0929 (MANSTATE 9,
+operating), zero new dmesg. Mic sanity on the 8192 topology: DEC0 0x24,
+151552 frames, 266098 nonzero, max 2742. Banked: 8192 tplg into
+out/rootfs-overlay (d8f4b5f3), build-audio-topology.sh default 8192,
+manifest updated. A7 is rootfs-only (firmware file + 0.2.19) — already
+permanent on the tablet; kernel #39 flashed unchanged.
+
+AUDIO STATUS: speakers at stock loudness with HPF/EQ/compressor/-1 dBFS
+limiter protection as the default sink; microphones working (kernel
+0028 + UCM); all permanent. Open audio items: (1) ADSP GPR-registration
+boot race -> whole audio stack deferred, seen once (hardening: Fedora
+0130/0194 ADSP memory patches, a kernel/DT flight); (2) wired
+headphones (hw:0,1 plays 4 periods then EIO; needs a headset + a
+Headphones UCM device); (3) BT audio pairing test; (4) mic noise-floor
+check vs Fedora's -64 dBFS; (5) offer 0028 upstream to denialwm.

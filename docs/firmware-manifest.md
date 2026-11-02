@@ -93,3 +93,11 @@ ba37d49aeba91e216d5008736936944ebc3a2da3e325 (not shipped; phonewave's
 prebuilt 11b78ff1… provenance still open, audio-plan Q1). Loads as
 card "OnePlus-Pad4" via q6apm topology request (qcom/<driver>/<model>
 path, topology.c:1422).
+
+Update 2026-11-02 (A7): the SHIPPED OnePlus-Pad4-tplg.bin is now the
+stock-ceiling build, VOL_CTRL_MAX=8192 —
+d8f4b5f3e304cd2b7162ba37d49aeba91e216d5008736936944ebc3a2da3e325
+(39040 B; scripts/build-audio-topology.sh default). The -12 dB
+bring-up build (2056, f9bfb173…) is retained as the reference the
+ladder was flown on. Rail: 8192 only with the PipeWire speaker-
+protection chain (device pkg 0.2.18+, swh-plugins) as the default sink.
