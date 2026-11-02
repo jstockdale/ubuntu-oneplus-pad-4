@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Sat, 3 Oct 2026 08:53:17 +0300
+Subject: [PATCH] Input: nt36536: follow the panel's enable / disable, not its
+ prepare
+
+The NT36536 touch controller is part of the display driver IC. Its firmware
+is downloaded again after every panel power cycle and only starts once the
+display is on. The driver registers as a panel follower on panel_prepared /
+panel_unpreparing: at panel_prepared the DSI host has not started streaming
+yet (the panel sets prepare_prev_first), the resume work downloads the
+firmware and then waits for the REK state, and the wait times out with the
+controller still in the INIT state:
+
+  [NVT-ts-spi] nvt_check_fw_reset_state 629: error, retry=51, buf[1]=0xA0, ...
+
+Seen 0.6 s after a 60 -> 120 Hz refresh-rate modeset (rehearsal R2, 72.7 s)
+and after a display-off period (R1d, 604 s); never in a session without a
+modeset. The stock driver resumes on the panel's UNBLANK event (display on)
+and suspends on EARLY_BLANK (before the display goes off).
+
+Use the panel_enabled and panel_disabling follower hooks instead: they are
+called by drm_panel_enable() after the panel is on and by drm_panel_disable()
+before it goes off, for any panel (the hooks do not depend on the panel's
+own enable / disable callbacks).
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/input/touchscreen/nt36536/nt36xxx.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index d557d0e2e5a6..c5d5406019dd 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -1721,7 +1721,14 @@ static int32_t nvt_ts_resume(struct device *dev)
+ 
+ 
+ #if defined(CONFIG_DRM_PANEL)
+-static int panel_prepared(struct drm_panel_follower *follower)
++/*
++ * The touch controller is part of the display driver IC (TDDI): its firmware is downloaded again after every panel
++ * power cycle and only runs once the display is on. Follow the panel's enable (drm_panel_enable(), after the DSI
++ * host streams) and its disable (before the display goes off), as the stock driver does with the UNBLANK and
++ * EARLY_BLANK events. At panel_prepared the display is not up yet and the REK-state wait after the download times
++ * out (retry=51, state 0xA0) after every refresh-rate modeset.
++ */
++static int panel_enabled(struct drm_panel_follower *follower)
+ {
+ 	struct nvt_ts_data *ts = container_of(follower, struct nvt_ts_data, panel_follower);
+ 
+@@ -1737,7 +1744,7 @@ static int panel_prepared(struct drm_panel_follower *follower)
+ 	return 0;
+ }
+ 
+-static int panel_unpreparing(struct drm_panel_follower *follower)
++static int panel_disabling(struct drm_panel_follower *follower)
+ {
+ 	struct nvt_ts_data *ts = container_of(follower, struct nvt_ts_data, panel_follower);
+ 
+@@ -1749,8 +1756,8 @@ static int panel_unpreparing(struct drm_panel_follower *follower)
+ }
+ 
+ static struct drm_panel_follower_funcs nt36xxx_panel_follower_funcs = {
+-	.panel_prepared = panel_prepared,
+-	.panel_unpreparing = panel_unpreparing,
++	.panel_enabled = panel_enabled,
++	.panel_disabling = panel_disabling,
+ };
+ #endif
+ 
+-- 
+2.43.0
+

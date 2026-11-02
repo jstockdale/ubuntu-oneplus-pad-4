@@ -1,0 +1,54 @@
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index 50090cb8d91f..9e594e5b73aa 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -1268,21 +1268,20 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 	/* If the device follows a DRM panel, configure panel follower */
+ 	if (drm_is_panel_follower(&client->dev)) {
+ 		ts->panel_follower.funcs = &nt36xxx_panel_follower_funcs;
+-		devm_drm_panel_add_follower(&client->dev, &ts->panel_follower);
++		ret = devm_drm_panel_add_follower(&client->dev,
++						  &ts->panel_follower);
++		if (ret) {
++			dev_err_probe(&client->dev, ret,
++				      "failed to register panel follower\n");
++			goto err_panelwait_failed;
++		}
+ 	}
+ #endif
+ 
+-	//---eng reset before TP_RESX high
+-	nvt_eng_reset();
+-	gpiod_set_value_cansleep(ts->reset_gpio, 0);
+-
+-	// need 10ms delay after POR(power on reset)
+-	msleep(10);
+-
+ 	while (!ts->panel_on) {
+ 		if(retry_count > 5) {
+-			ret = -EPROBE_DEFER;
+-			NVT_ERR("panel wait failed, ret=%d\n", ret);
++			ret = dev_err_probe(&client->dev, -EPROBE_DEFER,
++					    "panel is not on\n");
+ 			goto err_panelwait_failed;
+ 		}
+ 		NVT_LOG("panel is off, retry=%d\n", retry_count);
+@@ -1290,6 +1289,18 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 		msleep(200);
+ 	}
+ 
++	/*
++	 * The eng reset is the first IC write; it must never hit the panel
++	 * before the follower reports it prepared (a deferred probe used to
++	 * reset a bootloader-lit TDDI and abandon it - the v17 class).
++	 */
++	//---eng reset before TP_RESX high
++	nvt_eng_reset();
++	gpiod_set_value_cansleep(ts->reset_gpio, 0);
++
++	// need 10ms delay after POR(power on reset)
++	msleep(10);
++
+ 	//---check chip version trim---
+ 	ret = nvt_ts_check_chip_ver_trim_loop();
+ 	if (ret) {
