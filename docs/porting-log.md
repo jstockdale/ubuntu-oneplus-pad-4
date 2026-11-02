@@ -1459,3 +1459,45 @@ Built-in SPEAKERS (TDM, confirmed + flashed) and every other subsystem
 are unaffected. Net audio result: speakers work; mic/headphone await
 the upstream fix. This closes the active audio push; next is the port's
 other subsystems (VPU cheap next, then sensors/GNOME).
+
+## 2026-11-02 — ROOT CAUSE PROVEN BY MEASUREMENT: perpetua 7c8cc30's
+## READ_DONE payload-size check rejects the DSP's 56-byte completions
+
+The double-check overturned the "live SoundWire/DSP starvation" verdict
+with direct evidence. First, the initramfs carries ZERO audio modules
+and the perpetua-only "TX_AIF1 Capture Switch" control is ABSENT on the
+running system, so our module-level tests were valid (0027 really did
+load; 0028-sdw really did load and really did not fix it). Then ftrace
+on the capture event path during a 3 s capture: q6apm_graph_start 8,
+q6apm_read 26, graph_callback 29, event_handler 0, snd_pcm_period_
+elapsed 0. A kprobe on graph_callback decoding the GPR header showed ALL
+16 packets are opcode 0x05001005 = DATA_CMD_RSP_RD_SH_MEM_EP_DATA_
+BUFFER_V2 (READ_DONE) with clean tokens 0-7 — the DSP captures audio,
+fills every buffer and reports each one; the kernel discards every
+report before the client callback. Dumping the q6apm_graph object on
+READ_DONE: cb == event_handler (kallsyms match), tx_data.buf non-NULL,
+num_periods 8, ar_graph non-NULL — every guard passes except one: the
+DSP's payload_size is 56 bytes while sizeof(struct data_cmd_rsp_rd_sh_
+mem_ep_data_buffer_done_v2) is 15 x u32 = 60 (five trailing md_*
+metadata words the firmware does not send). perpetua 7c8cc30d7fc4 added
+"if (... data->payload_size < (int)sizeof(*rd_done)) break;" (git log
+-S confirms) -> 56 < 60 -> silent drop of every READ_DONE. Upstream v7.3
+has the identical 60-byte struct but NO size check (only !ar_graph) and
+reads just status/buf_addr_lsw/msw — hence Fedora (no 7c8cc30) captures.
+The WRITE_DONE case got the same check against a 32-byte struct with
+an md_* tail -> WCD headphone playback dead the same way. This exactly
+matches denialwm's fleet-wide "capture starts but no data arrives"
+regression (iceland/aston/nx809j, suspect 7c8cc30). Earlier chain
+summary stands: 0027 (tx-macro) fixed the analog/DAPM layer; the
+"SoundWire slave Alert / read-FIFO underflow / data-port regs 0" were
+side-effects of the stalled stream, not the cause; the NPL clock was a
+red herring; the sdw.c hunks were not it.
+
+Fix = patch 0028 (NEW, replaces the dropped sdw.c attempt): validate
+READ/WRITE_DONE by the bytes actually dereferenced —
+offsetofend(rd_done, buf_addr_msw) and offsetofend(done, status) —
+keeping the NULL/bounds intent. One-hunk-pair change to
+sound/soc/qcom/qdsp6/q6apm.c (snd_q6apm.ko, module-level test loop).
+All 28 patches apply clean. Flight #39 next: expect READ_DONE ->
+event_handler -> period_elapsed, hw_ptr advancing, real mic samples,
+and WCD headphone playback restored.

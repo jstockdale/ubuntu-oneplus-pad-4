@@ -1,0 +1,54 @@
+From: jstockdale <jstockdale@gmail.com>
+Subject: [PATCH] ASoC: qcom: q6apm: validate READ/WRITE_DONE payloads by the fields used
+
+Perpetua commit 7c8cc30d7fc4 ("ASoC: qcom: hostless modem voice through
+q6apm") added payload-size checks to graph_callback() that reject a
+DATA_CMD_RSP_RD/WR_SH_MEM_EP_DATA_BUFFER_DONE_V2 whose payload is
+smaller than the full kernel struct. The structs carry trailing
+optional metadata words (md_*) that this ADSP firmware does not send:
+on the OnePlus Pad 4 every READ_DONE arrives with a 56-byte payload
+against sizeof(struct data_cmd_rsp_rd_sh_mem_ep_data_buffer_done_v2)
+= 60, so every capture completion is silently dropped — the stream
+reaches RUNNING, the DSP fills and reports every buffer (verified by
+kprobe: 16/16 packets opcode 0x05001005, tokens 0-7, payload_size 56),
+but snd_pcm_period_elapsed() is never called, hw_ptr stays 0 and the
+PCM read fails with EIO. The WRITE_DONE path has the same over-strict
+check (32-byte struct with md_* tail), killing WCD headphone playback.
+Upstream v7.3 has no such check (it only requires ar_graph) and reads
+just the leading fields, which is why the Fedora port captures fine.
+
+Keep the NULL-payload and bounds intent but only require the bytes the
+handler actually dereferences: buf_addr_msw for READ_DONE and status
+for WRITE_DONE (offsetofend). Fixes the denialwm-fleet "capture starts
+but no data arrives" regression on iceland/aston/nx809j.
+
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+diff --git a/sound/soc/qcom/qdsp6/q6apm.c b/sound/soc/qcom/qdsp6/q6apm.c
+index 5ea39bd30746..25d3a92589b5 100644
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -632,7 +632,7 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
+ 		break;
+ 	case DATA_CMD_RSP_WR_SH_MEM_EP_DATA_BUFFER_DONE_V2:
+ 		if (!graph->ar_graph || !data->payload ||
+-		    data->payload_size < (int)sizeof(*done))
++		    data->payload_size < (int)offsetofend(typeof(*done), status))
+ 			break;
+ 		client_event = APM_CLIENT_EVENT_DATA_WRITE_DONE;
+ 		mutex_lock(&graph->lock);
+@@ -660,8 +660,13 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
+ 
+ 		break;
+ 	case DATA_CMD_RSP_RD_SH_MEM_EP_DATA_BUFFER_V2:
++		/*
++		 * The ADSP's READ_DONE omits the trailing metadata words
++		 * (56 bytes here vs the 60-byte struct); only require the
++		 * fields this handler dereferences.
++		 */
+ 		if (!graph->ar_graph || !data->payload ||
+-		    data->payload_size < (int)sizeof(*rd_done))
++		    data->payload_size < (int)offsetofend(typeof(*rd_done), buf_addr_msw))
+ 			break;
+ 		client_event = APM_CLIENT_EVENT_DATA_READ_DONE;
+ 		mutex_lock(&graph->lock);
