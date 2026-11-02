@@ -1,11 +1,12 @@
 Package: ubuntu-iceland-device
-Version: 0.2.16
+Version: 0.2.17
 Section: admin
 Priority: optional
 Architecture: arm64
 Maintainer: Ubuntu iceland port contributors <noreply@example.invalid>
 Depends: systemd, kmod, e2fsprogs, util-linux, cloud-guest-utils,
- systemd-zram-generator
+ systemd-zram-generator, alsa-ucm-conf, alsa-utils, pipewire, pipewire-pulse,
+ wireplumber
 Description: Device support for the OnePlus Pad 4 (iceland)
  Board-specific integration for the OPD2514 running an Ubuntu userspace on
  the Perpetua mainline kernel:
@@ -14,7 +15,11 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     initramfs-tools at LABEL=UBPAD4_ROOT, because the stock vendor_boot
     cmdline carries no root= and is deliberately never rewritten;
   * first-boot root filesystem expansion to the whole userdata partition;
-  * two-tier swap: zstd-compressed zram in front of the storage.
+  * two-tier swap: zstd-compressed zram in front of the storage;
+  * audio userspace: the Pad 4 UCM2 profile (speakers at the -12 dB
+    bring-up cap, internal mics at stock levels) and the WirePlumber
+    soft-mixer rule, in front of the AudioReach topology the firmware
+    overlay ships.
  .
  This package grows the way its gts9u counterpart did: one integration at a
  time, each added only when the matching regression has been observed on this
