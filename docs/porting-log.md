@@ -1306,3 +1306,37 @@ difference must be the LPASS TX codec-DMA transfer, a kernel CONFIG,
 or a runtime/userspace detail. Handed to the loaded debug context
 (round 4) to deep-dive those against Fedora. Device flashed on #37,
 held for testing.
+
+## 2026-11-02 — SCOPE CHANGE: the bug is the LPASS codec-DMA (both
+## directions), not mic-specific. Speakers (TDM) unaffected.
+
+Round-4 decisive test: WCD HEADPHONE playback via RX_CODEC_DMA_RX_0
+(hw:0,1) FAILS with the identical write EIO as mic capture. So the
+LPASS codec-DMA transfer is broken in BOTH directions (playback +
+capture). The "playback works" result was the TDM SPEAKER path only
+(PRIMARY_TDM_RX_0 -> q6afe/PRM -> TFA amps), a DIFFERENT LPASS
+interface that does NOT use codec-DMA. Consequences: built-in speakers
+work (flashed, permanent); WCD headphone-out AND both mics (all
+codec-DMA) do not.
+
+Concrete lead: during an active codec-DMA stream, LPASS_CLK_ID_TX_CORE_
+MCLK is enabled (4/4, held by codec@6ae0000 tx-macro) but
+LPASS_CLK_ID_TX_CORE_NPL_MCLK is DISABLED (0/0, deviceless) — likewise
+RX_CORE_NPL and VA_CORE_MCLK/2X are 0. LPASS_HW_MACRO + LPASS_HW_DCODEC
+votes are held (6/6). Bit clock present, frame/word (NPL) clock absent
+= codec-DMA periods never complete (hw_ptr frozen, EIO), matching the
+observed stall in both directions.
+
+Status of comparison vs Fedora: round 4 excluded CONFIG (our .config
+has SND_SOC_LPASS_CDC_DMA=m, QDSP6 APM/PRM/LPASS set, etc.; Fedora
+required.config forces only TFA9865=m), unadopted patches (none for
+q6afe/codec-dma/capture), and q6prm clock-ID bugs (our 0012 is additive
+TDM IDs only). Source (q6apm*, q6apm-lpass-dais, audioreach codec-dma,
+soundwire/qcom, wcd939x, tx-macro post-0027), DT, and firmware
+(adsp.mbn) all byte/functionally identical to v7.3/Fedora. So the
+NPL-not-voted is a RUNTIME clock-tree behaviour, not a diffable source
+regression — and we have NO working codec-DMA path on our own device to
+diff against (only TDM works). Cracking it likely needs Fedora booted
+on this unit for a live clk_summary/codec-dma register reference, or a
+deep LPASS macro/q6prm clock-tree investigation. Precise known-issue;
+speakers + everything else unaffected.
