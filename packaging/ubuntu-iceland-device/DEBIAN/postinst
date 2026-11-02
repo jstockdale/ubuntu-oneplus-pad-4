@@ -27,6 +27,10 @@ case "$1" in
 			systemctl enable ubuntu-iceland-usb-gadget.service >/dev/null 2>&1 || true
 			systemctl enable serial-getty@ttyGS0.service >/dev/null 2>&1 || true
 			systemctl enable systemd-networkd.service >/dev/null 2>&1 || true
+			# 0.2.18: the protected "Speakers" filter-chain sink becomes each
+			# account's configured default output (WirePlumber 0.5 does not
+			# pick filter sinks by priority alone). Global user-unit enable.
+			systemctl --global enable iceland-speaker-default.service >/dev/null 2>&1 || true
 		fi
 		# A changed conf.d must reach the installed initramfs; harmless in
 		# the image build, where make-initramfs.sh regenerates anyway.

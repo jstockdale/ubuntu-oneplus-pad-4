@@ -26,7 +26,8 @@ find "$build" -type f -exec chmod 0644 {} +
 # Executable bits are part of the package's behavior, not cosmetics:
 # initramfs-tools SILENTLY skips a non-executable hook, which is how the
 # first initramfs shipped without rescue/mainline-init.
-chmod 0755 "$build"/DEBIAN/postinst "$build"/usr/libexec/* \
+find "$build"/usr/libexec -type f -exec chmod 0755 {} +
+chmod 0755 "$build"/DEBIAN/postinst \
 	"$build"/etc/initramfs-tools/hooks/* "$build"/etc/initramfs-tools/scripts/init-top/* 2>/dev/null || true
 
 # dpkg-deb refuses stray editor droppings and so should we.

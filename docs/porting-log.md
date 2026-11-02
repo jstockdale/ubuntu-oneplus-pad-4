@@ -1614,3 +1614,39 @@ pairing test, mic noise-floor check vs Fedora's -64 dBFS (ADPT
 disable 0059 is in). Upstream: 0028 should be offered to denialwm
 (their open iceland/aston/nx809j regression; Reixo0 carries the same
 fix as fcabe5fd25c7).
+
+## 2026-11-02 — A6 speaker-protection chain (0.2.18) + A7 prepped
+
+Interim lever: the PipeWire speaker sink soft volume was 0.40 (plus
+the -12 dB DSP cap) — the owner heard playback "like 25%". Raised the
+soft volume to 1.0 (wpctl; WirePlumber persists it) — safe, the 2056
+DSP cap still bounds everything. Owner-confirmed louder replay.
+
+A6 (0.2.18): ported the Fedora chain verbatim — /usr/share/pipewire/
+pipewire.conf.d/62-iceland-speakers.conf (filter-chain sink "Speakers"
+= effect_input.speakers: 4th-order 150 Hz HPF -> stock-tone EQ cuts ->
+sc4 compressor 2.5:1 over -24 dBFS +9 dB make-up -> fast_lookahead_
+limiter at -1 dBFS; flags ifexists+nofail; target.object = our
+alsa_output.platform-sound.HiFi__Speaker__sink), /usr/share/wireplumber/
+wireplumber.conf.d/62-iceland-speaker-raw.conf (raw sink -> "Speakers
+(raw, unprotected)", priority.session 100), /usr/libexec/iceland/
+iceland-speaker-default + user unit (WantedBy wireplumber.service,
+enabled --global in postinst) which sets effect_input.speakers as the
+CONFIGURED default (WirePlumber 0.5 lists filter sinks under Filters
+and never picks them by priority). Depends += swh-plugins 0.4.17
+(LADSPA sc4_1882 + fast_lookahead_limiter_1913 in /usr/lib/ladspa).
+On-device: chain nodes present (plugins loaded), raw sink demoted,
+effect_output.speakers -> raw sink linked, voice recording played
+through the chain. Packaging bug found + fixed: build-device-package.sh
+restored exec bits with a non-recursive chmod usr/libexec/* so the
+promoter in usr/libexec/iceland/ shipped 0644 ("Permission denied");
+now `find usr/libexec -type f -exec chmod 0755`. Promoter verified
+manually: "configured default output effect_input.speakers",
+wpctl @DEFAULT_AUDIO_SINK@ = Speakers.
+
+A7 prepped (not deployed): topology rebuilt at VOL_CTRL_MAX=8192 into
+out/tplg-8192/ (sha d8f4b5f3, == the earlier reference build —
+reproducible); 0.2.19 with the UCM Speaker pin AND FixedBootSequence at
+8192. Deploy = stage the 8192 tplg to /lib/firmware/qcom/kaanapali/ +
+install 0.2.19 + reboot (rootfs-only; the flashed #39 kernel is
+untouched), then verify control max 8192, chain default, listening.
