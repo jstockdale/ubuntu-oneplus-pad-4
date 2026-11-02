@@ -1256,3 +1256,27 @@ under snd_soc_core (16 users) so no hot-swap; a tx-macro-only fix =
 make modules + rsync + RAM-boot the existing #36 bundle (no Image
 rebuild). DT/core fix = full bundle rebuild. Device held booted +
 instrumented for a one-shot test when the fix lands.
+
+## 2026-11-02 — A5 fix (0027) CONFIRMED at the analog layer; a
+## second DSP-capture-DMA stall now isolated
+
+Flew the tx-macro revert (patch 0027, module rebuilt sha 5425c7e0,
+kernel #37 RAM boot). CONFIRMED it fixes the layer the debug pass
+identified: via the UCM/PipeWire capture path the tx-macro chain now
+fully powers (it never did before) — reg 0x400 = 0x24 (CLK_EN
+asserted, was 0x14), DAPM "TX_AIF1 Capture"/"TX DEC0 MUX"/"ADC1" all
+On with the WCD-direct leg correctly dark, and lpass-tx-mclk enabled
+(9.6MHz) clocking swr2. The compose-capture-mutes abort was the
+analog-path bug; 0027 resolves it.
+
+Remaining (new, distinct layer): the capture PCM reaches state
+RUNNING but hw_ptr is frozen at 0 (avail_max 0, delay 0) for the whole
+capture — the DSP AudioReach capture graph runs but DMAs no data into
+the ring; wav is header-only; no kernel errors. Selecting the real
+tx-macro leg (the fix) exposed this: pre-fix, pw-record delivered
+~215040 silent frames (ring advancing on the degenerate WCD-direct/
+decimator-off path); post-fix the ring is frozen. So the analog
+samples now reach the LPASS codec-DMA but the q6apm capture read path
+(RD_SHARED_MEM / period completion) isn't filling userspace. Handed to
+the loaded debug context (round 3) to pin the q6apm/q6apm-dai capture
+data-delivery cause vs v7.3/Fedora. Device held on #37 for testing.
