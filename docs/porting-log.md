@@ -1380,3 +1380,41 @@ codec-DMA graph on our side to see if the DSP faults the transfer; (c)
 investigate the wcd_tx persistent-Alert (WCD-SDW interrupt/enumeration)
 though it doesn't alone explain the RX failure. Tracked known-issue.
 Built-in speakers + all other subsystems unaffected and working.
+
+## 2026-11-02 — BREAKTHROUGH: codec-DMA regression identified w/
+## external corroboration; sdw.c revert (0028) built
+
+Round-6 external research (the "SWR read FIFO underflow" lead) found
+the answer OUTSIDE our tree. The denialwm/phonewave project's own
+FEATURES.md documents this EXACT bug as a REGRESSION on THREE devices:
+ - iceland (ours): "Microphones | broken | Capture starts but no data
+   arrives; aston too. Suspect 7c8cc30d7fc4"
+ - aston (OnePlus 13) + nx809j: same "capture stalls now", worked
+   ~Oct-22 (devices-73) -> broken ~Oct-28 (devices-139).
+Commit 7c8cc30d7fc4 ("ASoC: qcom: hostless modem voice through q6apm",
+Doctor Logix, Oct 24) is denialwm-ONLY — Fedora/mzakamin never carried
+it. THAT is why 5 rounds of "everything matches Fedora" found nothing:
+the regression is in a denialwm-exclusive commit, not a Fedora-vs-us
+diff. (Same commit added the topology_uncertain latch we cleared in
+round 2 and the GRAPH_OPEN handling; its codec-DMA-breaking part is the
+sdw.c stream-lifecycle hunks.)
+
+Root-cause hunk: 7c8cc30's additions to sound/soc/qcom/sdw.c — an
+-EBUSY guard in qcom_snd_sdw_startup (aborts if a codec DAI stream is
+already active), an err-path set_stream(NULL) clear loop, and a
+set_stream(NULL) clear loop in qcom_snd_sdw_shutdown. This is the ONLY
+part of 7c8cc30 in the SoundWire/codec-DMA path but NOT the (working)
+TDM path. It wedges the WCD SoundWire stream -> both codec-DMA
+directions starve (mic swr2 + headphone swr1), matching our Test-1
+both-directions-dead finding, the wcd_tx ALERT, and the read-FIFO
+underflow.
+
+Fix: patch 0028 reverts ONLY the sdw.c hunks (voice frontend files left
+in place, gated off on iceland). Verified the result == upstream v7.3
+sdw.c (qcom_snd_sdw_startup + shutdown, diff-clean). All 28 patches
+apply clean; sdw.c builds into snd-soc-qcom-common.ko (module-level
+test loop). Bundle building; flight #38 next: expect arecord to deliver
+real frames AND WCD headphone playback to return. First fix with direct
+external corroboration (the denialwm devs' own open bug + suspect)
+rather than inference. NOTE: denialwm may land their own fix upstream —
+watch denialwm/linux-perpetua.
