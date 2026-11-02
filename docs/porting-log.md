@@ -1525,3 +1525,15 @@ the boot — and that it is actually loaded (lsmod). 0027's #37 test was
 valid (lpass-tx-macro.c -> snd-soc-lpass-tx-macro.ko, sha 5425c7e0 !=
 pre-fix 5a1bf38a, behaviour changed). Initramfs shadowing excluded
 (initrd carries only gpio-sbu-mux + qrtr).
+
+Addendum (same day): on-tablet sha of snd-soc-qcom-sdw.ko.zst reads
+211cab73 = the REVERTED build, so the full-tree rsync did carry the
+#38 fix and #38 WAS a valid negative test (only my hash check looked
+at the wrong file). Consistent with the real cause. Corroboration for
+0028: Reixo0's nx809j kernel commit fcabe5fd25c7 "ASoC: qcom: q6apm:
+accept read-done replies without metadata" is the IDENTICAL one-line
+fix (offsetofend(typeof(*rd_done), buf_addr_msw)); the AudioReach SPF
+engine source (rd_sh_mem_ep_api.h) defines READ_DONE v2 as 14 x u32 =
+56 bytes with no "offset" word, i.e. the kernel struct carries a
+spurious field. Pre-fix on-tablet snd-q6apm.ko.zst = dcb101ed (the
+#39 flight must show a different, loaded sha).
