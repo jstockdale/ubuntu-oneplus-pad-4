@@ -1587,3 +1587,30 @@ WCD headphone-out (hw:0,1) plays 4 periods then EIO with a guessed
 manual route and NO headset plugged in; needs a headset + a proper
 Headphones UCM device to test for real. Audio ladder A6 (PipeWire
 limiter chain) and A7 (gain raise to 8192) remain as planned.
+
+## 2026-11-02 — #39 FLASHED: microphones permanent; voice loopback
+## confirmed. C4 core audio complete (speakers + mics).
+
+Flashed boot_b with the #39 bundle (a4060fbb, patches 0001-0028). On
+the fresh storage boot: boot_b sha == bundle, slot B re-marked
+bootable+successful, kernel #39, fixed snd-q6apm (76954e7e) loaded,
+card OnePlus-Pad4 registered, touch/wifi/BT coldplug — no regressions.
+Voice loopback on that same cold boot: pw-record from
+alsa_input.platform-sound.HiFi__Mic__source for 5.18 s captured the
+owner speaking at peaks 4961/5317 (ch0/ch1), RMS -35.0/-33.7 dBFS
+(ambient earlier ~2300 peak / -42 dBFS), then pw-play rendered it
+through the TDM speakers at the bring-up cap. The complete chain —
+mics -> WCD9395 -> SoundWire -> tx-macro -> codec-DMA -> ADSP ->
+q6apm (0028) -> PipeWire -> speakers — works from storage with no PC
+in the loop.
+
+Audio status: SPEAKERS working + flashed; MICROPHONES working +
+flashed (kernel 0028 + 0.2.17 UCM/WirePlumber). Remaining audio
+ladder: A6 PipeWire speaker-protection chain (swh-plugins limiter,
+raw-sink demotion), A7 raise VOL_CTRL_MAX 2056 -> 8192 (stock
+ceiling) only after A6 is default, wired headphones (hw:0,1 plays 4
+periods then EIO; needs a headset + a Headphones UCM device), BT
+pairing test, mic noise-floor check vs Fedora's -64 dBFS (ADPT
+disable 0059 is in). Upstream: 0028 should be offered to denialwm
+(their open iceland/aston/nx809j regression; Reixo0 carries the same
+fix as fcabe5fd25c7).
