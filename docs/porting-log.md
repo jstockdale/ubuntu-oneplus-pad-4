@@ -1340,3 +1340,43 @@ diff against (only TDM works). Cracking it likely needs Fedora booted
 on this unit for a live clk_summary/codec-dma register reference, or a
 deep LPASS macro/q6prm clock-tree investigation. Precise known-issue;
 speakers + everything else unaffected.
+
+## 2026-11-02 — codec-DMA root cause = live SoundWire-bus transfer;
+## static analysis exhausted (5 agent rounds). NPL was a red herring.
+
+Round 5 (definitive negatives): there is NO missing codec-DMA init or
+clock vote. sm8550/kaanapali tx-macro binds lpass_ver_11 (flags =
+RESET_SWR only, NO HAS_NPL_CLOCK), so TX_CORE_NPL_MCLK / RX_CORE_NPL /
+VA_CORE_MCLK being deviceless/0 is the CORRECT expected state (v9/sm8250
+artifact, gone on v11). codec-DMA needs only TX/RX_CORE_MCLK (voted) +
+LPASS_HW_MACRO/DCODEC (held 6/6) — all present. The SoundWire stream
+IS prepared+enabled (sdw_prepare_stream + sdw_enable_stream,
+sc8280xp.c:353-385 / sdw.c, byte-identical to v7.3). audioreach
+codec-dma media-format/intf-cfg (audioreach.c:1018-1076) identical.
+q6prm 0012 (additive TDM IDs) exonerated. flat-cache warning benign
+(regmap touched while runtime-suspended). The Srinivas q6apm hw-pointer
+fix is already in our tree. So kernel+clock+config+DT+firmware are all
+exhaustively Fedora-identical and internally correct.
+
+Localization: the two DEAD paths (RX codec-DMA via swr1, TX codec-DMA
+via swr2) are exactly the two that ride SoundWire; the WORKING path
+(TDM speakers) does not. Device evidence: WCD SDW slaves —
+wcd_rx(sdw:2...:4)=Attached, wcd_tx(sdw:3...:3)=ALERT (persists during
+capture); swr2 SWRM regs during capture show 0x010=0x40e 0x014=0x100001
+but data-port regs 0x030/0x034=0x00 (no port transfer); bus clocks run
+(lpass-tx-mclk->swr2 9.6MHz). No kernel errors (silent). BUT: RX
+playback ALSO fails though wcd_rx is Attached — so it is NOT simply
+"wcd_tx stuck in Alert"; the codec-DMA<->SoundWire port transfer fails
+even with an attached slave. This is a live-bus / WCD-SDW-streaming or
+DSP-codec-DMA-transfer condition.
+
+Conclusion: static analysis is exhausted; every diffable input matches
+the working Fedora port. The decisive next evidence requires a LIVE
+reference we don't have on our own device (only TDM works). Paths
+forward: (a) boot the Fedora iceland image on this unit once and diff
+the running soundwire-device status + swr2 SWRM regs + GPR codec-DMA
+graph trace during a working capture; (b) a GPR/DSP trace of the
+codec-DMA graph on our side to see if the DSP faults the transfer; (c)
+investigate the wcd_tx persistent-Alert (WCD-SDW interrupt/enumeration)
+though it doesn't alone explain the RX failure. Tracked known-issue.
+Built-in speakers + all other subsystems unaffected and working.
