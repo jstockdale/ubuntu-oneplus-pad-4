@@ -1565,3 +1565,25 @@ issue, parked behind mic userspace wiring.
 
 Node-id lesson: PipeWire node ids are per-boot; find the source BY
 NAME ("Internal microphones"), never by a cached number.
+
+## 2026-11-02 — PipeWire mic capture WORKS; A5 CLOSED end to end
+
+pw-dump: node 50 = alsa_input.platform-sound.HiFi__Mic__source
+(Audio/Source, api.alsa.path hw:OnePlusPad4,2 — correct) and it was
+ALREADY the default source. The earlier zero-captures were a tooling
+artefact: `pw-record --target 50` (numeric) was not honoured and
+pw-link showed the stream linked to HiFi__Speaker__sink:monitor_FL/FR
+(hence WRITE_DONEs + silence). `pw-record --target
+alsa_input.platform-sound.HiFi__Mic__source` (by NAME) links to
+Mic__source:capture_FL/FR. Result: DEC0/DEC1 0x24, MIC BIAS1/ADC1/
+TX_AIF1 Capture On, pcm2c RUNNING hw_ptr 109439, READ_DONE 120 ->
+event_handler 120 -> period_elapsed 120, capture 228352 frames
+(4.76 s), 417061 nonzero samples, max 2287, RMS -42.4 dBFS = real
+room audio through the desktop path. Apps using the default source
+get the mics. Mic capture is DONE (kernel 0028 + existing 0.2.17 UCM/
+WirePlumber userspace). Kernel #39 (0001-0028) is RAM-booted, NOT yet
+flashed — flash to make the mic fix permanent. Remaining audio item:
+WCD headphone-out (hw:0,1) plays 4 periods then EIO with a guessed
+manual route and NO headset plugged in; needs a headset + a proper
+Headphones UCM device to test for real. Audio ladder A6 (PipeWire
+limiter chain) and A7 (gain raise to 8192) remain as planned.
