@@ -1418,3 +1418,44 @@ real frames AND WCD headphone playback to return. First fix with direct
 external corroboration (the denialwm devs' own open bug + suspect)
 rather than inference. NOTE: denialwm may land their own fix upstream —
 watch denialwm/linux-perpetua.
+
+## 2026-11-02 — codec-DMA: root cause CONFIRMED but fix is upstream's
+## to make; sdw.c revert insufficient; 0028 dropped, tracked.
+
+Flew 0028 (sdw.c-hunks revert of 7c8cc30) as #38 RAM boot. Result:
+did NOT fix codec-DMA capture. Behaviour is intermittent/racy —
+PipeWire capture still freezes (decimator powers, reg 0x400=0x24, but
+hw_ptr stuck at 0); raw arecord flips between 144000 silent frames and
+pcm_read EIO run-to-run. So the sdw.c stream-lifecycle hunks were not
+the whole regression.
+
+Checked the other 7c8cc30 hunks for a next revert target: the
+q6apm-lpass-dais.c (+13), sc8280xp.c (+68 voice links) and
+audioreach.c (+361) hunks are ALL voice-gated — q6apm_voice_backend_link()
+and q6apm_voice_board() return NULL/false on iceland (we are not
+oneplus,aston), so they are inert here and reverting them changes
+nothing. The q6apm.c latch does not fire (round 2). apr.c (+22, GPR
+callback order) is shared with the WORKING TDM path. So sdw.c was the
+only non-gated codec-DMA-path hunk, and it was insufficient — the
+regression is a subtler interaction not isolatable to one cleanly-
+revertable hunk on our tree, and a full revert of 7c8cc30 conflicts
+with our speaker patches 0011-0024 (which were written on top of its
+code in q6apm.c/audioreach.c/sc8280xp.c/topology.c).
+
+Upstream status: fetched denialwm/linux-perpetua — 90 commits past our
+pin, 7c8cc30 STILL present (not reverted), NO SoundWire/codec-DMA fix
+among them. The denialwm devs have this open (FEATURES.md: iceland+
+aston+nx809j broken, suspect 7c8cc30) with no fix yet. So nobody has
+fixed it anywhere; it is genuinely an open upstream regression.
+
+DECISION: dropped patch 0028 (verified-correct restore of upstream
+sdw.c, but insufficient and could conflict with the eventual
+authoritative fix; recoverable from git b2b11bf). Patch series back to
+0001-0027 = exactly what is flashed on #37. codec-DMA audio (WCD
+headphone-out + both mics) tracked as a precise known-issue pinned to
+upstream regression 7c8cc30; the clean fix will come from the denialwm
+project's own patch (watch perpetua/v7.3) or a kernel rebase past it.
+Built-in SPEAKERS (TDM, confirmed + flashed) and every other subsystem
+are unaffected. Net audio result: speakers work; mic/headphone await
+the upstream fix. This closes the active audio push; next is the port's
+other subsystems (VPU cheap next, then sensors/GNOME).
