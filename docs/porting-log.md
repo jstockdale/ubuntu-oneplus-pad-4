@@ -1151,3 +1151,70 @@ Flight plan next (plan §4): A2 bundle = RAM boot + hand-installed
 modules, SILENT gate (six "Found TFA9865", EINVAL above 2056 on the
 stream volume, routes read 0). First sound only at A3: 1 s, -30 dBFS,
 440 Hz, hand on chassis, MANSTATE operating on all six.
+
+## 2026-11-01 (23:00) — A2 flew clean; A3: FIRST SOUND
+
+A2 bundle (kernel #35, 22:05 PST, patches 0001-0024, post-0.2.16
+initrd ac042cf4) RAM-booted after rsync'ing the full stripped module
+tree (audio set sha-verified against modules.sha256; depmod clean —
+also retired the modules.builtin.modinfo warning). G-A2 all green,
+silent: card up on the TDM DT, SIX "Found TFA9865 MN1" (right bank
+enumerates as i2c bus 4, not downstream's 22 — cosmetic), speaker
+route off, control ceiling hard at max=2056 (an attempted 8192 pins
+to 2056; amixer clamps client-side so the EINVAL leg of 0021 goes
+unexercised — the ceiling itself is proven). No regressions.
+
+A3 (guarded): 1.0 s, 440 Hz, -30 dBFS stereo tone via
+plughw:OnePlusPad4,0 with the MM1→PRIMARY_TDM_RX_0 route armed only
+for the burst. Mid-play regmap reads: ALL SIX amps reg12=0x0929 —
+MANSTATE 9, operating. Zero new dmesg lines across the window, route
+verified off after. Replayed once; USER CONFIRMS AUDIBLE. First sound
+on the port, at the bring-up cap. Per-side formal check rides A4's
+channel test (GNOME part deferred to C5).
+
+## 2026-11-02 — A3 speakers CONFIRMED; A4 up; A5 mic capture blocked
+## (precise signature)
+
+A3: user confirmed audible tone from the speakers on the A2 bundle
+(kernel #35/#36). Speaker chain proven end to end at the -12 dB cap,
+all six amps MANSTATE 9. This is the hardware-risk gate and it is
+PASSED.
+
+A4: device package 0.2.17 ships the Fedora UCM2 profile (speaker pin
+held at the 2056 bring-up cap, not their 8192) + the phonewave
+WirePlumber soft-mixer rule + pipewire/wireplumber/alsa-ucm-conf
+deps. UCM loads (our card longname is "OnePlus-Pad4", so it needs its
+own conf.d/kaanapali/OnePlus-Pad4.conf symlink beside Fedora's
+oneplus-OnePlusPad4.conf). WirePlumber builds the Speaker sink and
+"Internal microphones" source; soft-mixer active; playback through
+PipeWire works.
+
+GPR pair 0025/0026 (infiniti 0109 callback-before-probe + 0131
+1024-byte intents) built into kernel #36. The boot-time "CMD timeout
+for [1001021]" persists once (cosmetic, does not block the tplg).
+
+A5 BLOCKED — mic capture returns EIO, zero frames, no hardware risk.
+Signature, fully isolated:
+ - FE "MultiMedia3 Capture" (hw:0,2) opens then fails: debugfs state
+   = "No active DSP links" — the DPCM core attaches NO back end.
+ - The whole capture DAPM chain stays Off even mid-arecord:
+   TX_AIF1 Capture, ADC1 REQ, MIC BIAS1, TX SWR_INPUT0, TX_SWR_CLK.
+ - tx-macro decimator path-ctl (reg 0x400 on 6ae0000.codec-tx_macro)
+   never asserts CLK_EN; the POST_PMU unmute dwork never runs because
+   the decimator widget never powers.
+ - The routing mixer "MultiMedia3 Mixer TX_CODEC_DMA_TX_3" is a
+   2-channel BOOLEAN reading on,off and refusing on,on — but the
+   playback mixer "PRIMARY_TDM_RX_0 Audio Mixer MultiMedia1" is also
+   on,off and playback links fine, so the single enabled channel is
+   not the blocker.
+ - The BE widget "TX_CODEC_DMA_TX_3 Capture" EXISTS (dai_out, in 2
+   out 0), statically wired from BOTH "TX_AIF1 Capture" (6ae0000
+   tx-macro) and "WCD AIF1 Capture" (audio-codec) and out to
+   device120.codec_dma_tx1 on the GPR service. All routes present;
+   the link simply never activates.
+ - Controls verified at stock: ADC1/2 Volume 14, TX_DEC0/1 84,
+   muxes/switches on. Mic volumes and switches are not the cause.
+So: a capture-only FE->BE DSP-link-formation failure in
+q6routing/q6apm (or a topology capture-graph gap), distinct from the
+working playback path. Handed to a focused debug pass against the
+Fedora tree (which captures cleanly on this exact ADSP image).
