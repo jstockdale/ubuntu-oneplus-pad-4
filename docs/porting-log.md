@@ -1702,3 +1702,18 @@ boot race -> whole audio stack deferred, seen once (hardening: Fedora
 headphones (hw:0,1 plays 4 periods then EIO; needs a headset + a
 Headphones UCM device); (3) BT audio pairing test; (4) mic noise-floor
 check vs Fedora's -64 dBFS; (5) offer 0028 upstream to denialwm.
+
+## 2026-11-02 — ADSP boot-race hardening prepped: patch 0029 (Fedora/
+## infiniti 0130, ADSP reserved memory 0x4c00000 -> 0x5000000)
+
+Rationale: "the signed ADSP image spans 0x5000000 bytes" but our
+kaanapali.dtsi reserves 0x4c00000 at 0xa1400000 — the last 4 MiB of
+the signed image lie outside the carveout, so Linux can allocate those
+pages and corrupt the DSP: a textbook cause of an INTERMITTENT ADSP/
+GPR bring-up failure (works until the overlap is touched), matching the
+once-seen "no gprsvc registrations -> q6prm never probes -> whole audio
+stack deferred" boot. Applies cleanly as 0029 (one-line DT change ->
+Image/DTB rebuild, bundle flight, flash). Fedora 0194 (ADSP remote-heap
+no-map) is NOT adopted: it conflicts and is a prerequisite for a
+linux-next fastrpc backport we do not carry. Proof of the race fix is
+statistical (census boots); 0029 is correct on its own merits.
