@@ -1537,3 +1537,31 @@ engine source (rd_sh_mem_ep_api.h) defines READ_DONE v2 as 14 x u32 =
 56 bytes with no "offset" word, i.e. the kernel struct carries a
 spurious field. Pre-fix on-tablet snd-q6apm.ko.zst = dcb101ed (the
 #39 flight must show a different, loaded sha).
+
+## 2026-11-02 — FLIGHT #39: MIC CAPTURE FIXED AT THE KERNEL (0028 PROVEN)
+
+Kernel #39 (0001-0028, bundle a4060fbb) RAM-booted; fixed snd_q6apm.ko
+(76954e7e, != pre-fix dcb101ed) verified on disk AND loaded. Raw
+`arecord -D hw:0,2 -f S16_LE -r48000 -c2 -d4` with the UCM Mic device
+enabled: READ_DONE packets 36, ALL payload_size 56; event_handler 36;
+snd_pcm_period_elapsed 36 — every DSP completion now reaches the client
+(was 0/0). pcm2c state RUNNING, hw_ptr 93599 and advancing (was frozen
+at 0). arecord exit 0, no EIO. Mid-capture HW: DEC0/DEC1 reg 0x400/
+0x480 = 0x24 (CLK_EN, unmuted), MIC BIAS1 On, ADC1 On, TX SWR_INPUT0
+On, TX DEC0 MUX On, TX_AIF1 Capture On. Captured content: 374882 of
+384000 samples nonzero, max|x| 2543 = REAL room audio through the
+mics. A5 (mic capture) is RESOLVED at the kernel level by 0028.
+
+Correction from the same flight: the first "mic" run on this boot
+targeted node 50 by cached id; on THIS boot node 50 is still listed as
+"Internal microphones" but pw-record against it produced 399
+WRITE_DONEs (playback), pcm2c never opened, decimators 0x04, zeros —
+i.e. PipeWire's UCM-derived source node does NOT open hw:0,2. So the
+remaining mic item is PURELY USERSPACE (WirePlumber/UCM source
+wiring), not kernel. Headphone (hw:0,1): WRITE_DONE arrives at
+plsz=32 (passes even the old check — write-done size was never the
+headphone cause); plays 4 periods then pcm_write EIO — a separate RX
+issue, parked behind mic userspace wiring.
+
+Node-id lesson: PipeWire node ids are per-boot; find the source BY
+NAME ("Internal microphones"), never by a cached number.
