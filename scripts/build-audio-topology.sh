@@ -5,10 +5,10 @@
 # (vendored verbatim in configs/audio/topology/, upstream VOL_CTRL_MAX 8192),
 # with the gain cap applied HERE at build time. docs/audio-plan.md §2.1/§4-A0.
 #
-# VOL_CTRL_MAX: 8192 = 0 dB = stock's stream ceiling (A7, 2026-11-02) now that the PipeWire
-# protection chain (0.2.18) is the default sink. 2056 (-12 dB) was the bring-up cap; the raise to
-# 8192 (stock's 0 dB stream ceiling) is rung A7, only after the PipeWire
-# limiter chain is the proven default sink. Override: VOL_CTRL_MAX=8192 $0
+# VOL_CTRL_MAX: 8192 = 0 dB = stock's stream ceiling (rung A7, 2026-11-02), shipped only
+# because the PipeWire speaker-protection chain (device pkg 0.2.18+, swh-plugins) is the
+# default sink — that chain IS the amp protection. 2056 (-12 dB) was the bring-up cap the
+# ladder was flown on; rebuild it with: VOL_CTRL_MAX=2056 $0
 set -euo pipefail
 
 BASE_REPO=https://github.com/linux-msm/audioreach-topology
