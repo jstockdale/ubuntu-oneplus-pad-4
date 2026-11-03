@@ -2120,3 +2120,24 @@ of 720p in 0.11 s; the decode-back gave 0 frames — under investigation
 (SPS/PPS / stream format), not a hardware fault per the kernel log.
 Build #42 (0001–0036 + the 13 iris fixes) continues; it is the flashing
 candidate once its own RAM-boot battery passes.
+
+## 2026-11-02 — VP3 on #41: hardware H.264 encode produces a valid bitstream;
+## the VUI colour fields need 0292 (in #42)
+
+GStreamer, not the hardware, caused the first encode failure: with no
+downstream caps `v4l2h264enc` programmed the first menu entries —
+Baseline, level 1.0 — for 720p30 (SPS bytes 42 80 0a; h264parse: "VUI
+framerate 30.0 exceeds allowed maximum 0.4"), and that nonsensical
+session was the second firmware system error (319 s). Constraining the
+caps after the encoder (`video/x-h264,profile=high,level=(string)4.1`)
+gives a proper SPS (profile_idc 100, level_idc 41): 60 × 720p30 in
+0.36 s, 300 × 1080p30 in 1.06 s wall (0.81 s of it videotestsrc), no
+firmware errors. The bitstream is valid: gstreamer1.0-libav's avdec_h264
+decodes all 60 frames. The hardware decode-back and mp4mux still fail at
+caps negotiation because h264parse derives `colorimetry=2:4:5:4` from the
+VUI colour description the encoder writes — exactly what Fedora 0292
+("signal SMPTE 170M as 6/6/6 and map decoded …", carried as our 0055)
+fixes; re-test on #42. Robustness items for VP4: a nonsensical level or
+an unsupported VP9 profile must be rejected, not crash the firmware.
+Media-plan rule: always constrain profile/level after v4l2h264enc in
+test pipelines (real apps do), and verify clips with gst-discoverer.
