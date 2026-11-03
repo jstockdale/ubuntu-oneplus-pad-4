@@ -44,7 +44,9 @@ ensure() {
 	# udev applies the address when the interface appears (also fixes naming:
 	# MACAddressPolicy none keeps predictable names from the bus path).
 	mkdir -p /etc/systemd/network
-	printf '[Match]\nDriver=ath12k_pci\n\n[Link]\nMACAddress=%s\n' "$m" > /etc/systemd/network/20-iceland-wlan.link
+	# the WCN7860 binds as ath12k_wifi7_pci on Perpetua (ath12k_pci upstream)
+	( umask 022; printf '[Match]\nDriver=ath12k_wifi7_pci ath12k_pci\n\n[Link]\nMACAddress=%s\n' "$m" > /etc/systemd/network/20-iceland-wlan.link )
+	chmod 0644 /etc/systemd/network/20-iceland-wlan.link
 }
 wlan() {
 	m=$(tr -d ' \n' < "$DIR/wlan-mac" 2>/dev/null) || exit 0
@@ -55,8 +57,13 @@ wlan() {
 		&& log "$IFACE address set" || { log "could not set the $IFACE address"; exit 1; }
 }
 # ---- bluetooth (the sequence the Fedora iceland port proved on this chip) ----
-addr_now() { btmgmt --index "$IDX" info 2>/dev/null | grep -oE 'addr ([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' | head -n 1 | cut -d' ' -f2 | tr 'A-F' 'a-f'; }
-powered() { btmgmt --index "$IDX" info 2>/dev/null | grep 'current settings:' | grep -qw powered; }
+# btmgmt blocks forever in epoll_wait when its stdin is /dev/null (what a
+# systemd service gets; reproduced 2026-11-02), but returns at once when stdin
+# is a pipe carrying a newline. Feed it one and cap every call; this kernel's
+# Bluetooth sysfs has no address attribute, so the address is read the same way.
+BTM() { printf '\n' | timeout 15 btmgmt --index "$IDX" "$@"; }
+addr_now() { BTM info 2>/dev/null | grep -oE 'addr ([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' | head -n 1 | cut -d' ' -f2 | tr 'A-F' 'a-f'; }
+powered() { BTM info 2>/dev/null | grep 'current settings:' | grep -qw powered; }
 bt() {
 	t=$(tr -d ' \n' < "$DIR/bdaddr" 2>/dev/null | tr 'A-F' 'a-f') || exit 0
 	valid "$t" || { log "bad address in $DIR/bdaddr"; exit 2; }
@@ -68,17 +75,17 @@ bt() {
 		# Set Public Address is accepted only while the controller is powered
 		# off; on this chip it must have been powered once first (btqca marks
 		# the NVM default invalid and takes the device tree's address).
-		powered || btmgmt --index "$IDX" power on >/dev/null 2>&1
+		powered || BTM power on >/dev/null 2>&1
 		sleep 1
-		btmgmt --index "$IDX" power off >/dev/null 2>&1
+		BTM power off >/dev/null 2>&1
 		sleep 0.5
-		o=$(btmgmt --index "$IDX" public-addr "$t" 2>&1)
+		o=$(BTM public-addr "$t" 2>&1)
 		if [ "$(addr_now)" = "$t" ]; then
-			btmgmt --index "$IDX" power on >/dev/null 2>&1
+			BTM power on >/dev/null 2>&1
 			log "address set (attempt $n)"; exit 0
 		fi
 		log "attempt $n refused: $(printf '%s' "$o" | tail -n 1)"
-		[ $n -ge 8 ] && { btmgmt --index "$IDX" power on >/dev/null 2>&1; exit 1; }
+		[ $n -ge 8 ] && { BTM power on >/dev/null 2>&1; exit 1; }
 		sleep $d; d=$((d * 2)); [ $d -gt 8 ] && d=8
 	done
 }

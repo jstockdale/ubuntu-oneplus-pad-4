@@ -2391,3 +2391,25 @@ a .link file generator for ath12k_pci, iceland-bdaddr.service on
 bluetooth.target with udev re-run on hci0 add, Depends bluez + iproute2.
 The BT sequence is the one the Fedora port proved on this chip (power on
 → off → Set Public Address, retried) rewritten under BSD-3-Clause.
+
+## 2026-11-02 — Radio identity applied (0.2.25): label MAC on Wi-Fi, own BT address
+
+Owner photographed the label: one MAC (the WLAN identity; no BT address
+printed, consistent with Android generating that one per install).
+Written on the tablet only (/etc/iceland/wlan-mac, 0600 root; never in
+the repo, the log or the commit). Bluetooth: /etc/iceland/bdaddr
+generated once from /etc/machine-id with the locally-administered bit
+(second nibble 2), programmed by the power on → off → Set Public Address
+sequence on the second attempt; bluetoothd runs on it; /var/lib/bluetooth
+holds the placeholder's dir and the new one. Two field fixes on the way:
+(1) the WCN7860 binds as ath12k_wifi7_pci on Perpetua (not ath12k_pci) —
+the .link now matches both; `udevadm test-builtin net_setup_link` confirms
+"Config file /etc/systemd/network/20-iceland-wlan.link is applied";
+(2) btmgmt blocks forever in epoll_wait when stdin is /dev/null (what a
+systemd service gets) — reproduced; a pipe carrying a newline makes it
+return at once, and this kernel's Bluetooth sysfs has no address
+attribute, so every btmgmt call is now pipe-fed and capped at 15 s and
+the address is read through it. Both units complete (success). Starting
+iceland-radio-ids by hand applied the WLAN MAC live: Wi-Fi re-associated
+on the label MAC, new DHCP lease (ubuntu-iceland.local resolves; use the
+mDNS name rather than a fixed IP from now on). dpkg --audit clean.
