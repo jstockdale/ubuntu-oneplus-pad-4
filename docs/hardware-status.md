@@ -11,8 +11,8 @@ Status legend: ✅ verified here · 🟡 partial, limitation described ·
 ❌ tried and does not work · ❓ not yet tested · — hardware absent.
 
 Last revised: 2026-11-02. Running kernel: Perpetua perpetua/v7.3 @
-`7c98a10e6bb7` + patches 0001–0028 (build #39, flashed to `boot_b`); device
-package `ubuntu-iceland-device` 0.2.21.
+`7c98a10e6bb7` + patches 0001–0036 and 0043–0055 (build #42, flashed to
+`boot_b` on 2026-11-02); device package `ubuntu-iceland-device` 0.2.22.
 
 | Component | Status | Evidence / notes |
 |---|---:|---|
@@ -39,7 +39,7 @@ package `ubuntu-iceland-device` 0.2.21.
 | Thermal | 🟡 | 63 zones; kernel passive loops on CPU (90 °C, step_wise, cpufreq cooling) and GPU (105 °C, devfreq); no NTC/skin zones in our DT yet, so no shell-temperature model or policy daemon |
 | Sensors (IMU, compass, light, hall) | ❓ | identified (Bosch IMU, AKM compass, light sensor, lid magnet), all behind the ADSP sensor hub; factory calibration captured; plan in sensors-plan.md |
 | Suspend / resume | ❓ | never attempted (suspend_stats 0/0); mem_sleep defaults to deep, sleep targets masked since 0.2.21; known hazards and the F1 procedure in bringup-plan.md C6 |
-| Video decode / encode (VPU, iris) | 🟡 | 2026-11-02, RAM boot of kernel #41 (patches 0029–0036): iris decoder and encoder nodes up; hardware decode of 1080p30 H.264 (302 frames, bit-identical twice, 0.06 s CPU for 10 s of video), HEVC and VP9 verified; encoder verified: High/4.1 bitstreams that a software decoder plays fully (300 × 1080p30 in ~1 s), with a VUI colour-field nit that 0055 fixes; two firmware system errors were provoked by malformed inputs (4:4:4 VP9; a level-1.0 720p session) and the driver recovered — robustness items. Not flashed yet — kernel #42 with the fix set 0043–0055 flies next |
+| Video decode / encode (VPU, iris) | ✅ | 2026-11-02, kernel #42 flashed (patches 0029–0036 + the fix set 0043–0055): hardware decode of 1080p30 H.264 (302 frames, bit-identical runs, ~0.1 s CPU per 10 s of video), HEVC and VP9; hardware H.264 encode (High/4.1, 1080p30 at ~300 fps) into MP4 and back through the decoder; zero firmware/SMMU errors; robustness item: malformed inputs (4:4:4 VP9, a level-1.0 session) faulted the firmware before the fix set — retest in VP4 |
 | Cameras | ❓ | camss loads safely; no pipeline, sensor or firmware work yet; last phase |
 | GDM + GNOME session | ✅ | 2026-11-02: owner logged in on glass with the on-screen keyboard — Wayland user session on seat0 (VT2), `ubuntu:GNOME`, 3392×2400@120 Hz at integer 2× scale, protected Speakers sink the default, no idle suspend, interactive power button, fwupd absent (ubuntu-desktop-minimal, 844 packages). First login had been blocked only by a `/tmp/.X11-unix` ownership artifact of starting GDM by hand (fixed; a reboot avoids it). Still owed: a cold-boot census with GDM, the 25-min idle and power-press checks, the pen (ignored by libinput until A.3) |
 | Waydroid | ❓ | binder/netfilter in `kernel/config/config-waydroid.fragment`; phase D |

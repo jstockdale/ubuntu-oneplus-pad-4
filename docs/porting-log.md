@@ -2301,3 +2301,17 @@ h264parse ! mp4mux (flow -5) — is a GStreamer caps quirk on parsed raw
 files, not the driver: the encoder → mp4mux path works. Zero firmware
 system errors, zero SMMU video faults. Owner: "Green light!" → flashing
 boot_b with the same file.
+
+## 2026-11-02 — #42 FLASHED to boot_b: video decode/encode permanent
+
+Owner flashed bundle 82219574 ("Writing 'boot_b' OKAY") and rebooted.
+Lock-in at 10 s uptime: boot_b sha256 82219574… == the bundle; boot_a
+1f11e2c6… (stock, untouched; recorded as the reference); qbootctl:
+current slot _b, bootable, successful, service active; booted 7.3.0+ #42
+from storage; iris node okay, qcom-iris bound, /dev/video0+1, H.264
+1080p decode 302 frames in 0.43 s; 0 system errors, 0 SMMU video faults;
+card registered; ADSP/CDSP running; touch present; GDM active; 0 failed
+units; pd-mapper masked; fwupd absent. Flashed series = 0001–0036 +
+0043–0055 (49 patches). #42 artifacts kept: out/bundles/boot-42-82219574
+.img, qcom-iris-42-44b950d9.ko.zst, backups/iceland.dtb.42, and the
+module manifest. Build #43 (stylus input: + 0037–0039, 52 patches) kicked.

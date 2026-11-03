@@ -59,7 +59,7 @@ earn a ✅ here.
 | Thermal | 🟡 | zones registered; no policy daemon yet |
 | Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)) |
 | Suspend / resume | ❓ | deliberately untested so far |
-| Video decode (VPU) | ❓ | iris series carried as patches 0029–0036; first RAM-boot flight pending ([docs/bringup-plan.md](docs/bringup-plan.md) VP) |
+| Video decode / encode (VPU) | ✅ | 2026-11-02: hardware H.264/HEVC/VP9 decode and H.264 encode, flashed (kernel #42) |
 | Cameras | ❓ | last phase ([docs/media-misc-plan.md](docs/media-misc-plan.md)) |
 | GNOME on Wayland | ✅ | 2026-11-02: logged in on glass — Wayland session, 2× scale, 120 Hz, touch + on-screen keyboard; cold-boot census and idle checks still owed |
 | Waydroid | ❓ | after the desktop is daily-drivable |
