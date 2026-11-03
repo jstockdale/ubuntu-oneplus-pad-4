@@ -11,6 +11,8 @@ falling back to the platform default (qcom/vpu/vpu40_p2.mbn), so no copy
 under the generic name is needed. Same four lines as the Fedora iceland
 port's board enable.
 
+Ours (2026-11-02, VP video). Exit: submit to Perpetua with the iris series (0029, 0030, 0032–0036) when Perpetua takes it. Re-diffed for the pin bump (rung P, 2026-11-02): the head moved the CPU thermal overrides into a shared include, so the patch is now just the &iris block.
+
 Signed-off-by: John Stockdale <jstockdale@gmail.com>
 ---
  arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts | 5 +++++

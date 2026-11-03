@@ -1,6 +1,6 @@
 # Porting log
 
-Newest first. Every entry records what was done, what was observed (with the
+Oldest first, new entries appended at the end. Every entry records what was done, what was observed (with the
 command or file that shows it), and what it changed about the plan. Claims
 about the hardware belong in `hardware-status.md` once they have evidence;
 this file is the narrative.
@@ -174,7 +174,7 @@ unlocked: no → `fastboot flashing unlock` → confirmed on-device → wipe →
 verifiedbootstate **orange**, vbmeta.device_state **unlocked**, still
 slot _b. Active slot B means the unit has OTA'd and both slots are
 populated: the empty-slot EDL hazard is retired for this device. Unit
-serial 2fe096b5 (future factory-capture label). ColorOS 17 note: the
+serial of the owner's tablet banked off-repo (future factory-capture label). ColorOS 17 note: the
 catalog offer came via Oxygen Updater only; stock's staged rollout has
 not reached this unit; auto-update disabled regardless (and the wipe
 removed Oxygen Updater itself).
@@ -676,8 +676,8 @@ kernel payload, same flashed init_boot_b initramfs). ACM+ECM composite
 enumerated clean; host NetworkManager got a persistent iceland-usb
 profile (192.168.7.1/24) after its DHCP attempt was found starving the
 link. Pull: 169 files, 6.3 GB, zero bad checksums; tarballed as
-oneplus-pad4-iceland-2fe096b5-factory-2026-10-31.tar.zst (723 MB,
-sha256 25749ef9…) — serial 2fe096b5 from androidboot.serialno.
+oneplus-pad4-iceland-<serial>-factory-2026-10-31.tar.zst (723 MB,
+sha256 25749ef9…) — <serial> is the owner's tablet's, from androidboot.serialno.
 
 Surprises worth remembering: the flashed rootfs was still running
 device package 0.2.1 (not 0.2.9 as assumed — the image predated the
@@ -1044,8 +1044,7 @@ enabled-time route naturally — T5 verifies, else a one-shot fix.
 Next: T4 soak, T5 coldplug 3/3, T6 flash + 0.2.16 retiring the final
 blacklist line.
 
-## 2026-11-01 (night) — T6 flashed. C2 closed; the tablet is
-## self-contained
+## 2026-11-01 (night) — T6 flashed. C2 closed; the tablet is self-contained
 
 Session-restart interlude first: the desktop session died mid
 ship-build (background task orphaned), and a forked session's rerun
@@ -1101,8 +1100,7 @@ splash→DPU handoff, t=0.39s, taints 512/W); arm-smmu context faults
 SID 0x800 in the same handoff window; ath12k regulatory grumbles;
 OnePlus-Pad4-tplg.bin request (that one is C4's whole job).
 
-## 2026-11-01 (later night) — C4 opens: topology built (A0), card
-## instantiates (A1), TDM chain ported (A2 build)
+## 2026-11-01 (later night) — C4 opens: topology built (A0), card instantiates (A1), TDM chain ported (A2 build)
 
 Three research agents landed plans for every outstanding subsystem
 (docs/audio-plan.md, sensors-plan.md, media-misc-plan.md — each checked
@@ -1172,8 +1170,7 @@ verified off after. Replayed once; USER CONFIRMS AUDIBLE. First sound
 on the port, at the bring-up cap. Per-side formal check rides A4's
 channel test (GNOME part deferred to C5).
 
-## 2026-11-02 — A3 speakers CONFIRMED; A4 up; A5 mic capture blocked
-## (precise signature)
+## 2026-11-02 — A3 speakers CONFIRMED; A4 up; A5 mic capture blocked (precise signature)
 
 A3: user confirmed audible tone from the speakers on the A2 bundle
 (kernel #35/#36). Speaker chain proven end to end at the -12 dB cap,
@@ -1219,8 +1216,7 @@ q6routing/q6apm (or a topology capture-graph gap), distinct from the
 working playback path. Handed to a focused debug pass against the
 Fedora tree (which captures cleanly on this exact ADSP image).
 
-## 2026-11-02 (cont.) — A5 round 2: latch DISPROVEN on-device;
-## refined to a TX capture-path data-starvation bug
+## 2026-11-02 (cont.) — A5 round 2: latch DISPROVEN on-device; refined to a TX capture-path data-starvation bug
 
 Tested the debug pass's #1 root cause (perpetua-only topology_uncertain
 graph-open latch) empirically before patching. DISPROVEN for our
@@ -1257,8 +1253,7 @@ make modules + rsync + RAM-boot the existing #36 bundle (no Image
 rebuild). DT/core fix = full bundle rebuild. Device held booted +
 instrumented for a one-shot test when the fix lands.
 
-## 2026-11-02 — A5 fix (0027) CONFIRMED at the analog layer; a
-## second DSP-capture-DMA stall now isolated
+## 2026-11-02 — A5 fix (0027) CONFIRMED at the analog layer; a second DSP-capture-DMA stall now isolated
 
 Flew the tx-macro revert (patch 0027, module rebuilt sha 5425c7e0,
 kernel #37 RAM boot). CONFIRMED it fixes the layer the debug pass
@@ -1281,8 +1276,7 @@ samples now reach the LPASS codec-DMA but the q6apm capture read path
 the loaded debug context (round 3) to pin the q6apm/q6apm-dai capture
 data-delivery cause vs v7.3/Fedora. Device held on #37 for testing.
 
-## 2026-11-02 — #37 FLASHED (speakers + analog mic fix permanent);
-## mic capture narrowed to LPASS codec-DMA (everything else matches Fedora)
+## 2026-11-02 — #37 FLASHED (speakers + analog mic fix permanent); mic capture narrowed to LPASS codec-DMA (everything else matches Fedora)
 
 Flashed boot_b with the #37 bundle (891fcb6e, patches 0001-0027:
 touch+wifi+BT+speakers+GPR pair+tx-macro revert). Verified: boot_b sha
@@ -1307,8 +1301,7 @@ or a runtime/userspace detail. Handed to the loaded debug context
 (round 4) to deep-dive those against Fedora. Device flashed on #37,
 held for testing.
 
-## 2026-11-02 — SCOPE CHANGE: the bug is the LPASS codec-DMA (both
-## directions), not mic-specific. Speakers (TDM) unaffected.
+## 2026-11-02 — SCOPE CHANGE: the bug is the LPASS codec-DMA (both directions), not mic-specific. Speakers (TDM) unaffected.
 
 Round-4 decisive test: WCD HEADPHONE playback via RX_CODEC_DMA_RX_0
 (hw:0,1) FAILS with the identical write EIO as mic capture. So the
@@ -1341,8 +1334,7 @@ on this unit for a live clk_summary/codec-dma register reference, or a
 deep LPASS macro/q6prm clock-tree investigation. Precise known-issue;
 speakers + everything else unaffected.
 
-## 2026-11-02 — codec-DMA root cause = live SoundWire-bus transfer;
-## static analysis exhausted (5 agent rounds). NPL was a red herring.
+## 2026-11-02 — codec-DMA root cause = live SoundWire-bus transfer; static analysis exhausted (5 agent rounds). NPL was a red herring.
 
 Round 5 (definitive negatives): there is NO missing codec-DMA init or
 clock vote. sm8550/kaanapali tx-macro binds lpass_ver_11 (flags =
@@ -1381,8 +1373,7 @@ investigate the wcd_tx persistent-Alert (WCD-SDW interrupt/enumeration)
 though it doesn't alone explain the RX failure. Tracked known-issue.
 Built-in speakers + all other subsystems unaffected and working.
 
-## 2026-11-02 — BREAKTHROUGH: codec-DMA regression identified w/
-## external corroboration; sdw.c revert (0028) built
+## 2026-11-02 — BREAKTHROUGH: codec-DMA regression identified w/ external corroboration; sdw.c revert (0028) built
 
 Round-6 external research (the "SWR read FIFO underflow" lead) found
 the answer OUTSIDE our tree. The denialwm/phonewave project's own
@@ -1419,8 +1410,7 @@ external corroboration (the denialwm devs' own open bug + suspect)
 rather than inference. NOTE: denialwm may land their own fix upstream —
 watch denialwm/linux-perpetua.
 
-## 2026-11-02 — codec-DMA: root cause CONFIRMED but fix is upstream's
-## to make; sdw.c revert insufficient; 0028 dropped, tracked.
+## 2026-11-02 — codec-DMA: root cause CONFIRMED but fix is upstream's to make; sdw.c revert insufficient; 0028 dropped, tracked.
 
 Flew 0028 (sdw.c-hunks revert of 7c8cc30) as #38 RAM boot. Result:
 did NOT fix codec-DMA capture. Behaviour is intermittent/racy —
@@ -1460,8 +1450,7 @@ are unaffected. Net audio result: speakers work; mic/headphone await
 the upstream fix. This closes the active audio push; next is the port's
 other subsystems (VPU cheap next, then sensors/GNOME).
 
-## 2026-11-02 — ROOT CAUSE PROVEN BY MEASUREMENT: perpetua 7c8cc30's
-## READ_DONE payload-size check rejects the DSP's 56-byte completions
+## 2026-11-02 — ROOT CAUSE PROVEN BY MEASUREMENT: perpetua 7c8cc30's READ_DONE payload-size check rejects the DSP's 56-byte completions
 
 The double-check overturned the "live SoundWire/DSP starvation" verdict
 with direct evidence. First, the initramfs carries ZERO audio modules
@@ -1588,8 +1577,7 @@ manual route and NO headset plugged in; needs a headset + a proper
 Headphones UCM device to test for real. Audio ladder A6 (PipeWire
 limiter chain) and A7 (gain raise to 8192) remain as planned.
 
-## 2026-11-02 — #39 FLASHED: microphones permanent; voice loopback
-## confirmed. C4 core audio complete (speakers + mics).
+## 2026-11-02 — #39 FLASHED: microphones permanent; voice loopback confirmed. C4 core audio complete (speakers + mics).
 
 Flashed boot_b with the #39 bundle (a4060fbb, patches 0001-0028). On
 the fresh storage boot: boot_b sha == bundle, slot B re-marked
@@ -1651,8 +1639,7 @@ reproducible); 0.2.19 with the UCM Speaker pin AND FixedBootSequence at
 install 0.2.19 + reboot (rootfs-only; the flashed #39 kernel is
 untouched), then verify control max 8192, chain default, listening.
 
-## 2026-11-02 — A7 deploy hit an unrelated boot race: audio stack
-## deferred when the ADSP GPR services never registered
+## 2026-11-02 — A7 deploy hit an unrelated boot race: audio stack deferred when the ADSP GPR services never registered
 
 A7 deployed (8192 tplg d8f4b5f3 staged + 0.2.19 UCM pin 8192, asound.
 state wiped, `sudo reboot`). On that boot: "--- no soundcards ---".
@@ -1678,8 +1665,7 @@ ADSP bring-up; census how often it recurs. Runbook: after any reboot,
 confirm /proc/asound/cards before audio tests; if empty, check
 devices_deferred, then reboot.
 
-## 2026-11-02 — A7 PASSED: speakers at the STOCK ceiling behind the
-## protection chain. Audio ladder A0-A7 COMPLETE.
+## 2026-11-02 — A7 PASSED: speakers at the STOCK ceiling behind the protection chain. Audio ladder A0-A7 COMPLETE.
 
 On a good boot (card at 0 min, deferred list clean): control
 "stream0.vol_ctrl0 MultiMedia1 Playback Volu" max=8192, value 8192
@@ -1703,8 +1689,7 @@ headphones (hw:0,1 plays 4 periods then EIO; needs a headset + a
 Headphones UCM device); (3) BT audio pairing test; (4) mic noise-floor
 check vs Fedora's -64 dBFS; (5) offer 0028 upstream to denialwm.
 
-## 2026-11-02 — ADSP boot-race hardening prepped: patch 0029 (Fedora/
-## infiniti 0130, ADSP reserved memory 0x4c00000 -> 0x5000000)
+## 2026-11-02 — ADSP boot-race hardening prepped: patch 0029 (Fedora/infiniti 0130, ADSP reserved memory 0x4c00000 -> 0x5000000)
 
 Rationale: "the signed ADSP image spans 0x5000000 bytes" but our
 kaanapali.dtsi reserves 0x4c00000 at 0xa1400000 — the last 4 MiB of
@@ -1718,8 +1703,7 @@ no-map) is NOT adopted: it conflicts and is a prerequisite for a
 linux-next fastrpc backport we do not carry. Proof of the race fix is
 statistical (census boots); 0029 is correct on its own merits.
 
-## 2026-11-02 — CORRECTION: 0029 was a no-op; the real audio boot race was
-## the userspace pd-mapper. FIXED (rootfs-only, 0.2.20), 10/10 reboots clean.
+## 2026-11-02 — CORRECTION: 0029 was a no-op; the real audio boot race was the userspace pd-mapper. FIXED (rootfs-only, 0.2.20), 10/10 reboots clean.
 
 0029 withdrawn. The claim behind it ("the signed ADSP image spans 0x5000000
 but the carveout is 0x4c00000") is true of kaanapali.dtsi — measured: the
@@ -1783,7 +1767,7 @@ Image committed with the 2026-10-30 gadget-serial work) and out/ramdisk —
 148 commits kept, pack 424 KiB; full-history scan for credentials (none;
 the Wi-Fi profile was only ever applied by hand on the device) and device
 identifiers (only the fastboot serial in four provenance notes, kept on
-purpose). Licensing made explicit: BSD-3-Clause for everything this port
+purpose then — superseded 2026-11-03: the serial leaves current text, `<serial>` in file names and "the owner's tablet" in prose; git history keeps it). Licensing made explicit: BSD-3-Clause for everything this port
 wrote (SPDX headers on every script and config that takes a comment),
 GPL-2.0-only for kernel/patches (From/Signed-off-by completed on our
 own patches), MIT inherited by the three PipeWire speaker files from
@@ -1831,8 +1815,7 @@ on boot_b. Rule, added to the runbook: never edit a script while it is
 running. The tablet's initramfs regenerated by 0.2.20 (0e12c8cf) is
 staged at out/initrd.img-7.3.0+.post-0.2.20 for the next bundle build.
 
-## 2026-11-02 — Readiness review integrated: plan revised; C5 guards shipped
-## (0.2.21); T2 passed; VPU series imported (0029–0036) and building
+## 2026-11-02 — Readiness review integrated: plan revised; C5 guards shipped (0.2.21); T2 passed; VPU series imported (0029–0036) and building
 
 Five readers (VPU, sensors, desktop, suspend, remaining audio) checked the
 plans against the pinned tree, the build config, the overlay, the archives
@@ -1926,8 +1909,7 @@ transient systemd unit (iceland-desktop-install.service, log in
 /var/log/iceland-desktop-install.log), detached from ssh; 844 packages.
 VP0 build running in parallel on the host (36 patches, build-vp0.log).
 
-## 2026-11-02 — C5 flight: desktop installed; one self-inflicted dpkg error
-## (dconf key syntax), fixed in 0.2.22
+## 2026-11-02 — C5 flight: desktop installed; one self-inflicted dpkg error (dconf key syntax), fixed in 0.2.22
 
 `ubuntu-desktop-minimal` (844 packages) installed on the dev rootfs as a
 transient unit. apt exited 100: `dpkg: error processing package ibus` and
@@ -1989,8 +1971,7 @@ from mutter over its session bus: DSI-1 3392×2400@120 (DRM-preferred;
 'scale-monitor-framebuffer'" is GNOME 50's harmless note about a retired
 key.
 
-## 2026-11-02 — C5 on glass: password accepted, session died at Xwayland
-## (/tmp/.X11-unix owned by the greeter) — fixed live; GDM-started-by-hand artifact
+## 2026-11-02 — C5 on glass: password accepted, session died at Xwayland (/tmp/.X11-unix owned by the greeter) — fixed live; GDM-started-by-hand artifact
 
 Owner reports: touchscreen, on-screen keyboard and the greeter all work,
 login bounces back. Journal: pam_unix(gdm-password:session) opened the
@@ -2061,8 +2042,7 @@ none on 0x1940/0x1943/0x1944/0x1a20; audio card, ADSP/CDSP, touch, the
 single deferred TNOC entry all as on #39. Firmware/PAS happens at the
 first session open — VP2 (decode) is the proof.
 
-## 2026-11-02 — VP2 on kernel #41: firmware system error on the first real
-## session; the iris fix set (13 patches) goes in as 0043–0055; build #42
+## 2026-11-02 — VP2 on kernel #41: firmware system error on the first real session; the iris fix set (13 patches) goes in as 0043–0055; build #42
 
 GStreamer registered v4l2{h264,h265,vp9,av1}dec and v4l2{h264,h265}enc on
 the new nodes. H.264 and HEVC pipelines died at 0.02 s — NOT the decoder:
@@ -2121,8 +2101,7 @@ of 720p in 0.11 s; the decode-back gave 0 frames — under investigation
 Build #42 (0001–0036 + the 13 iris fixes) continues; it is the flashing
 candidate once its own RAM-boot battery passes.
 
-## 2026-11-02 — VP3 on #41: hardware H.264 encode produces a valid bitstream;
-## the VUI colour fields need 0292 (in #42)
+## 2026-11-02 — VP3 on #41: hardware H.264 encode produces a valid bitstream; the VUI colour fields need 0292 (in #42)
 
 GStreamer, not the hardware, caused the first encode failure: with no
 downstream caps `v4l2h264enc` programmed the first menu entries —
@@ -2248,8 +2227,7 @@ tablet over Wi-Fi (usb0 unplugged while it charges). Next: owner plugs
 usb0, `fastboot boot` the #42 bundle, flight-vp1 + the VP2/VP3 battery
 (now expecting the encode round-trip and mp4mux to pass), then flash.
 
-## 2026-11-02 — Audio outage in the GNOME session (no sound, "No Input
-## Devices"): HiFi profile vanished from WirePlumber; restart recovered it
+## 2026-11-02 — Audio outage in the GNOME session (no sound, "No Input Devices"): HiFi profile vanished from WirePlumber; restart recovered it
 
 On the #41 RAM boot, about an hour after the login tone had played, Chrome
 (YouTube) was silent and GNOME showed no input device. Findings over Wi-Fi:
@@ -2316,8 +2294,7 @@ units; pd-mapper masked; fwupd absent. Flashed series = 0001–0036 +
 .img, qcom-iris-42-44b950d9.ko.zst, backups/iceland.dtb.42, and the
 module manifest. Build #43 (stylus input: + 0037–0039, 52 patches) kicked.
 
-## 2026-11-02 — Audio outage ROOT CAUSE: WirePlumber made a second card object
-## from the compress node and the two fought over the device reservation. Fixed (0.2.23).
+## 2026-11-02 — Audio outage ROOT CAUSE: WirePlumber made a second card object from the compress node and the two fought over the device reservation. Fixed (0.2.23).
 
 Recurred 6 min into the fresh #42 boot (profiles off/pro-audio only, no
 nodes). With WIREPLUMBER_DEBUG=3,spa.alsa*:4,s-monitors-alsa*:5 the
@@ -2737,13 +2714,13 @@ conffile and the unit enabled. GNOME's Graphics Tablets panel says "No
 tablet detected" because libwacom cannot match the devices: bus 0x1c
 (SPI, which libwacom does not know), vendor/product 0000, the pen device
 parentless under /devices/virtual ("is a tablet but not supported by
-libwacom"). 0043 gives both devices Novatek's vendor id 0x0603 / product
-0x6536 and the pen its SPI parent; the device package ships
+libwacom"). 0063 (numbered 0043 when it was written; renumbered on 2026-11-03 because 0043 was already the first iris fix) gives both devices Novatek's vendor id 0x0603 / product
+0x6536 and the pen its SPI parent; device package 0.2.29 ships
 /etc/libwacom/oneplus-pad4.tablet (DeviceMatch i2c|0603|6536, integrated
 display, @generic-no-eraser styli) and 74-iceland-pen.rules, which sets
 ID_BUS=i2c on the two devices for matching only. The udev side is
 installed; the ids arrive with #45's touch module (the build had not
-reached drivers/input when the worktree was edited, so #45 carries 0043
+reached drivers/input when the worktree was edited, so #45 carries 0063
 although its patch count says 61). libinput also logs "Ignoring pressure
 offset greater than 50%" when a tap begins without a hover frame — noise,
 noted for N6.
@@ -2751,7 +2728,7 @@ noted for N6.
 Rung P: the pin moved to b7d639cfb282 (fetch-perpetua.sh default; the
 build script takes the pinned checkout's HEAD, so the first #45 attempt
 built the old pin and failed at the re-diffed 0031 — fetch-perpetua.sh
-moves the checkout). Series: 61 patches — the four re-diffs in place,
+moves the checkout). Series at the #45 build: 61 patch files (62 with 0063, written after the build started) — the four re-diffs in place,
 0020 dropped (AK1), 0041/0042 included. Flight plan and abort criteria in
 the readiness board; scripts flight-charging.sh and svooc-session.sh.
 
@@ -2782,7 +2759,7 @@ resolved; cannot write 20 bytes") — it now waits for ServicesResolved;
 after the fix the owner has movement, click and right click again.
 Graphics Tablets panel: libwacom identifies a device from the udev
 PRODUCT property and accepts only bus 0/3/5/0x18 (libwacom.c
-get_bus_vid_pid), so our SPI bus 0x1c was rejected even with 0043's ids;
+get_bus_vid_pid), so our SPI bus 0x1c was rejected even with 0063's ids;
 74-iceland-pen.rules now sets PRODUCT=18/603/6536/0 on the two devices and
 `libwacom-list-local-devices` answers "OnePlus Pad 4".
 
@@ -2855,8 +2832,39 @@ which puts 50 % eight hours out; a four-core 70 % stress-ng load draws
 minutes, so the load runs under a thermostat (SIGSTOP above 36 °C,
 SIGCONT below 33 °C) with stops at the target, on charger attach and at
 40 °C (discharge-to-half.sh, device-local /tmp, first target 87 %).
+
+Revised the same day: the helper now runs the backlight at maximum (2.7 A on its own, against the 0.8 A idle desktop) plus a small CPU load under the same cell-temperature thermostat.
+
 Witness for the sessions: journald is persistent (33 boots kept), NMI and
 soft-lockup detectors are on (hung_task 120 s, no panic), no pstore; the
 tethered usb0 witness in the plan cannot exist with the brick in the only
 port, so the witness is ssh over Wi-Fi plus the persistent journal and
 the host-side session log.
+## 2026-11-03 — Series housekeeping before the documentation checkpoint: input-identity patch renumbered 0043 → 0063; p-pinbump folded into the README
+
+The pen/touch input-identity patch (vendor 0x0603 / product 0x6536, the pen's parent device, the libwacom match) was written as 0043 while #45 built, but 0043 was already the first infiniti iris fix (0043-media-iris-release-mvp-noc-low-power-request-vpu4x-infiniti.patch); it is now 0063-nt36536-input-device-identity.patch and the number 0020 (retired as AK1) is not reused, so the series is 0001–0063 less 0020 — 62 files, 61 of which #45 applied (0063 was compiled into #45's nt36536 module by hand after the build had started; the running module reverses the patch cleanly; it goes into the next build as a file). Every "0043" that means the input identity reads 0063 from here on; "0043–0055" in the video context is unchanged. kernel/patches/p-pinbump/ is gone — its four re-diffs (0028 carrying only the WRITE_DONE hunk, the READ_DONE half being upstream as 9ba37ef1db70; 0031 reduced to the &iris block after the head moved the CPU thermal overrides into a shared include; 0058 keeping Xiaomi's pmic-glink match data beside ours; 0061 keeping the SuperVOOC nodes the head added beside the pen charger's) were byte-identical to the series copies — and its notes are now a section of kernel/patches/README. The config fragments were re-merged against the head's devices/iceland/kernel.config: ADC5 Gen3/Gen4, CHARGER_SC8547, CHARGER_SC8547_SVOOC, oplus_svooc, and the NMI and soft lockup detectors with hung_task at 120 s. Still owed in rung P: the 9 V rate at a lower charge, the standard-charging regression (SDP/DCP/PD, OTG, connected boot, 500 mA fallback), the 24 h soak on #45 (running since the flash), the three SuperVOOC stages, then the formal checkpoint — this pass is an interim documentation checkpoint ordered by the owner.
+
+
+## 2026-11-03 — Regression found by the checkpoint audit: the pen charger has no hBoost on #45 (0058 matches the old board compatible)
+
+The audit's patch reader asked whether the pmic_glink hBoost auxiliary
+device still appears on #45, because Perpetua 5ff346c547a7 (before the
+b7d639cfb282 pin) renamed the board's pmic-glink compatible from
+"oplus,kaanapali-pmic-glink" to "oneplus,kaanapali-pmic-glink" (generic
+"qcom,kaanapali-pmic-glink" fallback kept) and the re-diffed 0058 still
+keys the hBoost client on the old string. Read from the flashed tablet:
+`/sys/bus/auxiliary/devices` lists pmic_glink.altmode.0, .power-supply.0
+and .ucsi.0 — no pmic_glink.hboost.0 — and the pen charger, although bound
+at 1-002b, reads state=off present=0 chip_id=0x0000 fw_version=0x0
+tx_voltage_mv=0 (on #44, with the old pin, the gate had read firmware
+0x20022 and the 7 V supply acknowledged). The MT5806 asks the firmware for
+its boost through that auxiliary client and powers the coil from it, so pen
+charging on the magnet edge is broken on #45 — the pen still writes (the
+handshake is BLE + the touch controller) and still sleeps on the magnet,
+which is why nothing looked wrong. pmic_glink is built in, so there is no
+module swap for this: 0058 now matches "oneplus,kaanapali-pmic-glink" in
+the series (the fix flies with build #46), hardware-status carries the
+regression, and the #44 "pen charges" evidence stands for the old pin only.
+Lesson for the pin-bump checklist: after a replay with `git am -3`, grep
+every carried match table against the board file's compatibles at the new
+pin — a clean apply says nothing about a renamed string.

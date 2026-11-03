@@ -1,4 +1,4 @@
-# Bring-up plan: Phase C onward (from 2026-10-31; revised 2026-11-02)
+# Bring-up plan: Phase C onward (from 2026-10-31; revised 2026-11-03)
 
 Baseline, 2026-11-02 evening: the tablet boots Ubuntu standalone from
 boot_b (kernel #39 = Perpetua 7c98a10e6bb7 + patches 0001–0028, bundle
@@ -9,6 +9,8 @@ join), Bluetooth controller, battery telemetry, both consoles (panel fbcon,
 serial getty on the gadget), ssh over usb0 and over the air, speakers at
 stock loudness behind the protection chain, microphones. C0–C4 are done.
 Repository public at github.com/jstockdale/ubuntu-oneplus-pad-4.
+
+Status 2026-11-03: boot_b now carries kernel #45 (Perpetua perpetua/v7.3 @ b7d639cfb282 + patches 0001–0062 less the retired 0020, bundle boot-45-3cfb46cf; 0063 compiled into its touch module by hand; boot-44-f97398b2 is the fallback image) and the device package is 0.2.30; VP, the C5 flight and the pen suite (A.3, A.3b, A.3c) are done, rung P is in progress, and the readiness board below is the current state.
 
 Retired this revision: the "DSI PHY probe lottery". Journal census of the
 last 20 boots (kernels #36–#39): 20/20 bring up fbcon at 1.9–2.0 s, msm
@@ -25,7 +27,16 @@ boot_b ← factory/fcap/part-boot_b.img; init_boot_b ← bundle archive; both
 sha-verified. Added 2026-11-02: never edit a script while it is running
 (bash reads by byte offset); measure the live device tree before adopting a
 sibling's SoC-dtsi fix (0029 was a no-op because the board file already
-carried it).
+carried it). Added 2026-11-02 (#42 gate): every bundle gets a versioned copy
+(out/bundles/boot-NN-<sha8>.img) before the next build, because the build
+script rewrites out/bundle and out/kernel-iceland; bundle assembly is a
+separate step from the kernel build (build-boot-bundle.sh with
+INITRAMFS=…). Added 2026-11-03: CONFIG_MODVERSIONS is off, so module trees
+are never mixed across pins — the rootfs module tree is replaced wholesale
+at a pin bump, with a backup tar on the host; and after a series replay at
+a pin bump, grep every carried match table against the board file's
+compatibles at the new pin (0058 matched a renamed string on #45 and the
+pen charger silently lost its hBoost).
 
 ## C0–C4 — done (10-31 … 11-02)
 
@@ -37,7 +48,7 @@ chain, mics via 0028). Evidence per item in hardware-status.md and the
 porting log. Carried opens from these phases: BT pairing + per-unit address,
 wired headphones (UCM device + headset test), pen capabilities, stylus
 props, the filed one-shots (T+60 USB bounce, early console loss, depmod
-modules.builtin.modinfo).
+modules.builtin.modinfo). Status 2026-11-03: the per-unit address shipped in 0.2.25, pen capabilities and stylus props closed with #43 and the pen suite (A.3c), and BLE bonding is proven with the pen; classic BT pairing, wired headphones and the one-shots remain.
 
 ## VP — Video decode/encode (iris VPU): one kernel flight, before/with C5
 
@@ -48,7 +59,7 @@ and rpmhpd OPP labels, IRQ 174, SMMU SIDs 0x1940/0x1943/0x1944/0x1a20) are
 all present and unused; kernel config already builds iris, V4L2 mem2mem,
 videobuf2, MDT loader, PAS, UBWC as modules/built-in; vpu40_2v.mbn
 (sha256 69d4e215…) is on the tablet, in the overlay and in the manifest;
-Perpetua's head (b7d639cf, 100 commits past the pin) has no iris work, so
+Perpetua's head (b7d639cf, 100 commits past the pin of the time; our pin since #45) has no iris work, so
 the series is carried locally. v4l-utils, gstreamer1.0-tools/-base/-good/
 -bad and three 1080p test clips (~/clips: H.264, HEVC, VP9) are on the
 tablet since 2026-11-02.
@@ -83,6 +94,8 @@ tablet since 2026-11-02.
   infiniti 0069–0071 (all in /srv/ubuntu-iceland/ref/iceland-linux);
   firmware-manifest.md gets a VPU row with the sha.
 - VP5 VA-API (iris-vaapi) deferred to the desktop phase.
+
+Status 2026-11-03: VP0–VP4 done — VP1 first light and VP2 decode passed on #41 (2026-11-02); the 13-patch fix set VP4 had deferred (iceland 0157–0160, 0246–0250, 0292; infiniti 0069–0071) went in as 0043–0055 when the first VP9 session faulted the firmware; VP2/VP3 passed on #42 and #42 was flashed the same day (boot_b 82219574). Still owed: the VP4 robustness retest (a nonsensical level or an unsupported VP9 profile must be rejected, not crash the firmware) and the firmware-manifest VPU row with the sha (the manifest only names vpu40_2v.mbn in prose). VP5 stays deferred.
 
 ## C5 — Desktop: GNOME on Wayland (rootfs-only; no flight)
 
@@ -126,13 +139,14 @@ pick 2.2857× with fractional scaling and then refuse display changes; the
    usb0/serial: `systemctl disable gdm3` or `apt purge gdm3 gnome-shell`.
    Note: the dev rootfs gives a password login for ubuntu, not the
    first-boot wizard (that path is the clean-image build only).
+   Status 2026-11-03: PASS on 2026-11-02 — greeter on glass at 3392×2400, Wayland session on seat0, touch login with the on-screen keyboard, integer 2× scale, fwupd absent, corner taps under the finger, the short power press shows GNOME's dialog, idle gate closed (no suspend attempt on #41/#42); the desktop has been in daily use since, on #45 from 2026-11-03.
 4. Fold the guards into build-ubuntu-rootfs.sh's desktop profile and
    build one clean image (installer writes userdata only; boot_b
    untouched); plymouth and gnome-remote-desktop come with the metapackage
    and are untested on this boot path.
 5. Soak a day tethered; watch /sys/class/thermal under stress-ng +
    glmark2. No thermal policy daemon exists yet; Perpetua 8bd03159587a
-   (kaanapali CPU passive cooling) is a next-pin-bump candidate.
+   (kaanapali CPU passive cooling) is in the pin since #45 (2026-11-03; it only relocates iceland's existing 90 °C trips into a shared include, which is why 0031 was re-diffed).
 
 Gate: daily-drivable desktop, no tether.
 
@@ -213,7 +227,8 @@ decoded shell model cannot run yet.
 2. BT audio: apt install libspa-0.2-bluetooth; pair a keyboard or headset
    (none recorded as owned). PASS: pairing persists across a reboot; an
    A2DP sink appears in `wpctl status`.
-3. Stylus (OnePlus Stylo Pro) — input, next kernel bundle after VP:
+   Status 2026-11-03: BLE bonding is proven — the Stylo Pro is bonded with LE Secure Connections (A.3c N4) and served by HOGP/uhid, and the bond persists across reboots; classic pairing and A2DP remain untested and libspa-0.2-bluetooth is still to be installed.
+3. Stylus (OnePlus Stylo Pro) — input; flown as #43 on 2026-11-02 (evdev gate PASS: BTN_STYLUS/BTN_STYLUS2 in the KEY bits, 124 units/mm on every axis, libinput lists a 274×194 mm tablet, zero "missing tablet capabilities"), flashed with #45 on 2026-11-03:
    today the NT36536 driver already reports the pen's position, pressure,
    tilt and hover (ABS_PRESSURE/TILT_X/TILT_Y/DISTANCE, BTN_TOOL_PEN) and
    the firmware decodes the two barrel buttons and a battery byte that the
@@ -231,7 +246,8 @@ decoded shell model cannot run yet.
    absinfo, pen and finger agree at four corners; then libinput/GNOME
    (hover cursor, pressure in a drawing app). No Bluetooth involved: the
    Fedora port reports "the pen works" through the touch IC alone.
-3b. Pen charging — staged 2026-11-02 as kernel/patches/staged/0056–0062
+   Superseded 2026-11-02/03: on this unit the pen stayed silent through the touch IC alone — the controller's pen scanning is off until 0x7F/0x10 (0040), and even with scanning on and every host-side ack accepted (N2 on #44) the Stylo Pro writes only after the Bluetooth-brokered OPP handshake (A.3c; H2 refuted), so the Bluetooth leg is required, not polish.
+3b. Pen charging — staged 2026-11-02 as 0056–0062, promoted into the series (kernel/patches/0056–0062) for build #44; flown on #44 2026-11-03, PASS; flashed with #45
    (own flight after 3): the Fedora port's Maxic MT5806 wireless
    transmitter driver (hBoost converter voltage asked from the charger
    firmware over PMIC GLINK, owner 32785 / opcode 0x10007, 7 V idle →
@@ -243,7 +259,7 @@ decoded shell model cannot run yet.
    bus) and a pmic_glink hboost auxiliary client keyed to our board
    compatible (0058); 0062 = Fedora's later fix so the first s2idle after
    load is not aborted by the IC's post-start IRQ. Config
-   CONFIG_CHARGER_MT5806_PEN=m (kernel/config/staged). RAM-boot gate, in
+   CONFIG_CHARGER_MT5806_PEN=m (kernel/config/config-pen-charger.fragment, promoted from staged/ with the patches). RAM-boot gate, in
    this order: (1) regulators — dmesg has no "could not find RPMh address
    for resource LS3B_E0/LS4B_E0" and /sys/class/regulator still lists
    every vreg_l*b plus vreg_ls3b/ls4b (a missing resource would fail the
@@ -261,8 +277,9 @@ decoded shell model cannot run yet.
    wakeup-source on the IRQ. The driver registers no power_supply — its
    attributes live on the I2C device (state, present, pen_soc, rx_soc,
    tx_voltage_mv, tx_current_ma, inhibit, scan_fast, chip_id,
-   fw_version); a power_supply for the pen battery is a later polish.
-3c. Pen protocol (OPP) ladder — after the #44 flash. Verified 2026-11-02
+   fw_version);    a power_supply for the pen battery is a later polish.
+   Status 2026-11-03 (#44 RAM boot, boot-44-f97398b2; = N3 of the ladder): gate PASS in the planned order — vreg_ls3b/ls4b present and enabled with no RPMh complaint (the abort criterion); pmic_glink and the RPMh regulator driver are built in, so only mt5806_pen_charger.ko needed staging; driver bound at 0-002b, firmware 0x20022, 7000 mV acknowledged; the pen docked → "pen attached" within a second, state charging at 7.96 V × 0.11 A, the pen's address delivered (root-only, never recorded); tablet telemetry unchanged, no battmgr errors. Watch items: pen_soc stays −1 and no 10 V step was logged (charging proceeds at ≈ 8 V). The series rides in #45 (flashed); the pen battery into UPower is still owed.
+3c. Pen protocol (OPP) ladder — flown on the #44 RAM boot 2026-11-03 (#44 was never flashed; #45 carries 0040–0042 and, by hand in its touch module, 0063); N0–N6 all reached, polish owed (see N6). Verified 2026-11-02
    (research run, report in /srv/ubuntu-iceland/build/pen-protocol-work,
    its notes hold stock log extracts with addresses and never enter the
    repo): the Stylo Pro is an "OPP" pen. Stock enables scanning with the
@@ -281,6 +298,7 @@ decoded shell model cannot run yet.
    host-side acks alone, no radio needed) is the cheapest decisive test;
    also H3 pen asleep/bond-bound, H4 charger-mode 0x53 never sent, H6 our
    adapter carries the stock BT address without the pen's bond key.
+   Outcome 2026-11-03: H2 refuted on #44 (every downlink command accepted, no pen packets), so H1 stands — the pen transmits only after the BLE-delivered timing block; H6 did not arise (the pen bonded to our adapter on the stock address at the first attempt); H3 is real in a narrower form — the pen sleeps on the charger and when idle and applies the timing only after "sleep exit", which is why the daemon replays the handshake on that console event.
    - N0 owner's hand, nothing written: evtest on event4 with USB and the
      charger unplugged while writing (H4); the interrupt-reaction probe
      (pen tip on the glass, buttons pressed, no finger, against a 60 s
@@ -289,14 +307,14 @@ decoded shell model cannot run yet.
    - N1 frame logger (module swap, logging only): log every frame with
      point_data[1]>>3 == 30, any 0xF0 pen-ID packet and bytes 109..111.
      PASS: a page-6 frame with [3]=0, [4]=20 within 200 ms of the 0x10 ack
-     — the controller waits for the handshake exactly as on stock.
+     — the controller waits for the handshake exactly as on stock. PASS 2026-11-03 (#44, module swap of 0041): the frame came within a second of the enable, type 0, 20 bytes, the same pattern the stock log shows.
    - N2 downlink probe (module swap, a debugfs pen_cmd node): after the
      ack and the N1 frame write TIMING_CFG_ACK 0x02, CON_STA 0x20, CFG_ID
      0x01, PEN_INFO 0x48, then SIZE_INFO, owner writing throughout. PASS:
      point_data[66] leaves 0xFF / BTN_TOOL_PEN events → H2 proven, the
      BLE leg becomes polish (pressure source, battery, double-click).
      FAIL: H1 confirmed as necessary. Keep the stock gate semantics
-     (downlink only after a fresh uplink) in the driver either way.
+     (downlink only after a fresh uplink) in the driver either way. Outcome 2026-11-03: FAIL — every downlink command was accepted (status byte 0x00; the controller re-emitted its frame after the first ack) yet no pen packets; H2 refuted, H1 confirmed as necessary.
    - N3 = the 3b MT5806 flight: proof of life (present, pen_soc) and the
      pen's address (root-only, read, never recorded) for N4.
    - N4 BlueZ bond (owner's go-ahead for radio actions): btmon passive
@@ -306,7 +324,7 @@ decoded shell model cannot run yet.
      the 0x0067 characteristic enumerated; persists across a reboot. FAIL:
      H6 — retry with the adapter on its generated address, then the stock
      one; if both refuse, the pen's old bond must be cleared (procedure
-     unknown; owner question: does the pen have a reset gesture?).
+     unknown; owner question: does the pen have a reset gesture?). PASS 2026-11-03: the pen advertises while docked (ADV_IND every 16 s, Flags 0x04 only — no LE-discoverable bit, so plain discovery never creates a device object and Ubuntu's bluetoothd does not export the experimental ConnectDevice); a discovery filter with the pen's address as `pattern` makes BlueZ report it, and pair/trust/connect bonded it with LE Secure Connections on the first attempt — uhid "OnePlus Stylo Pro Mouse"/"Keyboard", Battery 100 %, barrel haptics live. BlueZ names characteristics by declaration handle, one below the stock log's value handles: stock 0x0067 = char0066 (0783b03e-8535-b5a0-7140-a304d2495cbb, write+notify), 0x003d = char003c (status), 0x0048 = char0047 (180938ac, barrel 02 press / 03 release), Battery 0x0021 = char0020; 6e400003 is the pen's text console. H6 did not arise; the bond persists across reboots (#45).
    - N5 bridge: one kernel rung exposing each uplink block (sysfs + uevent
      or a misc device) and accepting the downlink opcodes through the N2
      node; a BSD-3-Clause daemon on the rootfs that, over BlueZ D-Bus,
@@ -314,22 +332,22 @@ decoded shell model cannot run yet.
      the block to 0x0067 and maps the pen's notifications to
      CON_STA/CFG_ID/PEN_INFO/TIMING_CFG_ACK/PRESS. PASS: BTN_TOOL_PEN,
      position and non-zero pressure within 2 s of the pen touching the
-     glass after a resume; survives 10 blank/unblank cycles.
+     glass after a resume; survives 10 blank/unblank cycles. Done 2026-11-03: the kernel side is 0041 (sysfs pen_uplink + uevent, pen_downlink with stock's gate, pen_debug) and 0042 (pen_input — contact is the controller's call, magnitude the pen's); the daemon is iceland-pen (python3, BlueZ D-Bus, pyudev; BSD-3-Clause; device package 0.2.28 with /etc/iceland/pen.conf as a conffile) — it writes the 20-byte block to char0066, sends the five acknowledgements with stock's values (cfg_id 1, pen_info 2, con_sta 1, timing_ack 1, hopfrq_ack 1), mirrors the ~140 Hz pressure stream, maps the barrel button to BTN_STYLUS, and replays the handshake on every uplink frame, at start-up and on the console's "sleep exit"; since 0.2.29 it waits for ServicesResolved. The owner writes with pressure (14 taps → 14 tip-downs, up to 15507 of 16384, nothing while hovering); the 10-cycle blank/unblank soak of this gate is not recorded.
    - N6 polish: pressure source, battery level, double-click, the A.3
-     four-corner gate, libinput tablet mode and a drawing app; 30-min soak.
-   - Fidelity patch carried with N1 regardless: write the 0x11 deep-sleep
+     four-corner gate, libinput tablet mode and a drawing app; 30-min soak. Status 2026-11-03: pressure source and the barrel button (right click while hovering) done; GNOME's Graphics Tablets panel lists "OnePlus Pad 4" since 0.2.29 (0063 ids, 74-iceland-pen.rules presenting the SPI devices as I2C because libwacom accepts only bus 0/3/5/0x18, /etc/libwacom/oneplus-pad4.tablet). Owed: the barrel's double/long-press codes, middle-click mapping, pen battery into UPower, the libinput "pressure offset greater than 50%" notice (noise when a tap begins without a hover frame), the four-corner gate, the 30-min soak, and a proposal to libwacom to accept the SPI bus.
+   - Fidelity patch (not carried — 0041 took the handshake only; still owed, best with rung W's driver patch since today's blank leaves the IC awake): write the 0x11 deep-sleep
      in nvt_ts_suspend; pen command conditional on the REK wait and also
      from Boot_Update_Firmware; IRQ trigger from the DT flags once the
      pin bias is reconciled; charger 0x53/0x51 from a power-supply
      notifier. Licensing: driver work GPL-2.0-only (constants and
      behaviour taken from the GPL-2.0 vendor tree as interface facts,
      never code), the daemon BSD-3-Clause; offer the driver ABI to
-     Perpetua only once N5 passes.
+     Perpetua only once N5 passes — N5 passed 2026-11-03: the pen series 0037, 0039–0042, 0063 (+ 0038 DT) is now a Perpetua candidate (docs/upstreaming.md); nothing has been filed anywhere yet (the maintainer's GitHub account is needed; `gh` is not on the build host).
 4. Thermal baseline during the C5 soak (tb323fu's thermal-stress pattern:
    600 s all-core + glmark2; CPU zones held under 95 °C, no critical
    trip). The ADC/NTC zones (Perpetua cf2156997bf7, 573a270f7b90 +
    CONFIG_QCOM_SPMI_ADC5_GEN3; Fedora 0056/0190 skin/XO/USB-C) come with
-   the pin bump; only then the userspace model (iceland-thermal,
+   the pin bump — status 2026-11-03: the bump (#45) brought the PMK8850 Gen4 ADC with six charger thermistors as labelled IIO channels (batt_con_therm, usb_con_therm, usb_temp_l, svooc_mos_therm, subboard_therm, usb_temp_r) but no thermal zones for them, so the shell model still waits on the zones and the C5-soak thermal census is still owed; only then the userspace model (iceland-thermal,
    GPL-2.0-or-later, with its decoded-model provenance question).
 5. Audio watch items (2026-11-02): (a) loudness — owner is not sure the
    chain reaches full volume; measure the chain vs the raw sink vs stock
@@ -348,12 +366,12 @@ decoded shell model cannot run yet.
    Headphones UCM device from the wcd939x sequences alsa-ucm-conf already
    ships; if detection never fires, obtain Fedora's q90w2 headset fixes.
 
-## W — Touch-to-wake (one driver rung after #44; W3 after C6)
+## W — Touch-to-wake (one driver rung after #45, flashed 2026-11-03; W3 after C6)
 
 Verified 2026-11-02 (owner's question): with the screen blanked (GNOME
 idle-delay 300 s, DPMS off, nothing suspended) only the power key wakes
 the tablet, by design of 0008: panel_disabling → nvt_ts_suspend → host
-command 0x11 (deep sleep), IRQ disabled, contacts released. nt36xxx.c
+command 0x11 (deep sleep), IRQ disabled, contacts released — corrected the same day by the #43 side finding: nvt_ts_suspend builds the 0x11 command but never writes it (no CTP_SPI_WRITE), so on blank the IC is left awake with its IRQ disabled and contacts released; the IC's blank-time draw is already being paid, W1's "send no 0x11" is today's behaviour and its one variable is leaving the IRQ armed, and the stock driver also carries a PENDETECT wake gesture. nt36xxx.c
 has no gesture code (no WAKEUP_GESTURE, KEY_WAKEUP or enable_irq_wake),
 the touch node has no wakeup-source, wakeup_sources lists the PMIC power
 key only, and the Fedora queue carries nothing (their wake list: power
@@ -394,7 +412,7 @@ pipeline with one variable.
   zero spurious wakes.
 - W3 from s2idle, after C6 F1 passes: wakeup-source on the touch node,
   device_init_wakeup + enable_irq_wake in suspend. PASS: rtcwake freeze,
-  double tap wakes, 10/10; pm_wakeup_irq (CONFIG_PM_DEBUG arrives with P)
+  double tap wakes, 10/10; pm_wakeup_irq (CONFIG_PM_DEBUG did not come with P — no fragment sets it; add it on the C6 F2 RAM boot)
   names GPIO 158.
 - Patches: one driver patch (GPL-2.0-only) and one board DT patch
   (BSD-3-Clause); offered to Perpetua together with 0037/0039 (same file,
@@ -405,7 +423,7 @@ pipeline with one variable.
 Measured 2026-11-02 on a PD 3.0 charger (the owner's SuperVOOC-capable
 adapter): contract held at 5 V (voltage_max 5 V), input limit 2 A →
 4.90 V × 1.99 A = 9.75 W in, 6.9 W into the battery; the driver logs
-"unknown message 0x1000a" (the firmware's input events). Cause: our pin
+"unknown message 0x1000a" (the firmware's input events). Cause: our pin at the time,
 7c98a10e6bb7 (Oct 28) predates Denial's Oplus-Kaanapali charging work on
 perpetua/v7.3 (Oct 31 – Nov 3): request matching and errno results,
 charging enabled when the service comes up, host-set input limit, input
@@ -416,7 +434,7 @@ to 3 A), battery status/power derivation, and "ask PD sources for 9 V"
 SuperVOOC landed the same days: the Southchip SC8547D charge-pump driver
 (both pumps, VOOC PHY over D+/D- through the WCD939x mux), the
 oplus_svooc protocol library (KUnit-tested), sc8547_svooc session driver,
-PMK8850 Gen4 ADC with the four thermistors (battery connector, USB
+PMK8850 Gen4 ADC with the charger thermistors (four named in the commit, six on #45 — usb_temp_l and usb_temp_r as well: battery connector, USB
 connector, SVOOC MOSFETs, subboard) — devices/iceland/charging.md:
 51–55 W from the 80 W adapter (model 0x4B), battery 11.2 A, connector
 48 °C / MOSFETs 44 °C; an earlier run tripped the firmware's own
@@ -426,7 +444,7 @@ their own (they sit on five earlier battmgr changes) and the SuperVOOC
 set is ~25 commits across power/supply, iio/adc, typec mux and DT: the
 vehicle is a pin bump, not cherry-picks.
 
-- P0 host: new pin = perpetua/v7.3 head (b7d639cfb282 or later). Dry run
+- P0 host — done 2026-11-02/03: pin = perpetua/v7.3 head b7d639cfb282 (fetch-perpetua.sh default); the series replayed with `git am -3`, the four re-diffs in place (0028 WRITE_DONE hunk only; 0031 just the &iris block; 0058 keeps Xiaomi's pmic-glink match data next to ours; 0061 keeps the head's SuperVOOC nodes next to the pen charger's), 0020 retired (AK1: the head's TFA9865 driver already puts the middle amplifiers in stock's playing state, 5f:00e0 / 76:d700 read back on #45), the interim p-pinbump/ copies removed on 2026-11-03 (notes in kernel/patches/README), config fragments re-merged (ADC5 Gen3/Gen4, SC8547, SC8547_SVOOC, oplus_svooc, the NMI/soft lockup detectors with hung_task 120 s). Dry run
   2026-11-02 on b7d639cfb282 (100 commits past the pin): 55 of our 59
   patch files apply unchanged; the four that conflict, each small:
   0028 (READ_DONE hunk merged upstream as 9ba37ef1db70 — keep only the
@@ -442,18 +460,19 @@ vehicle is a pin bump, not cherry-picks.
   devices/iceland/kernel.config for the new drivers (ADC5 Gen3/Gen4,
   SC8547, SC8547_SVOOC, oplus_svooc). Build gate: modules diff census
   against the previous bundle, DTB diff reviewed node by node.
-- P1 RAM boot on the 5 V-only charger first (the PD adapter): the whole
+- P1 — done 2026-11-03 (#45 RAM boot; four fastboot attempts for the bootloader's USB re-enumeration churn, nothing on storage touched): census PASS (card, codec macros, soundwire, touch and pen, iris, lockup detectors on; AK1 regmaps at stock); PD_PPS 8.94 V, voltage_max 9 V, ICL 1.5 A, current_max 5 A at 99 % — the 9 V contract, no "unknown message"; the rate at a lower charge is still owed (expect ≈ 12–13 W). Two boot races surfaced and were fixed in 0.2.29 (WirePlumber's UCM profile never attaching, the pen daemon resolving GATT before ServicesResolved). As planned: RAM boot on the 5 V-only charger first (the PD adapter): the whole
   system census (display, touch, audio, Wi-Fi, BT, GDM, iris, stylus) +
   PD: expect 9 V × ~1.4 A ≈ 12–13.5 W, battmgr no "unknown message".
 - P2 SuperVOOC on the owner's adapter, tethered to the serial/usb0
   witness: sc8547 pumps bound, sc8547-svooc MAINS supply present, debugfs
-  status; watch the four thermistors and battery current; PASS = Denial's
+  status; watch the six thermistors (IIO channels, no thermal zones yet — the session script reads the channels) and battery current; PASS = Denial's
   envelope (≈50–55 W, pumps < 60 °C, no firmware overheat trip) and a
   clean fallback to PD when the session is refused. Safety: the
   firmware's 500 mA fallback after a failed session needs a replug; never
   run the first session unattended; the thermistor zones must exist
   before the session is enabled (their absence is the abort criterion).
-- P3 flash; then the suspend rungs of C6 (ebe4aed7e940 GDSC retention
+  Superseded 2026-11-03: the owner's adapter (Anker) is a PD PPS source to this firmware — 0 VOOC frames at any charge — so the stages need the OnePlus 80 W SuperVOOC brick; the usb0 witness cannot exist with the brick in the only port, so the witness is ssh over Wi-Fi, the persistent journal (33 boots kept) with the NMI/soft lockup detectors (hung_task 120 s), and the host-side svooc-session.sh log (not in the repo). The driver has no current knob — svooc_entry_ua() takes 2 A above 85 %, 3 A from 56 to 85 %, 6.2 A at ≤ 55 %, then the minimum with the thermal derate, the 4.46 V taper and the 55 W budget; admissible only with health Good, capacity < 90 %, cell 15–44 °C, every thermistor under its soft limit; a session ends at 90 %; the charger gate is usb_type DCP or Apple-brick at VBUS 4.5–5.5 V two seconds after the plug — so the stages are selected by charge level: stage 1 brick in at 86–89 % (2 A, self-ending at 90 %), stage 2 at 60–84 % (3 A, single pump), stage 3 at ≤ 55 % (up to 6.2 A, Denial's 50–55 W), each attended, discharge-to-half.sh (device-local /tmp; backlight at maximum plus a small CPU load under a cell-temperature thermostat) for the set-up. Until the stages pass, 75-iceland-charging.rules (0.2.30) writes Standard on every boot — in Standard the driver never starts a session and PD is unaffected; after a PASS the rule is dropped so Fast (the driver's default) ships, the owner's decision of 2026-11-03. The thermistor zones do not exist; the six IIO channels do, and their presence is the abort criterion now.
+- P3 flash — done 2026-11-03 (boot-45-3cfb46cf to boot_b, lock-in PASS, boot_a 1f11e2c6 untouched, slot _b bootable + successful; boot-44-f97398b2 is the fallback image; the 24 h soak runs since). Still owed in P: the 9 V rate at a lower charge, the standard-charging regression (SDP/DCP/PD, OTG, connected boot, 500 mA fallback), the three SuperVOOC stages, the soak, then the formal checkpoint (this pass is the interim documentation checkpoint of 2026-11-03). Then the suspend rungs of C6 (ebe4aed7e940 GDSC retention
   comes with the bump) and the thermal zones for the shell model.
 
 ## C6 — Hardening / dailyability (after C5)
@@ -468,7 +487,7 @@ symptom; disarmable at runtime with `power/wakeup=disabled` on
 0000:00:00.0, permanently by dropping wake-gpios as Fedora's final DT does;
 (2) the pin lacks Perpetua ebe4aed7e940 (2026-10-29, one day after our
 pin): PCIe/USB GDSCs PWRSTS_OFF_ON → RET_ON, "on resume gcc_pcie_0_gdsc
-stays stuck off and the phone resets" — must precede any flashed suspend.
+stays stuck off and the phone resets" — must precede any flashed suspend; in the pin since #45 (rung P, 2026-11-03), so F1 on #45 no longer expects the GDSC reset.
 The serial console is the USB gadget, which dwc3 device-mode suspend
 disconnects, so the witnesses are the panel, the host's USB log and the
 post-hoc suspend_stats/journal. No MCQ on our UFS DT (single reg, no
@@ -478,7 +497,7 @@ unset (no pm_wakeup_irq); Perpetua added it for aston on 2026-11-03.
 - S0 once, before any flight: drill and record the hard-reset gesture on
   the idle, synced tablet (runbook says power+vol-up; the media plan says
   power ≥10 s; only Vol-Down+Power ~15 s → fastboot is verified).
-- F1 baseline on flashed #39, nothing built: battery ≥40 %, tethered,
+- F1 baseline on flashed #45 (written for #39), nothing built: battery ≥40 %, tethered,
   host `journalctl -k -f`; on the tablet `nmcli radio wifi off`, `echo
   disabled > /sys/bus/pci/devices/0000:00:00.0/power/wakeup`, snapshot
   wakeup_sources + /proc/interrupts + suspend_stats, then `systemd-run
@@ -488,7 +507,7 @@ unset (no pm_wakeup_irq); Perpetua added it for aston on 2026-11-03.
   "PM: suspend entry (s2idle)"/"suspend exit" ≥25 s apart; panel, gadget
   and ssh back within 60 s. FAIL (a) wakes in <5 s → diff wakeup_sources
   → disable that source → F1b; (b) sleeps then resets → GDSC hazard
-  confirmed → F2 = RAM boot with ebe4aed7e940 + CONFIG_PM_DEBUG=y; (c)
+  confirmed → F2 = RAM boot with CONFIG_PM_DEBUG=y (ebe4aed7e940 is in the pin since #45, so a reset now points elsewhere); (c)
   never wakes → power press, else the drilled reset → fastboot → boot_b.
 - Then the DT pair (drop wake-gpios; USB wakeup-source) as our own
   patches, CONFIG_HOTPLUG_PCI_PCIE=y (Perpetua's route for the root port
@@ -496,14 +515,14 @@ unset (no pm_wakeup_irq); Perpetua added it for aston on 2026-11-03.
   RAM-boot gate. Policy last, rootfs-only: tmpfiles mem_sleep=s2idle,
   sleep.conf.d MemorySleepMode=s2idle, logind HandlePowerKey=suspend,
   unmask the sleep targets, GNOME timers back on.
-- Drain (S3) is unreachable on the pin: the single-cluster CPU PM domain
+- Drain (S3) was unreachable on the old pin 7c98a10e6bb7 (d68240c6e4bb and cf7e4df5e479 are in b7d639cfb282 since #45, untested here): the single-cluster CPU PM domain
   makes the firmware deny system power-down; d68240c6e4bb (two clusters
   + rpmh-stats node) is pin-bump material, with cf7e4df5e479 (UFS lane
   clocks → CXO shutdown).
 - The filed one-shots: T+60 USB bounce, early console loss, battmgr uevent
   EAGAIN, depmod modules.builtin.modinfo, on-device update-initramfs
   writing an unused /boot initrd.
-- Kernel pin bump (one flight, after VP and C5): past 9ba37ef1db70 (drop
+- Kernel pin bump — done as rung P on 2026-11-03 (#45 = b7d639cfb282, the 2026-11-02 head, which holds everything listed here that predates it; 0028 kept only its WRITE_DONE hunk; ADC5 Gen3/Gen4 merged; CONFIG_PM_DEBUG not yet; the suspend commits untested): past 9ba37ef1db70 (drop
   0028's READ_DONE hunk); suspend block ebe4aed7e940, d68240c6e4bb,
   78b1d23d88bc, cf7e4df5e479, 8b2990f9ae9f; thermal/ADC cf2156997bf7,
   573a270f7b90, b4ab5eb72d15 (+CONFIG_QCOM_SPMI_ADC5_GEN3=m) — note
@@ -512,29 +531,29 @@ unset (no pm_wakeup_irq); Perpetua added it for aston on 2026-11-03.
   qcom,drv-supported); the dpu/dp DisplayPort fixes; re-diff 0011–0024 and
   0029–0036 if they move.
 - Upstreaming: docs/upstreaming.md (WRITE_DONE consistency patch, our
-  0002/0004–0007/0010/0031, the license request to the Fedora port).
+  0002/0004–0007/0010/0031, the license request to the Fedora port; since 2026-11-03 also the pen series 0037, 0039–0042, 0063 (+ 0038 DT) for Perpetua, PipeWire's compress-node card object, WirePlumber's first-pass UCM attach, and libwacom's SPI bus — nothing filed anywhere yet).
 
 ## Phase D — Waydroid (after C5 stable)
 
 Binder/ashmem config audit in the Perpetua tree, Waydroid image,
 shared-kernel Android apps. Scoped when C5 lands.
 
-## Readiness board (2026-11-02, evening)
+## Readiness board (revised 2026-11-03)
 
 | Step | State | What it still needs |
 |---|---|---|
 | #42 video fix set | **flashed** (boot_b 82219574) | — |
-| #43 stylus input (0037–0039) | **RAM-booted and gated** 2026-11-02 21:14 (boot-43-e9368756): capabilities, udev and libinput all PASS; the pen itself silent — pen scanning in the controller is off until the stock 0x7F/0x10 command, now patch 0040 (flown live as a module swap, acknowledged), still no pen packets on any of the six pen-protocol values | research done (report in /srv/ubuntu-iceland/build/pen-protocol-work); patch 0041 (handshake plumbing: uplink export, downlink node, stock gate) written and compile-checked, flies as a module swap on #44: the Stylo Pro is an OPP pen — stock brokers a 20-byte timing block from the controller to the pen over BLE and the pen's replies back as 0x7F 0x40 commands; ladder A.3c (N0–N6) written; the cheapest decisive test is N2 (host-side acks, no radio), after the #44 flash; #43+0040 are flashed with #44 |
+| #43 stylus input (0037–0039) | **RAM-booted and gated** 2026-11-02 21:14 (boot-43-e9368756): capabilities, udev and libinput all PASS; the pen itself silent — pen scanning in the controller is off until the stock 0x7F/0x10 command, now patch 0040 (flown live as a module swap, acknowledged), still no pen packets on any of the six pen-protocol values | research done (report in /srv/ubuntu-iceland/build/pen-protocol-work); patch 0041 (handshake plumbing: uplink export, downlink node, stock gate) written and compile-checked, flies as a module swap on #44: the Stylo Pro is an OPP pen — stock brokers a 20-byte timing block from the controller to the pen over BLE and the pen's replies back as 0x7F 0x40 commands; ladder A.3c (N0–N6) written; the cheapest decisive test is N2 (host-side acks, no radio), after the #44 flash; #43+0040 are flashed with #44. Status 2026-11-03: superseded — 0041 flew on the #44 RAM boot (N1 PASS, N2 refuted H2), N4/N5 bonded the pen and made it write, 0042 and 0063 followed; #44 was never flashed; 0037–0042 are in #45, flashed 2026-11-03 (0063 by hand in its touch module) |
 | Audio hardening + processed mic (0.2.26) + clock domains (0.2.27) | **installed and measured** 2026-11-02: audio-check "present"; both inputs listed, "voice processing" the default (owner: much higher level); the crackle that came with it traced to the two DSP-timed PCMs sharing a clock domain, fixed by capture clock.name + sink priority.driver 3000 + min-quantum 2048: 0 resyncs / 0 xruns in a 60 s soak with both sources open during playback (51 per 3 min before); owner: "rock solid" | owed: the numeric speech-level gate (≈ −40 dBFS processed vs ≈ −54 raw, needs the owner's voice for 12 s) and a call-style echo test |
 | Wi-Fi idle drops (0.2.27) | root cause: station power save on, our powersave=2 drop-in outranked by Ubuntu's default file; moved to /etc zz- name | watch: no further unreachable-when-idle events; the DFS-roam "regulatory prevented using AP config" + ath12k "Timeout while waiting for regulatory update" lines → C6/P (ath12k fixes after the pin) |
-| #44 pen charger (0056–0062) + stylus 0037–0040 | **RAM-booted and gated** 2026-11-03 (boot-44-f97398b2): level shifters, hBoost, pen attached and charging, address delivered, telemetry unchanged — PASS; on the same boot the pen ladder reached N5: the Stylo Pro writes with pressure (0041/0042 + iceland-pen) | flash decision 2026-11-03: #45 (rung P) builds on top of #44's content, so the #44 flash is skipped in favour of flashing #45 after its gate; boot-44-f97398b2 is the fallback image; original gate text for the record: PMH0101 regulators (no cmd-db debugfs on this kernel, so the RPMh resources LS3B/LS4B can only be proven by the boot — abort criterion) → driver bound, fw 0x20022, hBoost 7000 mV acked → pen on the magnet edge → battmgr telemetry unchanged; then ONE flash for #43+#44 |
-| Checkpoint (owner's standing order, 2026-11-02) | **after the charging fixes (rung P) land**: the next full checkpoint | README, hardware-status, plan, patch provenance, upstreaming ledger, firmware manifest, the status page artifact, memory; commit and push to GitHub. Interim pushes continue after every verified step (the #44 flash gets its own docs pass), but the formal "we are here" checkpoint waits for 9 V PD + SuperVOOC |
-| P pin bump (charging 9 V / SuperVOOC, GDSC, thermistors) | **#45 flashed to boot_b 2026-11-03** (boot-45-3cfb46cf, lock-in PASS); RAM-boot census the same day PASS — 9 V PD contract on the Anker (PD_PPS, 8.94 V, voltage_max 9 V), both pumps bound, svooc supply + debugfs, six ADC thermistors live, AK1 regmaps at stock, lockup detectors on; two boot races found and fixed in 0.2.29 (WirePlumber HiFi attach, pen daemon GATT discovery), the WirePlumber one repeats on every boot of this pin and the guard nets it; 0.2.30 holds the svooc driver in Standard across boots (it re-probes to Fast) and scopes the guard to the owner's session; fastboot needed four attempts (bootloader USB churn) | owed: (a) the 9 V rate at a lower charge (expect ≈ 12–13 W); (b) the standard-charging regression (SDP/DCP/PD, OTG, connected boot, 500 mA fallback); (c) the SuperVOOC staged validation with the OnePlus 80 W brick (a PD source never speaks VOOC: the Anker is PD PPS to this firmware, 0 frames at any charge). The driver has no current knob — svooc_entry_ua() picks the session current by charge level: 2 A above 85 %, 3 A from 56 %, 6.2 A at ≤ 55 %, minimum with the thermal derate, the voltage taper and the 55 W budget; a session ends at 90 % — so stage 1 (2 A, self-terminating) = brick in at 86–89 %, stage 2 (3 A, single pump) at 60–84 %, stage 3 (up to 6.2 A, Denial's 50–55 W) at ≤ 55 % with a cool cell; each attended, svooc-session.sh logging the IIO thermistors, the persistent journal as the freeze witness (no usb0 with the brick in the only port); PASS → drop 75-iceland-charging.rules so Fast is the shipped default (owner's call); (d) a 24 h soak on #45 (running since the flash); then CHECKPOINT |
+| #44 pen charger (0056–0062) + stylus 0037–0040 | **RAM-booted and gated** 2026-11-03 (boot-44-f97398b2): level shifters, hBoost, pen attached and charging, address delivered, telemetry unchanged — PASS; on the same boot the pen ladder reached N5: the Stylo Pro writes with pressure (0041/0042 + iceland-pen) | flash decision 2026-11-03: #45 (rung P) builds on top of #44's content, so the #44 flash is skipped in favour of flashing #45 after its gate — done, #45 flashed 2026-11-03; boot-44-f97398b2 is the fallback image; original gate text for the record: PMH0101 regulators (no cmd-db debugfs on this kernel, so the RPMh resources LS3B/LS4B can only be proven by the boot — abort criterion) → driver bound, fw 0x20022, hBoost 7000 mV acked → pen on the magnet edge → battmgr telemetry unchanged; then ONE flash for #43+#44 |
+| Checkpoint (owner's standing order, 2026-11-02) | **after the charging fixes (rung P) land**: the next full checkpoint | README, hardware-status, plan, patch provenance, upstreaming ledger, firmware manifest, the status page artifact, memory; commit and push to GitHub. Interim pushes continue after every verified step (#44 was never flashed; the #45 flash got this interim documentation checkpoint, ordered by the owner on 2026-11-03), but the formal "we are here" checkpoint waits for the 9 V rate at a lower charge, the standard-charging regression, the three SuperVOOC stages and the 24 h soak |
+| P pin bump (charging 9 V / SuperVOOC, GDSC, thermistors) | **#45 flashed to boot_b 2026-11-03** (boot-45-3cfb46cf, lock-in PASS); RAM-boot census the same day PASS — 9 V PD contract on the Anker (PD_PPS, 8.94 V, voltage_max 9 V), both pumps bound, svooc supply + debugfs, six ADC thermistors live, AK1 regmaps at stock, lockup detectors on; two boot races found and fixed in 0.2.29 (WirePlumber HiFi attach, pen daemon GATT discovery), the WirePlumber one repeats on every boot of this pin and the guard nets it; 0.2.30 holds the svooc driver in Standard across boots (it re-probes to Fast) and scopes the guard to the owner's session; fastboot needed four attempts (bootloader USB churn) | owed: (a) the 9 V rate at a lower charge (expect ≈ 12–13 W); (b) the standard-charging regression (SDP/DCP/PD, OTG, connected boot, 500 mA fallback); (c) the SuperVOOC staged validation with the OnePlus 80 W brick (a PD source never speaks VOOC: the Anker is PD PPS to this firmware, 0 frames at any charge). The driver has no current knob — svooc_entry_ua() picks the session current by charge level: 2 A above 85 %, 3 A from 56 %, 6.2 A at ≤ 55 %, minimum with the thermal derate, the voltage taper and the 55 W budget; a session ends at 90 % — so stage 1 (2 A, self-terminating) = brick in at 86–89 %, stage 2 (3 A, single pump) at 60–84 %, stage 3 (up to 6.2 A, Denial's 50–55 W) at ≤ 55 % with a cool cell; each attended, svooc-session.sh logging the IIO thermistors, the persistent journal as the freeze witness (no usb0 with the brick in the only port); PASS → drop 75-iceland-charging.rules so Fast is the shipped default (owner's call); (d) a 24 h soak on #45 (running since the flash); (e) build #46 with 0058 matching the renamed board compatible — pen charging is dead on #45 (no pmic_glink.hboost device, MT5806 chip_id 0x0000; found by the 2026-11-03 audit; pmic_glink is built in, so no module swap) — RAM boot, pen-charger gate as on #44, then flash; then CHECKPOINT |
 | S sensors | kernel side complete; nothing of the userspace exists (the owner's auto-rotation report is this gap) | S1 host day (arm64 mmdebstrap chroot; make-dsp-tree.sh from the factory persist registry; hexagonrpc 0.5.0-1 → 598b591 + Fedora 0001/0002; libssc 0.4.4-2; iio-sensor-proxy 3.9-1 with ssc) — start when the host is not building kernels (qemu-user builds crawl under a kernel build) |
-| C6 suspend | hazards mapped; F1 procedure written | owner: one hard-reset drill (S0); then F1 on the flashed kernel with Wi-Fi off and WAKE# disarmed; the GDSC retention fix arrives with P, so F1 may reset — that is the expected data point |
-| A polish | identity done (0.2.25: label MAC on Wi-Fi; the stock BT address since its recovery from the capture); mic stage in 0.2.26 | BT pairing + libspa-0.2-bluetooth (also the pen's BLE side once the research says what it needs); a USB-C analog headset for the headphone rung; loudness comparison vs stock; Chrome/Widevine playback test |
-| W touch-to-wake | facts mapped (section W): deep sleep on blank, no gesture code, GPIO 158 is PDC-wakeable | after #44: W1 keep-awake RAM boot → W2 double-tap gesture (KEY_WAKEUP) → flash with the next bundle; W3 (s2idle) after C6 F1 |
-| C5 leftovers | desktop in daily use on #42 | owner: power-press shows GNOME's dialog; four-corner taps under the compositor; 24 h soak on the real charger; then fold the guards into the desktop rootfs profile and build one clean image |
+| C6 suspend | hazards mapped; F1 procedure written | owner: one hard-reset drill (S0); then F1 on the flashed kernel with Wi-Fi off and WAKE# disarmed; the GDSC retention fix (ebe4aed7e940) is in the pin since #45, so F1 runs on flashed #45 and a reset now would not be the GDSC hazard; CONFIG_PM_DEBUG still to be added on the F2 RAM boot |
+| A polish | identity done (0.2.25: label MAC on Wi-Fi; the stock BT address since its recovery from the capture); mic stage in 0.2.26 | classic BT pairing + libspa-0.2-bluetooth (BLE bonding is proven — the pen is bonded with LE Secure Connections since 2026-11-03, served by HOGP/uhid); pen polish — barrel double/long-press codes, middle click, battery into UPower, the libwacom SPI-bus proposal; a USB-C analog headset for the headphone rung; loudness comparison vs stock; Chrome/Widevine playback test |
+| W touch-to-wake | facts mapped (section W): deep sleep on blank, no gesture code, GPIO 158 is PDC-wakeable | after #45 (flashed 2026-11-03): W1 keep-awake RAM boot → W2 double-tap gesture (KEY_WAKEUP) → flash with the next bundle; W3 (s2idle) after C6 F1 |
+| C5 leftovers | desktop in daily use, on #45 since 2026-11-03; power press → GNOME's dialog and four-corner taps confirmed by the owner 2026-11-02 | the 24 h soak (running on #45 since the flash, counted under P); then fold the guards into the desktop rootfs profile and build one clean image |
 
 Idle gate: no suspend attempt in ~2 h of the #41 session nor on #42 so far
 (journal: 0 "Suspending", suspend_stats 0/0, sleep.target masked) — closed.
@@ -544,13 +563,13 @@ Idle gate: no suspend attempt in ~2 h of the #41 session nor on #42 so far
 C0: NAT → apt → clock → hygiene.                        [done 10-31]
 C1: display census (20/20) → weston → GPU fw → backlight. [done 10-31]
 C2: touch modprobe-with-panel → soak → coldplug → unblacklist. [done 11-01]
-C3: pwrseq → ath12k → BT (pairing still owed).           [done 11-01]
+C3: pwrseq → ath12k → BT (BLE bonding proven with the pen 11-03; classic pairing still owed).           [done 11-01]
 C4: audio PD → topology/UCM → amps → mics → chain → stock ceiling → race. [done 11-02]
-VP: import (done) → build gate → RAM-boot first light → decode → flash → encode → hardening.
-C5: guards (done) → T2 (done) → apt desktop → GDM on glass → taps/scale/power key → soak → clean image.
+VP: import → build gate → RAM-boot first light → decode → flash → encode → hardening (fix set 0043–0055 in #42). [done 11-02; VP4 robustness retest and the manifest VPU row owed]
+C5: guards (done) → T2 (done) → apt desktop (done) → GDM on glass (done 11-02) → taps/scale/power key (done 11-02) → soak (running on #45) → clean image.
 S:  host debs + DSP tree → secure-node attach → (DT flight) → ssccli → iio-sensor-proxy → GNOME rotate → ship.
-A:  BT/WLAN identity (0.2.25; stock BT address since) → BT audio + pairing → pen patches (next bundle) → thermal census → headphones (needs a USB-C headset).
+A:  BT/WLAN identity (0.2.25; stock BT address since) → pen (#43–#45 + A.3c N0–N6, done 11-03; polish owed) → BT audio + classic pairing (BLE bonding proven) → thermal census → headphones (needs a USB-C headset).
 W:  W1 keep-awake RAM boot → W2 double-tap gesture (KEY_WAKEUP) → flash → W3 s2idle wake source after C6.
 P:  re-diff → config re-merge → RAM-boot census (9 V contract) → flash #45 [done 11-03] → SuperVOOC staged by charge level with the brick (2 A at 86–89 % → 3 A at 60–84 % → 6.2 A at ≤ 55 %) → 9 V rate + standard regression → 24 h soak → drop the Standard rule → CHECKPOINT: docs + push (owner's order).
-C6: S0 reset drill → F1 s2idle baseline on #39 → GDSC + PM_DEBUG RAM boot → DT pair + pciehp → Wi-Fi-up → policy → pin bump → one-shots → upstreaming.
+C6: S0 reset drill → F1 s2idle baseline on #45 (GDSC retention in the pin since P) → PM_DEBUG RAM boot → DT pair + pciehp → Wi-Fi-up → policy → one-shots → upstreaming (pin bump done as P, 11-03).
 D:  Waydroid.

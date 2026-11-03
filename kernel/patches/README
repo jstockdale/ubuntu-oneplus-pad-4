@@ -8,10 +8,10 @@ the build fails loudly when one stops applying.
 A kernel patch is licensed like the file it changes (the kernel's own rule,
 Documentation/process/license-rules.rst): the driver and sound patches here
 modify GPL-2.0-only files and are GPL-2.0-only (LICENSES/GPL-2.0-only.txt);
-the device-tree patches (0001, 0003, 0005, 0022–0024, 0026) modify files that
+the device-tree patches (0001, 0003, 0005, 0022–0024, 0026, 0030, 0031, 0038, 0061) modify files that
 carry `SPDX-License-Identifier: BSD-3-Clause` — Qualcomm's `kaanapali.dtsi` and
 the Denial project's board file `kaanapali-oneplus-iceland.dts` (map220v) —
-and are BSD-3-Clause. Authorship is the `From:` line of each patch; the
+and are BSD-3-Clause; the two binding patches (0056, 0059) modify Documentation/devicetree/bindings schemas, which the kernel dual-licenses `(GPL-2.0-only OR BSD-2-Clause)` — 0059's new `maxic,mt5806.yaml` declares the same — and carry that dual license. Authorship is the `From:` line of each patch; the
 `Signed-off-by:` lines are the Developer Certificate of Origin (DCO 1.1) of
 the people who wrote or carried it, which is what the kernel and Perpetua
 require instead of a contributor agreement.
@@ -38,25 +38,57 @@ Provenance
 | 0003, 0008 | Fedora iceland port, github.com/mzakamin-hub/iceland-linux patch queue | mzak <mzak.amin@gmail.com> | carried verbatim with their sign-off |
 | 0004, 0005, 0006, 0007, 0010 | this port (C2 touch, C3 radios) | John Stockdale | to be offered upstream |
 | 0009 | Fedora iceland port, re-diffed against our tree | mzak (original); re-diff by this port | drop when Perpetua carries the stock porch |
-| 0011–0024 | Fedora iceland port's TDM speaker chain (AudioReach TDM endpoint, PRM TDM clocks, channel maps, sc8280xp TDM back end, TFA9865 stock setup, volume clamp, iceland DT) | mzak | carried with their sign-off where the original had one (0011 had none) |
+| 0011–0024 except 0020 (retired 2026-11-03, see the pin bump below) | Fedora iceland port's TDM speaker chain (AudioReach TDM endpoint, PRM TDM clocks, channel maps, sc8280xp TDM back end, TFA9865 stock setup, volume clamp, iceland DT) | mzak | carried with their sign-off where the original had one (0011 had none) |
 | 0025, 0026 | infiniti-mainline (OnePlus 15, same SoC): GPR callback before probe, 1024-byte GPR intent | Victor Fuentes <victor@vlinkz.dev> | carried with their sign-off |
 | 0027 | this port: revert of Perpetua aad249d15433 (tx-macro capture mutes) | John Stockdale | the revert restores upstream v7.3 behaviour on this codec |
-| 0028 | this port: q6apm READ/WRITE_DONE payload-size fix (microphones, WCD playback) | John Stockdale | READ_DONE half **merged upstream independently** on 2026-11-02 (Perpetua 9ba37ef1db70, same approach; also Reixo0/linux fcabe5fd25c7) — drop that hunk at the next pin bump; the WRITE_DONE half is offered as a consistency patch, docs/upstreaming.md |
+| 0028 | this port: q6apm READ/WRITE_DONE payload-size fix (microphones, WCD playback) | John Stockdale | READ_DONE half **merged upstream independently** on 2026-11-02 (Perpetua 9ba37ef1db70, same approach; also Reixo0/linux fcabe5fd25c7) — that hunk was dropped at the pin bump of 2026-11-03 and the patch now carries only the WRITE_DONE hunk, offered as a consistency patch (prepared branch q6apm-write-done-payload-size, one commit on b7d639cfb282; no PR opened yet), docs/upstreaming.md |
 | 0029, 0030, 0032–0036 | Qualcomm's kaanapali iris (VPU) series, carried by infiniti-mainline and the Fedora iceland queue (`/srv/ubuntu-iceland/ref/iceland-linux/patches/0001-infiniti` 0033, 0035, 0032, 0034, 0037, 0038, 0036) | Vikash Garodia, Jingyi Wang, Wangao Wang, Vishnu Reddy (oss.qualcomm.com), sign-offs kept | drop when Perpetua carries the iris support (none at b7d639cfb282) |
 | 0031 | this port: board enable for the iris codec (firmware-name vpu40_2v.mbn, status okay) — BSD-3-Clause (board dts) | John Stockdale | to be offered upstream with the series |
 | 0037 | Fedora iceland port's "give the pen its tablet capabilities" (0036), adapted to our DT-property probe: BTN_STYLUS/2, axis resolution from touchscreen-x-mm/y-mm | mzak (original); adaptation by this port | offer with 0039 to Perpetua |
 | 0038 | this port: touchscreen-x-mm/y-mm in the controller frame (193/274) — BSD-3-Clause (board dts) | John Stockdale | to be offered upstream |
 | 0039 | this port: the pen reports through touchscreen_report_pos like the finger (coordinates were raw) | John Stockdale | to be offered upstream |
-| 0040 | this port: the controller's pen scanning is off after every firmware download until the host sends the extended command 0x7F/0x10 (+ uplink-timing byte); the constants and sequence come from OnePlus's vendor driver for this SoC (OnePlusOSS sm8850 modules, GPL-2.0 vendor code — read, not copied); module parameter pen_type for flights | John Stockdale | flown on #43 (controller acknowledges; the pen itself still silent — research in progress); to be offered upstream with 0037/0039 |
-| 0041 | this port: OPP pen handshake plumbing — the controller's uplink frames kept out of the touch parser and exposed as sysfs `pen_uplink` (+ uevent), the downlink commands (0x7F 0x40 family) accepted through `pen_downlink` with stock's gate, `pen_debug` for the bench; protocol facts from the vendor driver, nothing copied | John Stockdale | written 2026-11-02 for ladder A.3c N1/N2/N5; first flight = module swap on #44 |
-| 0042 | this port: the pen's real pressure and barrel buttons arrive over Bluetooth on the Stylo Pro; `pen_input` on the SPI device lets the bridge daemon inject them into the pen input device | John Stockdale | written 2026-11-03 for A.3c N6; flown as a module swap on #44 |
-| 0043 | this port: vendor/product ids on the touch and pen input devices and the pen's parent, so libwacom (GNOME's Graphics Tablets panel) can match the tablet definition shipped by the device package | John Stockdale | written 2026-11-03 for A.3c N6 |
+| 0040 | this port: the controller's pen scanning is off after every firmware download until the host sends the extended command 0x7F/0x10 (+ uplink-timing byte); the constants and sequence come from OnePlus's vendor driver for this SoC (OnePlusOSS sm8850 modules, GPL-2.0 vendor code — read, not copied); module parameter pen_type for flights | John Stockdale | flown on #43 (controller acknowledges; the pen stayed silent until the Bluetooth leg); the pen research of 2026-11-02 confirmed 0x7F 0x10 as the only enable command on this tablet (the other sub-commands are unreachable with pen_support_opp) and the pen writes since #44 with 0041/0042 and the iceland-pen bridge; in #45 (flashed 2026-11-03); to be offered upstream with 0037/0039 and 0041/0042 |
+| 0041 | this port: OPP pen handshake plumbing — the controller's uplink frames kept out of the touch parser and exposed as sysfs `pen_uplink` (+ uevent), the downlink commands (0x7F 0x40 family) accepted through `pen_downlink` with stock's gate, `pen_debug` for the bench; protocol facts from the vendor driver, nothing copied | John Stockdale | written 2026-11-02 for ladder A.3c N1/N2/N5; flown as a module swap on #44 (2026-11-03): the uplink frame arrived within a second of the enable, every downlink command was accepted, and the pen tracked once the block had been written to it over Bluetooth; in the series since #45 (flashed 2026-11-03); to be offered to Perpetua with 0040/0042 |
+| 0042 | this port: the pen's real pressure and barrel buttons arrive over Bluetooth on the Stylo Pro; `pen_input` on the SPI device lets the bridge daemon inject them into the pen input device | John Stockdale | written 2026-11-03 for A.3c N6; flown as a module swap on #44 (taps and buttons PASS once the injected magnitude was gated on the controller's contact byte — contact is the controller's call, magnitude the pen's); in the series since #45 (flashed 2026-11-03); to be offered to Perpetua with 0041 |
+| 0063 | this port: vendor 0x0603 / product 0x6536 on the touch and pen input devices and the pen's parent device, so libwacom (GNOME's Graphics Tablets panel) can match the tablet definition shipped by the device package (74-iceland-pen.rules presents the SPI bus as I2C, since libwacom accepts only bus 0/3/5/0x18) | John Stockdale | written 2026-11-03 for A.3c N6, first filed as 0043 and renumbered the same day (numbering note below); compiled into #45's nt36536 module by hand after the build had started (#45's count of 61 patch files excludes it) and in the series for the next build; GNOME's Graphics Tablets panel lists "OnePlus Pad 4" since 0.2.29; to be offered upstream with the pen series |
 | 0043–0045 | infiniti-mainline iris fixes 0069–0071 (MVP NoC low-power release on vpu4x, hierarchical-B only, no picture state on decoder input) | Victor Fuentes | drop when Perpetua carries them |
 | 0046–0055 | Fedora iceland port's iris fixes 0157–0160, 0246–0250, 0292 (iova restrict region, capture bit-depth validation, hfi_sys_ops guard, uc_region boot failure, AHB bridge reset, power-off ordering, core lock, open limit, instance refcount, SMPTE 170M signalling) | Vishnu Reddy, Dmitry Baryshkov, mzak | drop as Perpetua picks them up |
-| 0056–0062 | pen charger (Maxic MT5806) from the Fedora iceland port with its prerequisites (PMH0101 level-shifter regulators 0084/0085, pmic_glink hboost client 0090 adapted to our compatible, binding 0091, driver 0092, board DT 0093 re-diffed, s2idle fix 0179) | mzak; adaptations by this port | promoted into the series for build #44 (2026-11-02); flight gate in docs/bringup-plan.md (#44 row); drop as Perpetua picks them up |
+| 0056–0062 | pen charger (Maxic MT5806) from the Fedora iceland port with its prerequisites (PMH0101 level-shifter regulators 0084/0085, pmic_glink hboost client 0090 adapted to our compatible, binding 0091, driver 0092, board DT 0093 re-diffed, s2idle fix 0179) | mzak; adaptations by this port | promoted into the series for build #44 (2026-11-02) and flown on its RAM boot of 2026-11-03 — PASS: level shifters vreg_ls3b/ls4b up with no RPMh complaint, mt5806 bound at 0-002b (firmware 0x20022, 7 V supply acknowledged), the docked pen attached and charging (gate in docs/bringup-plan.md, #44 row); 0058 and 0061 re-diffed at the pin bump (below); in #45 (flashed 2026-11-03) — where pen charging is broken: 0058 matched the board's old pmic-glink compatible, so no hBoost device (corrected 2026-11-03, flies with #46); the Fedora port's to submit — drop as Perpetua picks them up |
 
 Numbering note: the number 0029 was first used on 2026-11-02 for infiniti's
 ADSP reserved-memory change (0x4c00000 -> 0x5000000) and withdrawn the same
 day — the OnePlus board file already deletes and redefines that node with
 0x5000000, so it had no effect here (docs/porting-log.md, "0029 was a
 no-op"). The number was then reused for the iris platform data.
+
+Pin bump 2026-11-03 (rung P): 7c98a10e6bb7 → b7d639cfb282
+-----------------------------------------------------------
+
+The whole series was replayed with `git am -3` on Perpetua perpetua/v7.3 =
+b7d639cfb282 (100 commits past the old pin) on 2026-11-02; 56 patches applied
+untouched and four were re-diffed, replacing the same-numbered files here
+(the interim copies lived in a p-pinbump/ directory until 2026-11-03, when
+they were byte-identical to the series and the directory was removed):
+
+- 0028: the READ_DONE half is upstream (9ba37ef1db70); the WRITE_DONE half
+  is kept.
+- 0031: the head moved the CPU thermal overrides into a shared include; the
+  patch is now just the &iris block.
+- 0058: the head added Xiaomi's pmic-glink match data next to ours; both kept. The re-diff kept the hBoost client keyed on "oplus,kaanapali-pmic-glink" although Perpetua 5ff346c547a7, before the pin, had renamed the board's compatible to "oneplus,kaanapali-pmic-glink" (generic fallback kept): on #45 the generic entry matched, no pmic_glink.hboost device was created and the pen charger read chip_id 0x0000 — found by the checkpoint audit on 2026-11-03 and corrected the same day (0058 now matches the renamed string; pmic_glink is built in, so the fix flies with build #46).
+- 0061: the head added the SuperVOOC nodes (i2c_hub_0 charge pumps, PMK8850
+  ADC channels, tlmm pump IRQ states) at the same insertion points as the
+  pen charger's; both kept (i2c_hub_1, PMIC-GPIO states, gpio169 state).
+
+0020 was retired at the same time: at the new pin Perpetua's TFA9865 driver
+puts the two middle amplifiers in stock's playing state by itself (registers
+5f:00e0 and 76:d700 read back on build #45), so the local patch had nothing
+left to do. The number is not reused. The config fragments were re-merged
+against the head's devices/iceland/kernel.config (ADC5 Gen3/Gen4,
+CHARGER_SC8547, CHARGER_SC8547_SVOOC, oplus_svooc, and the lockup detectors
+Denial added after two freezes during SuperVOOC). Build #45 (kernel 7.3.0+)
+was RAM-booted and then flashed to boot_b on 2026-11-03.
+
+Numbering: the input-identity patch for the pen and touch devices was first
+filed as 0043 on 2026-11-03, colliding with the first infiniti iris fix; it is
+0063 since the same day (the series applies in lexical order, and it touches
+only nt36xxx.c, which no later patch changes). It was written after build #45 had started: #45 applied 61 patch files and carries 0063's change in its nt36536 module, compiled by hand; the next build takes it from the series.

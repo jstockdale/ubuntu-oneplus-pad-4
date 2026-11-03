@@ -24,6 +24,8 @@ called by drm_panel_enable() after the panel is on and by drm_panel_disable()
 before it goes off, for any panel (the hooks do not depend on the panel's
 own enable / disable callbacks).
 
+[Carried verbatim by the Ubuntu port from the Fedora iceland queue (github.com/mzakamin-hub/iceland-linux), with the author's sign-off; 0007 (the probe-time gate) pairs with it. Exit: submit to Perpetua together with 0007; drop when Perpetua's follower uses the enable / disable hooks.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

@@ -32,10 +32,12 @@ comments. What moved or was added for this tree:
 - The control-line pin states are a new &pmih0108_e1_gpios block (this
   board file had none) placed before &pon_resin; the label is the one
   of Perpetua's pmih0108-kaanapali.dtsi, the same as Fedora's.
-- pen_chg_int_default is the first state of the &tlmm block.
+- pen_chg_int_default was the first state of the &tlmm block (since the pin bump it follows the head's cp_second_irq_default).
 Nothing else in this file claims gpio169, hub pins gpio78 / gpio79,
 PMIH0108 gpio2 / 7 / 8 / 11 or PMH0101 gpio15 - 18. The touchscreen
 (&spi19) and the regions the stylus input patches touch are untouched.]
+
+Re-diffed for the pin bump (rung P, 2026-11-02): the head added the SuperVOOC nodes (i2c_hub_0 charge pumps, PMK8850 ADC channels, tlmm pump IRQ states) at the same insertion points, so the pen charger's nodes now follow them — &i2c_hub_1 after &i2c_hub_0, the control-line states after charger_therm_default in the &pmih0108_e1_gpios block the head added, pen_chg_int_default after cp_second_irq_default in &tlmm; the content is unchanged. Exit: drop when Perpetua takes the Fedora port's pen-charger series (the Fedora port's to submit).
 
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -19,9 +19,9 @@
 >   0x1940/0x1943/0x1944/0x1a20 — the SMMU watch in §1.6 must include
 >   0x1a20.
 > - VP2 needs gstreamer1.0-tools and -plugins-bad (h264parse/h265parse) in
->   addition to -plugins-good; none of the three is installed (rootfs-only).
-> - Perpetua's head b7d639cfb282 (100 commits past the pin) still carries
->   no iris work; nothing to adopt from a pin bump.
+>   addition to -plugins-good; none of the three was installed when this was written (staged 2026-11-02 — VP2/VP3 ran on them).
+> - Perpetua's head b7d639cfb282 (our pin since 2026-11-03) still carries
+>   no iris work; the bump dropped nothing (0029–0036 and 0043–0055 are all still carried on #45).
 > - The dtb-work scratch directory cited in the camera section is gone; the [superseded 2026-11-02 — see the correction block at the top]
 >   firmware choice (vpu40_2v.mbn) rests on the manifest and the Fedora
 >   port's working choice, not on a fresh stock-DT read.
@@ -43,6 +43,12 @@
 >   The serial witness during sleep is the gadget, which drops — use the
 >   panel, the host USB log and post-hoc suspend_stats. The hard-reset
 >   gesture (power ≥10 s vs power+vol-up) is unverified; drill it once.
+>
+> **Status 2026-11-03 (interim checkpoint):**
+> - VPU: §1's ladder ran on 2026-11-02 — VP0 (kernel #41, 0029–0036), VP1 first light, VP2 decode and VP3 encode PASSED on #41/#42, and #42 was flashed the same day; video ✅ in hardware-status.md (H.264/HEVC/VP9 decode, H.264 encode to MP4 and back through the decoder). VP4's hardening set went in early, as 0043–0055 (infiniti 0069–0071 + Fedora 0157–0160, 0246–0250, 0292), after the first real session's firmware system error (porting-log "VP2 on kernel #41 … the iris fix set goes in as 0043–0055"). Still owed under VP4: malformed inputs must be rejected, not crash the firmware (the 4:4:4 VP9 clip, the level-1.0 session); the seek/stop/start soak; the vpu40_2v.mbn sha into the manifest's shipped table (still hash-less under Remoteproc). Rules learned: verify clips with gst-discoverer, constrain profile/level after v4l2h264enc, `pkill -x`. VP5 (VA-API) untouched.
+> - Haptics and GNSS: the paper closures landed — hardware-status.md carries "Haptics — no vibration motor" and "GNSS / location — no GNSS hardware"; its Suspend row reads from §4's evidence (never attempted, suspend_stats 0/0, deep by default, sleep targets masked since 0.2.21) and its Cameras row from §5. §0's and Appendix B's "when hardware-status is next edited" items are done.
+> - Suspend: still untested (❓); C6 follows rung P. The pin moved to b7d639cfb282 on 2026-11-03 (build #45, flashed), which puts ebe4aed7e940 (the GDSC retention change this block names as the headline hazard) and the lockup detectors (NMI + soft, hung_task 120 s) into the running kernel; the bullet above's "Perpetua's head b7d639cfb282" is now the pin, and every "ours" file:line here is against 7c98a10e6bb7. Chrome 156 (with Widevine) is installed; DRM playback untested.
+> - Cameras: no work yet (❓); last phase, unchanged.
 
 Date: 2026-11-01 (research session; no device contact, no flights flown).
 Scope: the five remaining minor subsystems after C2/C3 — video decode/encode
@@ -137,8 +143,8 @@ its own campaign, camera last): broadly confirmed, with two overturns —
   ports. There is nothing to port.
 - **Haptics is even cheaper than "cheap": zero.** No motor is fitted
   (§2). Our hardware-status.md rows "Vibration ❓" and "Suspend ❓ works
-  per Nura wiki" should be updated from this document's evidence when
-  hardware-status is next touched (not done here).
+  per Nura wiki" were updated from this document's evidence (Haptics —
+  none fitted; Suspend ❓ never attempted, hazards in C6; GNSS — none).
 
 Recommended sequencing against the roadmap: **VPU now** (slots before/with
 C5 — hardware video is a desktop prereq for a tablet), haptics+GNSS are
@@ -171,7 +177,7 @@ absorb unbounded time and it blocks nothing else).
   (`FED/iceland-firmware MANIFEST.tsv`, path
   `updates/qcom/kaanapali/iceland/vpu40_2v.mbn`, same hash, their own
   independent extraction from vendor_a). Double-corroborated. **[V]**
-- No `/dev/video*` exists today (nothing binds).
+- No `/dev/video*` existed when this was written (nothing bound); since #41 (2026-11-02) /dev/video0 is "Iris Decoder" and /dev/video1 "Iris Encoder", flashed with #42.
 
 ### 1.2 What Fedora does (file-level)
 
@@ -269,7 +275,7 @@ the same "carried until merged" pattern.) **[V queue; I timing]**
 
 ### 1.5 Ladder
 
-- **VP0 — queue the patch set.** Import as our `kernel/patches/0011…`: [superseded 2026-11-02 — see the correction block at the top]
+- **VP0 — queue the patch set.** [VP0–VP3 PASSED 2026-11-02 on kernels #41/#42, #42 flashed — status note at the top] Import as our `kernel/patches/0011…`: [superseded 2026-11-02 — see the correction block at the top]
   infiniti 0031/0032/0033/0034/0035/0037/0038 + iceland 0062, adjusting
   only context. Build release bundle; `make modules` for iris; stage
   modules on the rootfs. Gate: clean build; `modinfo qcom-iris` shows
@@ -288,7 +294,7 @@ the same "carried until merged" pattern.) **[V queue; I timing]**
   software-decode levels. Fedora's benchmark: 3 % vs 47 % CPU.
 - **VP3 — encode proof.** `v4l2h264enc` 30 frames, decode back, eyeball +
   PSNR. Gate: GNOME screen recording works.
-- **VP4 — hardening + bank.** Add 0157-0160/0246-0250 (one bundle, they
+- **VP4 — hardening + bank.** [0157-0160/0246-0250 (+0292, infiniti 0069–0071) went in as 0043–0055 with #42 on 2026-11-02; the soak, the malformed-input rejection and the manifest hash remain] Add 0157-0160/0246-0250 (one bundle, they
   are driver-internal), soak with seek/stop/start loops (their q90l EOS
   fix is the known seek bug — adopt when we refresh to a q90-era base or
   cherry-pick early if ffmpeg seeks misbehave). Record firmware hash in
@@ -362,7 +368,7 @@ no haptics node in our DTS. **[V .config, DTS grep]**
 ### 2.2 Plan
 
 **Nothing to build.** Do not add a DT node; do not enable the SPMI
-haptics driver. One bookkeeping action when hardware-status.md is next
+haptics driver. One bookkeeping action [done: hardware-status.md Haptics row = "— no vibration motor in this tablet (stock disables it too)"] when hardware-status.md is next
 edited: Vibration row ❓ → "none fitted — stock DT disables
 qcom,hv-haptics; confirmed by Fedora's on-device measurement". GNOME on a
 motor-less tablet simply never fires feedback; no quirk needed.
@@ -416,7 +422,7 @@ any. There is no enablement path and nothing to debug against.
 
 ### 3.2 Plan (userspace only, optional, XS)
 
-- **GN0 — paper closure.** hardware-status note (when next edited): GNSS
+- **GN0 — paper closure.** [done: hardware-status.md row "GNSS / location — no GNSS hardware (modemless SoC)"] hardware-status note (when next edited): GNSS
   → "no receiver on this board (SM8850P, no modem; no GNSS HAL in stock
   vendor; Fedora measured absent)".
 - **GN1 — Wi-Fi geolocation for GNOME (optional, zero kernel).** Install/
@@ -825,7 +831,7 @@ camera→HW-encoder pipeline doesn't negotiate. **[V]**
 
 ## Appendix B — what this research closes or corrects
 
-- hardware-status.md (when next edited, not in this change): Cameras row
+- hardware-status.md (done in its 2026-11-02/03 revisions — Cameras ❓ "camss loads safely; no pipeline, sensor or firmware work yet", Suspend ❓ from §4's evidence, Haptics —, GNSS —; planned as): Cameras row
   → "sensor driver + DT exist in Fedora port, camss already in our tree";
   Suspend row → replace "works per Nura wiki" with §4's evidence;
   Vibration row → "none fitted"; add GNSS row → "no receiver".

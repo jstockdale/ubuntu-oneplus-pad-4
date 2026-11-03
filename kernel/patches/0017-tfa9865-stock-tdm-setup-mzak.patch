@@ -15,6 +15,8 @@ from the stock container (/odm/firmware/tfa98xx.cnt, 11.A.38): reg 0x20 =
 slot (regs 0x21/0x22; slots 0-5). They're written after the base tables,
 while the amplifier is still powered down.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 ---
  sound/soc/codecs/tfa9865.c | 68 ++++++++++++++++++++++++--------------

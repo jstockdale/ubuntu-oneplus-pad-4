@@ -20,6 +20,9 @@ Signed-off-by: Bryan O'Donoghue <bod@kernel.org>
 
 (cherry picked from commit 397ebadcbc219f6c20d11c0378d8cb7695d015c2)
 [ upstream author: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>; picked for the iceland kernel q89 ]
+
+[Carried by the Ubuntu port from the Fedora iceland queue (0249 there), sign-offs kept. Exit: drop when Perpetua carries upstream 397ebadcbc21.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

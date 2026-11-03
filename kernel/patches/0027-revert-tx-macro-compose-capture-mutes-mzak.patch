@@ -15,8 +15,10 @@ no equivalent and RX playback works here.
 Revert it, restoring the exact upstream tx_macro_tx_mixer_put (state +
 mixer_update_power, no register IO) and enable_dec PRE_PMU
 (unconditional PGA mute, no abort). The independent ADPT-disable
-(perpetua f690330c9187 = our 0059 intent) is layered on top and is
+(perpetua f690330c9187, the Fedora queue's 0059 ADPT disable, already in the pin) is layered on top and is
 KEPT by this revert (verified: file == upstream v7.3 + ADPT only).
+
+Ours (2026-11-02, A5 audio). Exit: offer the revert to Perpetua with the evidence (capture on this codec starves without it); drop when Perpetua reverts or reworks aad249d15433.
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>

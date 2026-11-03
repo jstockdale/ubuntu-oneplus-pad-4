@@ -24,6 +24,12 @@
 >   [superseded 2026-11-02: the stock address was later found in the
 >   capture's log store and installed device-locally — bringup-plan.md A.1]
 >   libspa-0.2-bluetooth is not installed (A2DP/HFP need it).
+>
+> **Status 2026-11-03 (interim checkpoint; the plan below is history — read docs/porting-log.md from "2026-11-01 (later night) — C4 opens" to "2026-11-02 — A7 PASSED" for the ladder, then the 2026-11-02/03 audio entries):**
+> - A0–A7 are complete (A7 PASSED 2026-11-02): the topology ships at the stock ceiling (VOL_CTRL_MAX 8192, d8f4b5f3…) behind the PipeWire protection chain (0.2.18); speakers ✅ and microphones ✅ in hardware-status.md. §4's rungs landed as kernel/patches/0011–0024 (A2: their 0041/0042/0045/0048/0044/0049/0046/0047/0104/0290/0051 + DT 0038/0043/0050 — 14 patches, not 15: 0059 was already complete in Perpetua, POST_PMU write included), 0025/0026 (A8's 0109 and 0131, built into #36), and two fixes the plan did not foresee, both ours: 0027 (revert of Perpetua aad249d15433, the tx-macro capture mutes that kept the analog capture chain dark) and 0028 (q6apm dropped every DSP capture completion as "too short", 56 vs 60 bytes; the READ_DONE half is upstream as 9ba37ef1db70 and was dropped at the pin bump, the WRITE_DONE half is still carried). Fedora 0130 is a no-op here (the board file already redefines adspslpi_mem at 0x5000000; 0029 withdrawn 2026-11-02); 0184/0194/0201 not adopted.
+> - Pin bump 2026-11-03 (build #45, flashed): every "our tree"/"@7c98a10e" citation below is against the old pin; the pin is b7d639cfb282. 0020 (= their 0290, the middle amps' gain/boost) was retired because Perpetua's TFA9865 driver now puts the middle pair in stock's playing state by itself (5f:00e0, 76:d700 read back on #45); the I2C bus numbers changed with the pin (middle amps 3-0037/7-0037). Series: 0001–0063 less 0020 (62 files).
+> - Landed since the ladder: the processed microphone (0.2.26 — stock's 14 dB recorder gain lives in its DSP; WebRTC AEC + gain control, then +14 dB under a limiter, as the Fedora port does it; default input "Internal microphones (voice processing)", raw selectable); the clock-domain fix for the crackle (0.2.27 — capture clock.name, sink priority.driver 3000, min-quantum 2048; two DSP-timed PCMs were being hard-resynced); four boot outages, each root-caused with a package fix: the userspace pd-mapper race (0.2.20), WirePlumber's second card object from the compress node (0.2.23, 52-iceland-compress.conf), four chain modules not autoloaded on one boot (0.2.26, modules-load.d + iceland-audio-check), and the card registering during WirePlumber's first pass so its UCM profile never attaches (repeats on every boot of #45; the 0.2.29 guard restarts WirePlumber once and logs it, 0.2.30 scopes it to the owner's session) — Q7's ordering worry came true on WirePlumber's side, not alsactl's.
+> - Still open: wired headphones (Q5 — a USB-C analog headset is the only blocker; the Headphones UCM device still to be written), BT A2DP (libspa-0.2-bluetooth), Q1 (phonewave's 11b78ff1… differs from both our builds, f9bfb173…/d8f4b5f3…), the loudness comparison against stock. Next audio rung after sensors (it needs hexagonrpcd's audio-PD file server): the Goodix SpeakerBoost DSP engine (AMDB registration, ACDB; blobs stay device-local). Upstream candidates not yet filed (docs/upstreaming.md): 0028's WRITE_DONE half, PipeWire's alsa-udev card object for comprC* nodes, WirePlumber's first-pass UCM attach.
 
 Date: 2026-11-01 (research night; flights when C4 opens). Companion to
 docs/porting-log.md (:981-986, the C4 doorbell) and docs/firmware-manifest.md
@@ -38,7 +44,7 @@ from, what else is missing behind it, and how to fly the fix without cooking
 six speaker voice coils.
 
 File:line references: ours against `/srv/ubuntu-iceland/linux-perpetua` at
-`7c98a10e6bb7` (perpetua/v7.3; identical content in the build worktree) and
+`7c98a10e6bb7` (perpetua/v7.3 — the pin when this was written; since 2026-11-03 the checkout and the build worktree are at b7d639cfb282, so these line numbers are historical) and
 `/srv/ubuntu-iceland/build/linux-iceland/.config`; theirs against fresh clones
 in the session scratchpad (`scratchpad/repos/`):
 
@@ -130,7 +136,7 @@ DSP graphs; no topology, no card.
   (:984-1006).
 - ADSP remoteproc enabled with our firmware names (:1257-1262). dtsi:
   GPR node `qcom,intents = <512 20>` (kaanapali.dtsi:3297-3301), ADSP region
-  0x4c00000 (:511-513) — both differ from Fedora, §3.
+  0x4c00000 (:511-513) — the intents differ from Fedora (their 1024 bytes adopted as our 0026); the region does not: the board file deletes and redefines adspslpi_mem at 0x5000000 (dts:21, :223), so Fedora's 0130 is a no-op here [corrected 2026-11-02, porting-log "0029 was a no-op"].
 
 ### 1.3 Driver state in our tree **[verified]**
 
@@ -265,12 +271,12 @@ patch files confirm. Status = content-checked against our pin tonight.
 | 0186/0187/0188/0192 wcd/MBHC fixes | headset-jack robustness | **no** (headset phase) |
 | 0194 ADSP remote-heap no-map | fastrpc-vs-CMA; relevant once linux-next `9981fbe599e8` lands | **no** |
 | 0201 q6apm: clear g_apm on removal | UAF on unbind (Qualcomm patch) | **no** |
-| 0001-infiniti/0109 apr: register GPR callback before probing | q6apm's probe-time sync command response was dropped → +5 s boot | **no** (apr.c:382-391 sets callback after probe) |
+| 0001-infiniti/0109 apr: register GPR callback before probing | q6apm's probe-time sync command response was dropped → +5 s boot | **no** at the pin (apr.c:382-391 sets callback after probe) — adopted as our 0025 on 2026-11-02 (kernel #36) |
 | 0110 q6apm-dai S32_LE | FE formats | superseded (our q6apm-dai-driver.c; FEs stay S16 anyway) |
 | 0111 send commands from the APM's GPR service | kaanapali ADSP answers only the registered port | **yes** (q6apm.c:33-43) |
 | 0112/0113 MI2S bclk + 32-bit MI2S | infiniti speakers (TFA9866/MI2S) | **yes** (`cbe9370819f0`, `3d56ad997ffe`) |
-| 0130 ADSP reserved memory 0x5000000 | "the signed ADSP image spans 0x5000000" | **no** (ours 0x4c00000 — yet our ADSP boots; parity item) |
-| 0131 1024-byte GPR intent | "some ADSP responses exceed 512 bytes" | **no** (ours `<512 20>`) |
+| 0130 ADSP reserved memory 0x5000000 | "the signed ADSP image spans 0x5000000" | **n/a** — the board file already reserves 0x5000000 at adspslpi@a1400000 (dts:21/:223 override the dtsi's 0x4c00000), the DTB is identical with and without the patch; adopted as 0029 and withdrawn the same day, 2026-11-02 |
+| 0131 1024-byte GPR intent | "some ADSP responses exceed 512 bytes" | **no** at the pin (ours `<512 20>`) — adopted as our 0026 on 2026-11-02 (kernel #36) |
 
 ### 2.3 UCM2 **[verified]** (iceland-mainline/audio/ucm/OnePlus-Pad4/)
 
@@ -347,7 +353,7 @@ snd-soc-sc8280xp, then polls `/proc/asound/cards` for "OnePlus-Pad4" with a
 | Kernel: TFA9865 TDM regs, MANSCONF, charge pump/sense, middle amps | 0046/0047/0104/0290 | missing (our tables are the silent I2S-era set) | A2 |
 | Kernel: volume clamp | 0051 | missing | A2 (safety-relevant) |
 | DT: TDM BE link + slots, bclk vote, card compatible | 0038/0043/0050 | MI2S link, no vote, kaanapali compatible | A2 |
-| Kernel: GPR plumbing | 0109 callback order, 0111 src_port, 0131 intents 1024, 0130 adsp mem | 0111 **in**; 0109/0130/0131 missing | A8 parity batch (not gating: our ADSP boots and q6apm reaches the tplg request) |
+| Kernel: GPR plumbing | 0109 callback order, 0111 src_port, 0131 intents 1024, 0130 adsp mem | 0111 **in**; 0109/0131 adopted as 0025/0026 (2026-11-02); 0130 a no-op here (the board file already reserves 0x5000000) | A8 parity batch (not gating: our ADSP boots and q6apm reaches the tplg request) |
 | Mic quality | 0052 gain scale, 0059 ADPT disable | 0052 in; 0059 partial | 0059 rides A2's bundle, gated at A5 |
 | Headset jack | 0186-0192 MBHC set + usbss | missing | A8 |
 | UCM2 | Qualcomm/kaanapali/OnePlus-Pad4 + conf.d link | none | A4 |
@@ -394,7 +400,7 @@ DISPLAY_PORT/WSA widgets (no such BE links in our DT) — record them (Q2).
 (their 0038 text) and must not be fed.
 
 **A2 — the TDM speaker chain as one unit (kernel+DT bundle, no sound).**
-Adopt, as our 0011-0025 (15 patches), their 0041, 0042, 0044, 0045, 0046,
+Adopt, as our 0011-0025 (15 patches) [as flown 2026-11-01: 0011–0024, 14 patches — 0059 was already complete in Perpetua and was skipped; 0020 of the set was retired at the 2026-11-03 pin bump], their 0041, 0042, 0044, 0045, 0046,
 0047, 0048, 0049, **0051 (the clamp — same bundle as the first TDM card,
 rail A2)**, 0104, 0290, 0059 (capture-only rider, gated at A5), plus DT
 0038+0043+0050.
@@ -463,7 +469,7 @@ stock** (their owner rule; a phone SPL meter at fixed distance is enough
 fidelity); limiter confirmed in-path during the test. This closes C4's core:
 PipeWire playback + mic + UCM in GNOME at stock loudness, protected.
 
-**A8 — parity backlog (next kernel refresh, not flights).**
+**A8 — parity backlog (next kernel refresh, not flights).** [Status 2026-11-03: 0109 and 0131 landed as 0025/0026 (kernel #36, 2026-11-02); 0130 is a no-op on this board (0029 withdrawn); 0186–0192 were already in the pin (corrections block); 0201, 0184, 0194 and the DP audio link remain unadopted; the headset rung waits on a USB-C analog headset.]
 0109 (GPR callback before probe: kills a 5 s boot stall), 0131 (1024-byte
 GPR intents), 0130 (ADSP region 0x5000000), 0201 (g_apm UAF), 0184 (swr port
 log), 0186-0192 + usbss work (USB-C analog headset + MBHC — new gate: plug
@@ -516,10 +522,10 @@ registers are all that exist below userspace. Therefore:
   recoverable; nothing here writes flash.
 - **asound.state** poisoning (S12): rail A5; also ship the FixedBootSequence
   route-offs exactly as theirs so a stray state can't wedge WirePlumber.
-- **GPR intents 512 vs 1024** (their 0131): if A2/A3 logs show missing GPR
+- **GPR intents 512 vs 1024** (their 0131) [adopted as 0026 in kernel #36, 2026-11-02]: if A2/A3 logs show missing GPR
   responses or stalls on big graphs, this is the first suspect — cheap DT
   bump, but it waits for evidence (one variable).
-- **Boot-time 5 s stall** (their 0109) will appear once audio coldplugs with
+- **Boot-time 5 s stall** (their 0109) [their 0109 is our 0025 since kernel #36, 2026-11-02] will appear once audio coldplugs with
   topology present; cosmetic until A8 — don't mistake it for a hang.
 - **Ubuntu packaging drift**: swh-plugins is universe; pin it as a device-deb
   dependency so an image rebuild can't silently drop the limiter (the chain
@@ -540,7 +546,7 @@ registers are all that exist below userspace. Therefore:
 2. **DP/WSA dangling widgets at A1**: warnings only, or instantiation
    trouble on our 3-link DT? If trouble: trim MM6/WSA/DP from our m4 build
    (overlay edit, not upstream) or carry their 0134 DP link early.
-3. **Does the denialwm devicesN kernel already carry the TDM chain?** Our
+3. **Does the denialwm devicesN kernel already carry the TDM chain?** [Overtaken 2026-11-01/03: the chain was ported from Fedora's queue as 0011–0024 before any devicesN branch was published; at the b7d639cfb282 pin Perpetua carries only the middle amps' playing state (0020 retired), the rest is still ours to carry.] Our
    perpetua/v7.3 branch does not, but phonewave's working audio implies the
    devicesN branches do. If denialwm publishes them, re-run the §2.2 table
    against that tree before writing our 0011+ series — we may be able to
@@ -554,7 +560,7 @@ registers are all that exist below userspace. Therefore:
    uses it and the board seems to have only the two AMICs — confirm no DMIC
    exists (schematic/stock mixer paths) and drop the VA subgraph from our
    build if so (smaller graph, fewer dangling widgets).
-7. **`alsactl` ordering on Ubuntu**: Fedora relies on 90-alsa-restore.rules
+7. **`alsactl` ordering on Ubuntu** [2026-11-03: the ordering that bit was WirePlumber's, not alsactl's — on every boot of #45 the card completes while WirePlumber's first pass is under way and the HiFi profile never attaches; netted by the 0.2.29 guard (one logged restart, scoped to the owner's session in 0.2.30), a WirePlumber upstream candidate]: Fedora relies on 90-alsa-restore.rules
    running the FixedBootSequence before WirePlumber. Verify the same ordering
    holds with Ubuntu's alsa-utils/udev packaging on our image (else ship a
    small ordered unit).

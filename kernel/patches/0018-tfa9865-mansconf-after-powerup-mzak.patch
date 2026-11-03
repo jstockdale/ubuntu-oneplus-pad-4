@@ -15,6 +15,8 @@ are in place, as the vendor driver does, and clear it before powering
 down. With the correct TDM setup it is normally already set; this keeps
 the start-up robust.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 ---
  sound/soc/codecs/tfa9865.c | 26 +++++++++++++++++++++++++-

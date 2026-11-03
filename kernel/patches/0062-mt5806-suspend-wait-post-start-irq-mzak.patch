@@ -52,6 +52,8 @@ the way the Fedora kit does, by a plain write to /sys/power/state
 would otherwise abort. Everything it touches is in the driver as
 carried; nothing else in the tree is involved.]
 
+Exit: drop when Perpetua takes the Fedora port's pen-charger series (the Fedora port's to submit); applied untouched at the pin bump to b7d639cfb282 (2026-11-02).
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>

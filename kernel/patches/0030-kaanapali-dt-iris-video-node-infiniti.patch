@@ -7,6 +7,8 @@ Add DT node for the kaanapali iris video node.
 
 Written with help from Taniya Das(added videocc node).
 
+[Carried by the Ubuntu port from Qualcomm's kaanapali iris series as carried by infiniti-mainline and the Fedora iceland queue, sign-offs kept; a kaanapali.dtsi patch, BSD-3-Clause. Exit: drop when Perpetua carries the iris support (none at b7d639cfb282).]
+
 Signed-off-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>
 Signed-off-by: Jingyi Wang <jingyi.wang@oss.qualcomm.com>
 [victor: order the power domains as in the binding, use LOW_SVS_D1 for

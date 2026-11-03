@@ -1,6 +1,6 @@
 # Getting the stock firmware (and why the build needs it)
 
-Last revised: 2026-10-29.
+Last revised: 2026-11-03.
 
 The port needs the owner's stock firmware for three separate jobs:
 
@@ -9,15 +9,26 @@ The port needs the owner's stock firmware for three separate jobs:
    sizes and AVB properties. No stock images, no flashable bundle.
 2. **Proprietary blobs.** Everything under
    `/lib/firmware/qcom/kaanapali/iceland/` plus the ath12k Wi-Fi firmware
-   comes out of the stock `vendor`/`odm` EROFS images via
-   `stage-firmware.py`.
+   comes out of the stock partitions via `stage-firmware.py` — the
+   `vendor`/`odm` EROFS images and the vfat `modem` (NON-HLOS) and
+   `bluetooth` images, recognised by superblock magic; the ADSP/CDSP images
+   are joined from their .mdt/.bNN siblings and the touch firmware stripped
+   of its FwUp container. Two exceptions, both recorded in
+   docs/firmware-manifest.md: the GPU SQE/GMU pair is deliberately NOT
+   stock's (stock's resets the tablet early in boot unless GPU preemption is
+   off; the triple-corroborated "vendor533" pair ships instead, AQE and zap
+   from our own vendor.img), and the audio topology is built, not extracted.
 3. **The way back.** Reflashing the stock `boot.img`/`init_boot.img` is the
    entire recovery story on a device with no usable EDL.
 
 The package must match the **installed** build: update the tablet to the
 newest available build first, then obtain that same build's full OTA, then
 stop updating until the next deliberate re-stage. `stage-stock-images.sh`
-records the post-build fingerprint and the installer refuses a mismatch.
+records the post-build fingerprint (PROVENANCE.json, copied into the
+release's RELEASE.txt); the installer's own gate is the fastboot product
+string (`canoe`, a platform name every iceland unit reports — not the build),
+so matching the package to the installed firmware is the operator's
+discipline, not something the installer can refuse.
 
 ## Where to get the full OTA
 
@@ -60,5 +71,14 @@ source, after the bootloader is unlocked:
 
 Caveat: plan B depends on our kernel booting with USB working before we have
 the firmware staged — the GPU/Wi-Fi blobs are not needed for a USB-gadget
-rescue boot, which is what makes this viable. It has not been exercised yet
-(boot-strategy.md assumptions 1 and 3 gate it).
+rescue boot, which is what makes this viable. Status 2026-11-03: never
+needed — the full OTA was obtained on 2026-10-29 (Oxygen Updater named the
+installed build, the catalog served the package) — and its second half has
+been exercised regardless: the factory capture of 2026-10-31
+(`scripts/capture-device-data.sh`, 169 images over the USB gadget from the
+booted system) read the per-unit partitions by name, and the Bluetooth
+firmware ships from that captured `bluetooth_a` image. Step 1 as written
+would not work on this ABL: a RAM boot never uses the downloaded image's
+ramdisk (boot-strategy.md, assumption 1 revised), so the rescue initramfs
+would have to be flashed to `init_boot_<slot>` first, stock image kept for
+restore.

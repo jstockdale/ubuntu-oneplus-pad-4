@@ -1,15 +1,20 @@
 # Touch bring-up plan (C2): NT36536 TDDI on the mainline panel
 
+> **Status 2026-11-03 (interim checkpoint).** This plan closed on 2026-11-01 (§9) and predates everything the pen needed. Since then — porting-log entries "Stylus input patches 0037–0039 adopted" and "#43 RAM boot: stylus capabilities PASS, pen silent" (2026-11-02), "Pen research (9-agent run)", "#44 RAM boot: pen charger PASS; the Stylo Pro WRITES" and "Pen suite closed out on #44" (2026-11-03):
+> - Touch is ✅ (hardware-status.md): T2's tap gate closed on glass on 2026-11-02 (touch survives the greeter's own blank/unblank), corner taps land under the finger in GNOME, so the orientation props are validated under the desktop. The blacklist is gone since 0.2.16 (iceland.conf is tombstones only). Owed: touch-to-wake — on blank 0008's follower disables the IRQ and nothing wakes but the power key; bringup-plan.md rung W (W1 keep-awake, W2 gesture 0x13/KEY_WAKEUP, W3 s2idle wake source after C6).
+> - The pen (§1.4's 0036/0037 "follow-up") grew into its own ladder: 0037 (their 0036 adapted to our touchscreen_parse_properties probe), 0038 (touchscreen-x-mm 193 / y-mm 274 in the controller's portrait frame — Fedora's 274/193 pairing is right only for their hard-coded landscape driver), 0039 (pen through touchscreen_report_pos) flew on #43 — capabilities PASS, pen silent. The Stylo Pro is an "OPP" pen whose handshake stock brokers over Bluetooth: 0040 turns the controller's pen scanning on (extended command 0x7F/0x10), 0041 exposes the 20-byte uplink timing block (sysfs pen_uplink) and accepts the 0x7F 0x40 downlink family (pen_downlink), 0042 lets the bridge inject the pen's Bluetooth pressure and barrel button (pen_input; contact is the controller's call, magnitude the pen's), 0063 gives the input devices vendor 0x0603 / product 0x6536 and the pen a parent (first filed as 0043, renumbered 2026-11-03). The bridge is iceland-pen (device package 0.2.28; libwacom tablet file + 74-iceland-pen.rules in 0.2.29). Pen 🟡: writes with pressure, tap = click, barrel while hovering = right click, GNOME's Graphics Tablets panel lists "OnePlus Pad 4"; owed: double/long-press codes, middle-click mapping, pen battery in UPower. Pen charging on the magnet edge works since #44 (0056–0062).
+> - The pin moved from 7c98a10e6bb7 to b7d639cfb282 on 2026-11-03 (build #45, flashed): every "our tree" line number below is against the old pin. Series: 0001–0063 less 0020 (62 files).
+
 Written 2026-11-01 from source research only — no device contact, no tree
-edits. Kernel of record: perpetua pin `7c98a10e6bb75d64a9f2e7b1e152ad1234a38659`
+edits. Kernel of record: perpetua pin `7c98a10e6bb75d64a9f2e7b1e152ad1234a38659` [the pin when this was written; b7d639cfb282 since 2026-11-03 — status note above]
 (worktree `/srv/ubuntu-iceland/build/linux-src-iceland`; its nt36536 driver
 directory is byte-identical to the pristine `/srv/ubuntu-iceland/linux-perpetua`
 — verified by diff today, so every "our tree" citation below is also a
-perpetua-upstream fact). Current bundle: `out/bundle/boot.img`
+perpetua-upstream fact). Bundle at the time of writing (the flashed bundle today is out/bundles/boot-45-3cfb46cf.img, kernel #45): `out/bundle/boot.img`
 (kernel_release 7.3.0+, built 2026-11-01T22:11, patches 0001–0006).
 
 Status quo: display is Linux-driven (DRM msm, GL Weston on DSI-1, porting-log
-2026-11-01), and `nt36536_ts` is blacklisted on the rootfs
+2026-11-01), and `nt36536_ts` is blacklisted on the rootfs [until 0.2.16 retired the line on 2026-11-01 (§9); iceland.conf is tombstones only]
 (`packaging/ubuntu-iceland-device/usr/lib/modprobe.d/iceland.conf:1-4`)
 because "the TDDI touch probe resets the live panel IC before deferring."
 This plan takes touch from blacklisted to shipped, one variable per flight.
@@ -144,7 +149,7 @@ probe-time immediate callback); `.panel_unpreparing` → `panel_on = false` +
 sure display reset(RESX) sequence and mipi dsi cmds sent before this"*.
 Suspend (:1582-1642) composes a deep-sleep command but **never writes it**
 (:1603-1606 — dead code; harmless under follower use, the panel power-cycle
-suspends the IC).
+suspends the IC) [2026-11-02, porting-log "#43 RAM boot": the 0x11 is never written, so on blank the IC is left awake with its IRQ disabled; the write is owed with bringup-plan.md rung W / the A.3c fidelity patch].
 
 Other load-bearing driver facts:
 
@@ -260,7 +265,7 @@ external predictor for our flight T1. (`rootfs/usr/local/sbin/pad4-hardware-init
   "fwup-strip-80-128"`) and the overlay copy
   `/srv/ubuntu-iceland/out/rootfs-overlay/lib/firmware/novatek/novatek_nt36536_fw.bin`
   re-hashed today = 5e9d9651… (staged 2026-10-29). The
-  `docs/firmware-manifest.md` "Still owed — Touch" line is stale; T0 below
+  `docs/firmware-manifest.md` "Still owed — Touch" line is stale; T0 below [done 2026-11-01: the manifest's "Touch (NT36536 TDDI, verified staged 2026-11-01, C2 T0)" section exists and the owed line is gone]
   closes it with an on-device check and a manifest block (§6).
 - **Variants NOT to ship:** `FW_NT36536_HUAXING_FAE.img` (088a37a8…) and
   `FW_NT36536_HUAXING_TEST.bin` (144c9d8d…) are different builds;
@@ -566,7 +571,7 @@ the patch build; T6 rides the already-planned WLAN flash.
 ## 6. Firmware staging block (manifest-ready, mirrors the GPU/BT precedent)
 
 For `docs/firmware-manifest.md` (new section "Touch (NT36536 TDDI, staged
-2026-10-29, verified 2026-11-01)"; delete the "Still owed — Touch" line):
+2026-10-29, verified 2026-11-01)"; delete the "Still owed — Touch" line) [applied 2026-11-01 — firmware-manifest.md §Touch]:
 
 | file | sha256 | size | source | provenance |
 |---|---|---|---|---|
@@ -640,7 +645,7 @@ deliberately not shipped. Overlay copy
   `research/repos/phonewave/devices/iceland/rootfs/usr/local/sbin/pad4-hardware-init`.
 - Ours: blacklist `packaging/ubuntu-iceland-device/usr/lib/modprobe.d/iceland.conf:1-4`;
   diag spi19-off `scripts/make-diag-bootimg.sh:189-193`; firmware pipeline
-  `configs/firmware/iceland.toml:165-171`; C2 gate `docs/bringup-plan.md:59-69`;
+  `configs/firmware/iceland.toml:165-171`; C2 gate `docs/bringup-plan.md` ("C0–C4 — done" since the 2026-11-02 revision; the old :59-69 now falls in the VP section);
   v17 record `docs/porting-log.md:509-514, 663-664`.
 
 ## 9. Outcome (2026-11-01) — ladder complete
@@ -658,6 +663,6 @@ probe at t≈2s predates panel enable, so the download rides the
 panel-enable path and the engine starts live. T6: ship bundle
 (7fa88c2e…) flashed to boot_b, partition sha verified, taps = 689 IRQ
 edges, 0.2.16 retired the blacklist (tombstones remain in
-iceland.conf). Pen reports as NVTCapacitivePen; BTN_STYLUS caps
+iceland.conf). Pen reports as NVTCapacitivePen; BTN_STYLUS caps [landed 2026-11-02 as 0037–0039 (#43), then the OPP handshake 0040–0042 and the input ids 0063 — the pen writes since 2026-11-03; status note at the top]
 (mzak 0036/0037 adaptation) remain the next touch-adjacent item,
 then coordinate-orientation validation under a desktop.

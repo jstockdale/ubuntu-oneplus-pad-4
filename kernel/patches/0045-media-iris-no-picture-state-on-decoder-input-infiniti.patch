@@ -7,6 +7,8 @@ Subject: [PATCH] media: iris: Don't report the picture state on decoder input
 The firmware returns input buffers with the last picture's flags,
 including V4L2_BUF_FLAG_ERROR, which makes GStreamer drop frames.
 
+[Carried by the Ubuntu port from infiniti-mainline's iris fixes (0071 there), with the author's sign-off. Exit: drop when Perpetua carries it.]
+
 Signed-off-by: Victor Fuentes <victor@vlinkz.dev>
 ---
  drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c | 2 --

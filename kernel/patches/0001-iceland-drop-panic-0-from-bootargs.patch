@@ -13,6 +13,8 @@ retry. An Ubuntu initramfs needs the argument gone; Perpetua's own
 rescue init never parses it, so its boot flow is unchanged aside from
 relying on the identical built-in panic timeout default.
 
+Ours (phase A, boot chain). Exit: permanent — Ubuntu-specific: initramfs-tools reads panic= and Perpetua's own rescue init never does, so upstream has no reason to take it; it stays here as long as the Ubuntu initramfs boots this kernel.
+
 Signed-off-by: John Stockdale <jstockdale@gmail.com>
 ---
 diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts

@@ -8,6 +8,8 @@ machine driver sets the back end's "bclk" in its TDM hw_params); the PRM's clock
 are the AFE ones (0x200 for the primary internal bit clock, shared with the PCM interfaces). Add the ids to
 q6prm and the entries to the q6prm clock table; the q6dsp-lpass-ports binding header already names them.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---

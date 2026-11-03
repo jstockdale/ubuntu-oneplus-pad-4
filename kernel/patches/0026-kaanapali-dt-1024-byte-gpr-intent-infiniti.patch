@@ -5,6 +5,8 @@ Subject: [PATCH] arm64: dts: qcom: kaanapali: Advertise a 1024-byte GPR intent
 
 Some ADSP responses exceed 512 bytes.
 
+[Carried by the Ubuntu port from infiniti-mainline (OnePlus 15, same SoC), with the author's sign-off; a kaanapali.dtsi patch, BSD-3-Clause. Exit: drop when Perpetua carries it.]
+
 Signed-off-by: Victor Fuentes <victor@vlinkz.dev>
 ---
  arch/arm64/boot/dts/qcom/kaanapali.dtsi | 2 +-

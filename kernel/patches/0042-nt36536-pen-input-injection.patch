@@ -4,8 +4,9 @@ Date: Tue, 3 Nov 2026 00:55:00 -0800
 Subject: [PATCH] Input: nt36536: take the pen's pressure and buttons from
  userspace
 
-Ours (2026-11-03, A.3c N6). Exit: offer to Perpetua with 0041 once the
-handshake is proven end to end.
+Ours (2026-11-03, A.3c N6). Exit: offer to Perpetua with 0041; the handshake
+was proven end to end on build #44 (2026-11-03) and taps, clicks and the
+barrel button work with the iceland-pen bridge (device package 0.2.28).
 
 With the OPP handshake complete the controller reports the Stylo Pro's
 position, tilt and hover, but its pressure byte only steps through 0, 16
@@ -13,7 +14,11 @@ and 32 of 16384 and its button bits stay 0: on this pen the real tip
 pressure (streamed at ~140 Hz) and the barrel buttons travel over
 Bluetooth. libinput therefore never saw the tip go down and no button was
 ever reported. Let the bridge daemon inject them through pen_input on the
-SPI device: "pressure <0..16384>" replaces the packet's pressure while the
+SPI device: "pressure <0..16384>" supplies the magnitude while the controller
+reports contact — contact stays the controller's call: its byte leads the
+pen's Bluetooth stream by tens of milliseconds and that stream can stay
+non-zero while hovering, so taking it unconditionally made every tap end in a
+second tip-down — and only while the
 pen is in range, "button <1|2> <0|1>" sets a stylus button at once and
 keeps it in every packet until released; both are cleared with the pen.
 

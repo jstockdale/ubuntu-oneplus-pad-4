@@ -55,6 +55,8 @@ by the i2c/of and auxiliary modaliases it exports. The driver's own
 sysfs attributes live on the I2C device, not under
 /sys/class/power_supply: it registers no power_supply.]
 
+Exit: drop when Perpetua takes the Fedora port's pen-charger series (the Fedora port's to submit); applied untouched at the pin bump to b7d639cfb282 (2026-11-02). Flown on build #44 (2026-11-03): bound at 0-002b, firmware 0x20022, the docked pen attached and charging at about 8 V.
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>

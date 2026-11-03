@@ -7,6 +7,8 @@ Subject: [PATCH 14/14] arm64: dts: qcom: kaanapali-oneplus-iceland: use the
 Use the "oneplus,iceland-sndcard" compatible, so the stereo stream is
 spread over all six speaker amplifiers; keep the Kaanapali fallback.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off; a board-dts patch, BSD-3-Clause. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 ---
  arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts | 2 +-

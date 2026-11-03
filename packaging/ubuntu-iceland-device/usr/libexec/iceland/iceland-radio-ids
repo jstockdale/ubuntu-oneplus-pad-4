@@ -5,7 +5,9 @@
 # On Perpetua every Pad 4 boots with the board file's placeholder Bluetooth
 # address and the WCN7860 firmware's default WLAN MAC. The real ones are
 # device-local: /etc/iceland/bdaddr and /etc/iceland/wlan-mac (one address
-# each, xx:xx:xx:xx:xx:xx, owner-supplied from the device label). When a file
+# each, xx:xx:xx:xx:xx:xx; the WLAN MAC owner-supplied from the device label,
+# the Bluetooth address the factory one recovered from the stock OS's log
+# store on 2026-11-02 — the label prints no Bluetooth address). When a file
 # is absent it is generated ONCE from /etc/machine-id (random per install,
 # never from the SoC serial, so the address reveals nothing about the unit)
 # with the locally-administered bit set; it then stays fixed for the life of
@@ -18,7 +20,7 @@ set -u
 DIR=/etc/iceland
 IDX=${ICELAND_HCI_INDEX:-0}
 WAIT=${ICELAND_BDADDR_WAIT:-60}
-IFACE=${ICELAND_WLAN_IFACE:-wlp1s0}
+IFACE=${ICELAND_WLAN_IFACE:-wlan0}
 log() { printf 'iceland-radio-ids: %s\n' "$*"; }
 valid() { printf '%s' "$1" | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'; }
 derive() {	# $1 = label -> locally administered unicast address from machine-id
@@ -41,8 +43,8 @@ ensure() {
 	ensure_file bdaddr bluetooth
 	ensure_file wlan-mac wlan
 	m=$(tr -d ' \n' < "$DIR/wlan-mac")
-	# udev applies the address when the interface appears (also fixes naming:
-	# MACAddressPolicy none keeps predictable names from the bus path).
+	# udev applies the address when the interface appears; the .link sets no
+	# NamePolicy, so the interface keeps the kernel's name, wlan0 (since 0.2.25).
 	mkdir -p /etc/systemd/network
 	# the WCN7860 binds as ath12k_wifi7_pci on Perpetua (ath12k_pci upstream)
 	( umask 022; printf '[Match]\nDriver=ath12k_wifi7_pci ath12k_pci\n\n[Link]\nMACAddress=%s\n' "$m" > /etc/systemd/network/20-iceland-wlan.link )

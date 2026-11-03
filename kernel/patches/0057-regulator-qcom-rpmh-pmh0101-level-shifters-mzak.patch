@@ -17,6 +17,8 @@ vote from the application processor the shifters are on only while the
 sensor hub streams (the Fedora camera patch 0086 found that for ls1 /
 ls2); the camera shifters themselves are not carried here.]
 
+Exit: drop when Perpetua takes the Fedora port's pen-charger series (the Fedora port's to submit); applied untouched at the pin bump to b7d639cfb282 (2026-11-02).
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>

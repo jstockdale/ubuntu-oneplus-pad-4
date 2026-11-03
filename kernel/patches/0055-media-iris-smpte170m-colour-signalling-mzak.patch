@@ -32,6 +32,8 @@ CAPTURE format is consistent:
 The decoder's OUTPUT queue still echoes the colorimetry set by user space,
 as the stateful decoder interface requires.
 
+[Carried by the Ubuntu port from the Fedora iceland queue (0292 there), with the author's sign-off; it is what made the hardware encode round trip negotiate on #42. Exit: drop when Perpetua or upstream takes the Fedora port's colour-signalling change, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 ---
  .../platform/qcom/iris/iris_hfi_common.c      | 10 +++++--

@@ -6,6 +6,8 @@ Subject: [PATCH] media: iris: Only allow hierarchical B-frames on kaanapali
 The kaanapali firmware crashes when HFI_PROP_MAX_B_FRAMES is set without
 hierarchical-B coding, so cap V4L2_CID_MPEG_VIDEO_B_FRAMES at 0.
 
+[Carried by the Ubuntu port from infiniti-mainline's iris fixes (0070 there), with the author's sign-off. Exit: drop when Perpetua carries it.]
+
 Signed-off-by: Victor Fuentes <victor@vlinkz.dev>
 ---
  drivers/media/platform/qcom/iris/iris_ctrls.c           | 4 ++++

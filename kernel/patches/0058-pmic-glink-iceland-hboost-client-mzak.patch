@@ -16,15 +16,26 @@ board stay as they are for Kaanapali.
 
 [adapted for the Ubuntu iceland port: Fedora's board file names the node
 "oneplus,iceland-pmic-glink". Perpetua's kaanapali-oneplus-iceland.dts
-has compatible = "oplus,kaanapali-pmic-glink", "qcom,kaanapali-pmic-glink"
-and its qcom_battmgr selects the OPLUS variant on that first string, so
-the hBoost client is attached to "oplus,kaanapali-pmic-glink" instead of
-a new compatible: no device tree or binding change (Perpetua documents
-neither string in qcom,pmic-glink.yaml), and that compatible is used by
-this board alone in the tree. The hunks apply at an offset: Perpetua's
-pmic_glink.c does not carry Fedora's 0028 (attach a channel that comes
-up before the platform device), which this change does not need. The
-other three clients (battery, altmode, UCSI) are created as before.]
+had compatible = "oplus,kaanapali-pmic-glink", "qcom,kaanapali-pmic-glink"
+at 7c98a10e6bb7, so the hBoost client was attached to that first string
+instead of a new compatible: no device tree or binding change (Perpetua
+documents neither string in qcom,pmic-glink.yaml), and the string is used
+by this board alone in the tree. Perpetua 5ff346c547a7, before the
+b7d639cfb282 pin, renamed the board's string to
+"oneplus,kaanapali-pmic-glink" (generic fallback kept); the re-diff of
+2026-11-02 kept the old string, so build #45 matched the generic entry —
+no pmic_glink.hboost device, pen charger dead (chip_id 0x0000) — found by
+the checkpoint audit on 2026-11-03, and the match entry now follows the
+board file. The hunks apply at an offset: Perpetua's pmic_glink.c does
+not carry Fedora's 0028 (attach a channel that comes up before the
+platform device), which this change does not need. The other three
+clients (battery, altmode, UCSI) are created as before.]
+
+Re-diffed for the pin bump (rung P, 2026-11-02): the head added Xiaomi's
+pmic-glink match data next to ours; both kept. Corrected 2026-11-03: the
+match string follows the board file's rename (flies with build #46).
+Exit: drop when Perpetua takes the Fedora port's pen-charger series (the
+Fedora port's to submit).
 
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -101,7 +112,7 @@ index 65bafd71a5ed..2daee96dec5e 100644
 +};
 +
  static const struct of_device_id pmic_glink_of_match[] = {
-+	{ .compatible = "oplus,kaanapali-pmic-glink", .data = &pmic_glink_iceland_data },
++	{ .compatible = "oneplus,kaanapali-pmic-glink", .data = &pmic_glink_iceland_data },
  	{ .compatible = "qcom,glymur-pmic-glink", .data = &pmic_glink_soccp_data },
  	{ .compatible = "qcom,kaanapali-pmic-glink", .data = &pmic_glink_soccp_data },
  	{ .compatible = "xiaomi,kaanapali-pmic-glink", .data = &pmic_glink_xiaomi_soccp_data },

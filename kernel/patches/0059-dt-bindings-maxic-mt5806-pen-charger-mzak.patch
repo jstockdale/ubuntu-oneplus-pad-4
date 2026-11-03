@@ -19,6 +19,8 @@ Perpetua 7c98a10e6bb7 (the vendor-prefixes.yaml hunk at an offset).
 The schema was not run through dt_binding_check on the build host:
 dt-schema is not installed there.]
 
+Exit: drop when Perpetua takes the Fedora port's pen-charger series (the Fedora port's to submit); applied untouched at the pin bump to b7d639cfb282 (2026-11-02).
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>

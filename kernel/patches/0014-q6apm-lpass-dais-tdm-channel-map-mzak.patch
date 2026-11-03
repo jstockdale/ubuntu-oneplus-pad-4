@@ -10,6 +10,8 @@ slot. Let the TDM ports take a channel map through set_channel_map, as
 the codec DMA ports already do: the even (RX) ports use the rx map, the
 odd (TX) ports the tx map.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 ---
  sound/soc/qcom/qdsp6/q6apm-lpass-dais.c | 15 +++++++++++++++

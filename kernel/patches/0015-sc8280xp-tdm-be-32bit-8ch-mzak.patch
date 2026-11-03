@@ -11,6 +11,8 @@ channel per active slot; the default 16-bit stereo fixup leaves the amplifiers e
 channels - the stock endpoint format on the OnePlus Pad 4 (48 kHz, 32 bit, 8 channels); the front ends stay
 16-bit stereo, the DSP widens the samples and spreads the channels.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---

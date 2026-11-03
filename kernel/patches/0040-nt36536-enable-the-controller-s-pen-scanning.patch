@@ -4,9 +4,12 @@ Date: Mon, 2 Nov 2026 21:30:00 -0800
 Subject: [PATCH] Input: nt36536: turn the controller's pen scanning on after
  every firmware download
 
-Ours (2026-11-02, A.3 stylus). Exit: submit to Perpetua with 0037/0039
-once the pen writes; the sub-command set may change with the pen research
-(/srv/ubuntu-iceland/build/pen-protocol-work).
+Ours (2026-11-02, A.3 stylus). Exit: submit to Perpetua with 0037/0039 and
+the handshake patches 0041/0042. The pen writes since build #44 (2026-11-03)
+once the Bluetooth leg is brokered by the iceland-pen bridge, and the pen
+research of 2026-11-02 confirmed 0x7F 0x10 as the only enable command on this
+tablet (pen_support_opp short-circuits the per-type switch, so the other
+sub-commands are unreachable); pen_type stays as a flight aid.
 
 The touch firmware comes up with pen scanning off: the pen packet at
 point_data[66] stays 0xFF and the pen input device never reports, however

@@ -3,6 +3,24 @@
 set -e
 
 case "$1" in
+	remove)
+		# The units postinst enabled leave dangling .wants links once
+		# their files are gone (systemd warns about each on every
+		# daemon-reload); they were enabled with systemctl rather than
+		# deb-systemd-helper, so nothing records them — remove them by
+		# name. serial-getty@ttyGS0 and systemd-networkd are Ubuntu's own
+		# units and stay as the owner left them.
+		rm -f /etc/systemd/system/sysinit.target.wants/ubuntu-iceland-grow-rootfs.service \
+			/etc/systemd/system/sysinit.target.wants/iceland-radio-ids.service \
+			/etc/systemd/system/multi-user.target.wants/ubuntu-iceland-usb-gadget.service \
+			/etc/systemd/system/multi-user.target.wants/iceland-audio-check.service \
+			/etc/systemd/system/multi-user.target.wants/iceland-pen.service \
+			/etc/systemd/system/bluetooth.target.wants/iceland-bdaddr.service \
+			/etc/systemd/user/wireplumber.service.wants/iceland-speaker-default.service
+		if command -v systemctl >/dev/null 2>&1; then
+			systemctl daemon-reload >/dev/null 2>&1 || true
+		fi
+		;;
 	purge)
 		# Undo the 0.2.20 masks so Ubuntu's own units come back with the
 		# package gone; a plain remove keeps them masked on purpose (the
@@ -11,6 +29,11 @@ case "$1" in
 			systemctl unmask pd-mapper.service qrtr-ns.service >/dev/null 2>&1 || true
 			systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
 			systemctl unmask fwupd.service fwupd.socket fwupd-refresh.timer fwupd-refresh.service >/dev/null 2>&1 || true
+		fi
+		# 0.2.21's dconf keys stay compiled into /etc/dconf/db/local until
+		# the db is rebuilt without the purged conffile.
+		if command -v dconf >/dev/null 2>&1; then
+			dconf update >/dev/null 2>&1 || true
 		fi
 		;;
 esac

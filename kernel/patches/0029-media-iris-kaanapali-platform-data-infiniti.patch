@@ -8,6 +8,8 @@ definitions and using the vpu4x ops.
 Move the configurations that differs in a per-SoC platform
 header, that will contain mode SoC specific data.
 
+[Carried by the Ubuntu port from Qualcomm's kaanapali iris series as carried by infiniti-mainline and the Fedora iceland queue, sign-offs kept. Exit: drop when Perpetua carries the iris support (none at b7d639cfb282).]
+
 Signed-off-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>
 Signed-off-by: Jingyi Wang <jingyi.wang@oss.qualcomm.com>
 [victor: rebased onto the 7.3 iris_platform_vpu3x.c layout]

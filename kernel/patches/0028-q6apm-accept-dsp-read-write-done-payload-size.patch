@@ -34,6 +34,8 @@ Re-diffed for the pin bump (rung P, 2026-11-02): the READ_DONE half of this
 patch is upstream since Perpetua 9ba37ef1db70 ("accept short read-done
 responses"); only the WRITE_DONE consistency change remains here.
 
+Exit: drop when Perpetua takes the WRITE_DONE change (prepared branch q6apm-write-done-payload-size, one commit on b7d639cfb282; no PR opened yet).
+
 ---
  sound/soc/qcom/qdsp6/q6apm.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

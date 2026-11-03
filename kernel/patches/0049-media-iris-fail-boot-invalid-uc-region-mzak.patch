@@ -20,6 +20,9 @@ Signed-off-by: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
 Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
 Signed-off-by: Bryan O'Donoghue <bod@kernel.org>
 [ upsync: commit f301102c17f2 in media-committers next (for 7.4) ]
+
+[Carried by the Ubuntu port from the Fedora iceland queue (0160 there), sign-offs kept. Exit: drop when Perpetua carries upstream f301102c17f2 (media-committers next, 7.4).]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

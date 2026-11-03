@@ -11,6 +11,8 @@ Add necessary buffer size calculation to support AV1 decode for vpu4x
 - add BUF_PARTIAL to the vpu4x decoder dispatch table, which AV1D
   requires
 
+[Carried by the Ubuntu port from Qualcomm's kaanapali iris series as carried by infiniti-mainline and the Fedora iceland queue, sign-offs kept. Exit: drop when Perpetua carries the iris support (none at b7d639cfb282).]
+
 Signed-off-by: Wangao Wang <wangao.wang@oss.qualcomm.com>
 ---
  .../platform/qcom/iris/iris_vpu_buffer.c      | 34 +++++++++++++++++--

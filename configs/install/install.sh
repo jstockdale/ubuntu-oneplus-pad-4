@@ -7,6 +7,13 @@
 # userdata — and refuses everything else.  It never switches slots, never
 # touches vbmeta/dtbo/vendor_boot, and never erases anything.
 #
+# Status 2026-11-03: not yet run end to end on hardware — no release ZIP has
+# been built; the owner's tablet was installed by hand with the same images
+# (init_boot_b first, then boot_b, 2026-10-30/31), and every kernel update
+# since has been `fastboot flash boot_b <bundle>` alone after a RAM boot of
+# the same file (docs/runbook.md §8).  Its gates were checked live on that
+# unit: product canoe, unlocked yes, current-slot b.
+#
 # ⚠ Writing userdata erases everything Android kept there (apps, settings,
 # files).  Android's system itself is untouched; booting back into Android
 # later will make Android re-initialise userdata, i.e. remove Ubuntu.
@@ -17,8 +24,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 # EXPECTED-PRODUCT is the fastboot product string, stamped by the release
 # build from configs/install/expected-fastboot-product.  Note it is NOT the
 # OTA metadata's product (OPD2514): this bootloader reports the platform
-# name, "canoe" (per the iceland-mainline project; to be confirmed on our
-# own unit).  The gate fails closed: no file, no flashing.
+# name, "canoe" (per the iceland-mainline project; confirmed on the owner's
+# unit at first fastboot contact, 2026-10-29).  The gate fails closed: no
+# file, no flashing.
 expected_product_file=$here/EXPECTED-PRODUCT
 
 say() { printf '%s\n' "$*"; }

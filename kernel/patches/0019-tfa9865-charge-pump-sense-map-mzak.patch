@@ -13,6 +13,8 @@ amplifier's return slots (0x68: stock 0x0914, here the chip default
 Write stock's values. Playback levels are unchanged: the attenuation and
 the maximum boost voltage of the tables are not touched.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

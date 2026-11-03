@@ -6,6 +6,8 @@ Subject: [PATCH] soc: qcom: apr: Register the GPR callback before probing
 q6apm sends a synchronous command in probe, and its response was
 dropped, delaying every boot by the 5 s timeout.
 
+[Carried by the Ubuntu port from infiniti-mainline (OnePlus 15, same SoC), with the author's sign-off. Exit: drop when Perpetua carries it.]
+
 Fixes: ec1471a898cc ("soc: qcom: apr: Add GPR support")
 
 Signed-off-by: Victor Fuentes <victor@vlinkz.dev>

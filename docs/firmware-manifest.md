@@ -2,7 +2,7 @@
 
 Every proprietary blob staged on the tablet or banked in the rootfs
 overlay, with its sha256 and the full provenance chain. Verified
-2026-11-01 on the device (serial 2fe096b5, stock 11.A.38 lineage,
+2026-11-01 on the owner's tablet (stock 11.A.38 lineage,
 package OnePlus_OPD2514_OP657AL1_16_BP2A.250605.015). Local sources:
 `/srv/ubuntu-iceland/stock/vendor-extracted/` (our own vendor.img,
 EROFS, extracted with fsck.erofs) and the Fedora port's firmware repo
@@ -36,12 +36,20 @@ Never stage it without that switch. Kept for reference only.
 boots; battmgr/pd-mapper/audio-PD alive), cdsp.mbn + cdsp_dtb.mbn,
 vpu40_2v.mbn, adspr.jsn. Sourced from our stock extraction in Phase A.
 
-## Still owed (tracked in bringup-plan)
+## Still owed (tracked in bringup-plan) — status 2026-11-03: all three landed
 
-- WCN786x WLAN firmware + board files (ath12k) — blocked behind the
-  pwrseq_qcom_wcn pin hunt (C3).
-- BT: ship stock blob under the kernel's requested gngbtfw20.mbn name.
-- Audio: LPASS topology + UCM2 profiles — C4.
+- ~~WCN786x WLAN firmware + board files (ath12k) — blocked behind the
+  pwrseq_qcom_wcn pin hunt (C3).~~ Shipped: the six `ath12k/WCN7860/hw2.0/`
+  files of configs/firmware/iceland.toml (section below); WLAN.GNG.2.0-01536
+  boots on every kernel since #31 (C3 complete, 2026-11-01).
+- ~~BT: ship stock blob under the kernel's requested gngbtfw20.mbn name.~~
+  Resolved the other way round: patch 0006 makes the kernel request stock's
+  `brh*` names (section below, staged 2026-11-01).
+- ~~Audio: LPASS topology + UCM2 profiles — C4.~~ Built and shipped (section
+  below; A0 2026-11-01, stock ceiling since A7 2026-11-02); the UCM2 profile
+  ships in ubuntu-iceland-device.
+- Open now: the ACDB/AMDB for the Goodix SpeakerBoost engine (planned after
+  sensors; blobs stay device-local) and the sensor-hub tree (phase S).
 
 ## Rules
 
@@ -49,6 +57,29 @@ Never stage a blob without recording sha256 + source here first.
 Prefer our own stock extraction; third-party copies only with
 published-hash corroboration from at least two independent sources
 (the AQE/vendor-pair standard).
+
+## Wi-Fi (WCN7860 / ath12k, in the overlay since 2026-11-01, C3)
+
+Six files under /lib/firmware/ath12k/WCN7860/hw2.0/, all from the owner's
+own OTA via `stage-firmware.py` (hashes of the destination files, recorded
+in configs/firmware/iceland.toml and verified against the Fedora
+MANIFEST.tsv, 2026-10-29):
+- amss.bin ← modem image/peach/amss20.bin —
+  23811bd6abe91a89ef00057e0a4d2e85ea3d0defcad377334cdef987ec4df820
+- aux_ucode.bin ← modem image/peach/aux_ucode20.elf —
+  4db9df6fdac982752f71c513f174da7e22307a769a9d49fd336b054919c9451e
+- m3.bin ← modem image/peach/phy_ucode20.elf —
+  c1a1295b1808ba204676c03967aea91effc5d85b55a9d269ba858c5e80c92b9c
+- qdss.cfg ← modem image/peach/qdss_trace_config_v2.cfg —
+  4683d8683437a11172723dc5820801aaaf5eb082336875a7664142582cc90cbb
+- board.bin ← odm etc/wifi/peach/bdwlan.elf —
+  355578ce4162b885c9371e8df7eac20bb4bcd28c8b9d11cf0bdd5114ec6cfe3c
+- regdb.bin ← odm etc/wifi/peach/regdb.bin —
+  365026525f6a9a1ebf0668b8c61fb1300bfdb2450148e994b9a4ca66257e7e43
+Loads verified on-device: WLAN.GNG.2.0-01536 (fw 0x200b7fff), MHI mission
+mode; the WCN7860 binds as ath12k_wifi7_pci on Perpetua (2026-11-01, C3).
+The driver's regulatory grumbles and the DFS-roam timeout are watch items,
+not firmware debts.
 
 ## Bluetooth (WCN7860 BT = "Brahma", staged 2026-11-01)
 
@@ -58,12 +89,23 @@ staged verbatim to /lib/firmware/qca/ and banked in the overlay.
 Key hashes:
 - brhbtfw20.mbn bd2532555b88982cb9d0c24dfbe9224b57ae9e9d6c1c3d9b2b95af565334e5dd
 - brhbtnv20.bin 3b5e9f7ccb2999e811a4c34e4d3272c85a9f1645c4df6e14338c67de135b5b9d
+Discrepancy to settle (noted 2026-11-03): configs/firmware/iceland.toml
+records the same two destination files, from the OTA's `bluetooth` image, at
+74ee832cd724… and 9671c2f0c1a8… (hash-verified 28/28 against the owner's
+OTA on 2026-10-29, cross-checked with the Fedora MANIFEST.tsv). One 11.A.38
+file cannot have two hashes: `sha256sum /lib/firmware/qca/brhbtfw20.mbn
+/lib/firmware/qca/brhbtnv20.bin` on the tablet decides which set is
+shipping, and the loser is corrected here or in the TOML.
 Loads verified on-device: BTFW.BRAHMA.2.0.1-00204, "QCA setup on UART
 is completed", bluez controller registered. Kernel patch 0006 renames
 the btqca WCN7860 request strings gng→brh to match stock (the infiniti
 0084 lineage uses brh; the chip's own firmware label says BRAHMA).
-Note: BT MAC currently a derived default; per-unit address lives in
-persist (excluded data) — wire later like the Fedora installer does.
+Note (status 2026-11-03): the controller runs on its factory Bluetooth
+address since 0.2.25 — it was not in persist (no bluetooth dir there) but in
+the stock OS's log store on the captured sdf LUN, recovered 2026-11-02; it
+lives only on the device in /etc/iceland/bdaddr and is programmed by
+iceland-bdaddr.service at bluetooth.target (the machine-id-derived address
+stays beside it as the fallback for units without a capture).
 
 ## Touch (NT36536 TDDI, verified staged 2026-11-01, C2 T0)
 

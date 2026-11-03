@@ -12,6 +12,8 @@ the following failing fluster tests
 - PICSIZE_C_Bossen_1
 - WPP_E_ericsson_MAIN_2
 
+[Carried by the Ubuntu port from Qualcomm's kaanapali iris series as carried by infiniti-mainline and the Fedora iceland queue, sign-offs kept. Exit: drop when Perpetua carries the iris support (none at b7d639cfb282).]
+
 Co-developed-by: Vishnu Reddy <busanna.reddy@oss.qualcomm.com>
 Signed-off-by: Vishnu Reddy <busanna.reddy@oss.qualcomm.com>
 Signed-off-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>

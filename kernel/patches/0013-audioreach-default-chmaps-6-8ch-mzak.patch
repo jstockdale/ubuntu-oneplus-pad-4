@@ -8,6 +8,8 @@ audioreach_set_default_channel_mapping() knew mono, stereo and four channels; a 
 channels (a TDM port with one channel per slot) sent an all-zero channel map in its endpoint media format
 and its MFC configuration. Add the 5.1 and 7.1 orders.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---

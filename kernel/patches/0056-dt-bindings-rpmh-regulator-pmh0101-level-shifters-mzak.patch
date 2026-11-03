@@ -15,6 +15,8 @@ to Perpetua 7c98a10e6bb7. Prerequisite of the pen charger: its I2C lines
 run through the PMH0101 level shifters 3 and 4, which the board file votes
 on as ls3 / ls4 under the PMH0101 RPMh regulators node.]
 
+Exit: drop when Perpetua takes the Fedora port's pen-charger series (the Fedora port's to submit); applied untouched at the pin bump to b7d639cfb282 (2026-11-02).
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>

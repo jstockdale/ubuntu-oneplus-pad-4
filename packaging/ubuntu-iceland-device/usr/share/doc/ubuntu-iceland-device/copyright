@@ -21,6 +21,14 @@ License: BSD-3-Clause
 Comment: adapted from the Fedora iceland port's UCM2 profile
  (mzakamin-hub/iceland-mainline audio/ucm/OnePlus-Pad4, no license declared).
 
+Files: usr/libexec/iceland/iceland-radio-ids
+Copyright: 2026 the Ubuntu OnePlus Pad 4 (iceland) port contributors
+License: BSD-3-Clause
+Comment: written for this package; the Bluetooth address sequence (power on,
+ power off, Set Public Address, retried) is the one the Fedora iceland port
+ (mzakamin-hub/iceland-mainline, no license declared) proved on this chip,
+ rewritten here, credited in the file.
+
 Files: usr/share/pipewire/pipewire.conf.d/60-iceland-mic-processing.conf
        usr/share/pipewire/pipewire.conf.d/61-iceland-mic-gain.conf
        usr/share/wireplumber/wireplumber.conf.d/63-iceland-mic-raw.conf
@@ -31,6 +39,18 @@ Comment: written for this package; the design (echo canceller first at
  processed source as the default by priority) and the measured values follow
  the Fedora iceland port's processed microphone (mzakamin-hub/iceland-mainline
  packaging/iceland-device, no license declared), credited in each file.
+
+Files: usr/libexec/iceland/iceland-pen
+       etc/iceland/pen.conf
+Copyright: 2026 the Ubuntu OnePlus Pad 4 (iceland) port contributors
+License: BSD-3-Clause
+Comment: written for this package. The handshake's constants and behaviour
+ (the controller's 0x7F pen commands, the 20-byte uplink timing frame, the
+ acknowledgement names and stock's values for them, the GATT characteristics
+ and the pressure and button encodings) were taken as interface facts from
+ OnePlus's GPL-2.0 vendor driver and the stock OS's own logs, and read from
+ the bonded pen itself; no code was copied (docs/porting-log.md, 2026-11-02
+ and 2026-11-03).
 
 License: BSD-3-Clause
  Redistribution and use in source and binary forms, with or without

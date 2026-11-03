@@ -10,6 +10,8 @@ further. Upstream U-Boot took the same decision for Snapdragon
 at probe; anything that wants one running can open the device and own
 it on purpose.
 
+Ours (phase A, boot chain). Exit: submit to Perpetua (the same decision U-Boot took for Snapdragon); drop when Perpetua stops the bootloader-armed watchdog at probe.
+
 Signed-off-by: John Stockdale <jstockdale@gmail.com>
 ---
 diff --git a/drivers/watchdog/qcom-wdt.c b/drivers/watchdog/qcom-wdt.c

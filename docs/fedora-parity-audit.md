@@ -4,6 +4,8 @@
 built, no device touched. Companion to docs/touch-plan.md and
 docs/porting-log.md (:989-1016, "the INT line is the war").
 
+> **Outcome 2026-11-01 and status 2026-11-03.** Ranked delta 2 was the wall: with 0009 (delta 1) flown and eliminated — correct timing, fresh download, engine still dead — the one-variable flight that reverted perpetua's 5892773b169d and moved the panel's command context from dsi[0] to dsi[1] lit the engine on the first panel cycle (IRQ pulsing, 10-slot multitouch at the coordinate extremes), promoted as permanent 0010 (porting-log "TOUCH WORKS: the bonded-DSI orientation was the wall"). C2 closed that night (T6 flashed, coldplug 2/2, 0.2.16 retired the blacklist; iceland.conf is tombstones only); the level-low test module went with it. Delta 7's cosmetics landed on 2026-11-02 as 0037 (their 0036 adapted to our touchscreen_parse_properties probe), 0038 (x-mm/y-mm in the controller frame) and 0039, and the pen then grew its own ladder (0040–0042, 0063 — touch-plan.md status note). Deltas 3–6 and 8–9 were never flown and stay parity backlog for a kernel refresh; flashed boots have run the apps SMMU and the stock vendor_boot cmdline (no ignore_unused crutches) since 2026-11-01 with the panel up 20/20 boots, so §1.4's "required before ever enabling the apps SMMU" and §7-4's "we still need the crutches" are overtaken, not confirmed — the SID 0x800 handoff faults are the known-benign cosmetics. The "provenance gap" closed: the Fedora branch iceland-7.3-rc7-next (q90z) was fetched on 2026-11-01 (media-misc-plan.md) and the queue is cloned under /srv/ubuntu-iceland/ref/ (sensors-plan.md corrections). The pin moved to b7d639cfb282 on 2026-11-03; every "our tree" citation is against 7c98a10e6bb7.
+
 **Question**: touch works on the Fedora (mzakamin) OnePlus Pad 4 port and on
 the phonewave port; on ours the IC never drives INT (gpio158 parked low
 through sustained touch, 2.4 kHz level-low storm with zero touch data in 43k
@@ -87,7 +89,7 @@ modes/DSC/flags/reset (§4).
   `msm.dsi_phy_muxes_first`, `msm.dpu_vid_slave_late_cleanup`,
   `msm.dpu_scanout_frame_vtotal`, `panel_novatek_nt36536.stock_power_timing`,
   `.bl_after_video`, idle-refresh 30 Hz defaults). **That source is not on
-  disk here** (queue snapshot ends at q89g/0306). Their *touch* milestone
+  disk here** (queue snapshot ends at q89g/0306 — since 2026-11-01 the q90z branch is fetched, media-misc-plan.md, and the queue is cloned under /srv/ubuntu-iceland/ref/, sensors-plan.md corrections). Their *touch* milestone
   predates all of it — 0174/0180 are 3 Oct, q89b-era — so q89g is the valid
   parity target for "touch engine starts"; the q90 set documents that their
   dual-DSI *display* path kept having glitches long after touch worked.
@@ -204,7 +206,7 @@ dialogue is observed healthy anyway.
   in the client list (infiniti 0093); **ours does not** [V] — already known
   to us as the reason the apps-SMMU probe kills splash scanout (porting-log
   :470-471; diag boots leave the SMMU alone). Required before ever enabling
-  the apps SMMU on a flashed boot.
+  the apps SMMU on a flashed boot. [Overtaken: release boots have run the apps SMMU live since 2026-11-01 (porting-log "Parade fully mapped", "T6 flashed") — the splash handoff leaves ten SID 0x800 faults per boot, known-benign, and the panel comes up 20/20; the client entry stays a parity item.]
 
 ### 1.5 Full disposition table (counts; complete list archived)
 
@@ -391,7 +393,7 @@ the full composed files. [V]
 - Release boots: stock vendor_boot cmdline, no ignore_unused flags
   (scripts/build-boot-bundle.sh :10); `nt36536_ts` blacklisted on the
   rootfs (packaging/ubuntu-iceland-device/usr/lib/modprobe.d/iceland.conf)
-  until the C2 gate.
+  until the C2 gate (passed 2026-11-01; 0.2.16 left tombstones only).
 - Diag/flight RAM boots (scripts/make-diag-bootimg.sh :104-127):
   `clk_ignore_unused pd_ignore_unused` +
   `initcall_blacklist=clk_disable_unused,genpd_power_off_unused,
@@ -457,16 +459,16 @@ here].
 Flight rules honored: RAM boots, one variable per flight, no rmmod of
 nt36536_ts, blacklist stays until the C2 gate (touch-plan :19-35). The
 rootfs still carries the LEVEL-LOW TEST module — restore the edge build
-before any of this (porting-log :1015-1016).
+before any of this (porting-log :1015-1016). [Overtaken 2026-11-01: the C2 gate passed, the blacklist is retired and the flashed #33+ kernels carry the edge build.]
 
-1. **144 Hz front porch 68→64 — our 0009, bundle already building.**
+1. **144 Hz front porch 68→64 — our 0009, bundle already building.** [Flown 2026-11-01: eliminated as the cause, kept as stock-correct.]
    [V difference existed; fix staged] The only stock-timing mismatch the
    TDDI saw during every failed flight, on the mode fbcon runs. Their 0103
    is in q89b, i.e. present for their entire touch-working history.
    *Action*: fly the queued T-flight unchanged (builtin panel → kernel+
    bundle rebuild, RAM boot; already in motion). If touch events appear,
    stop; the rest of this list becomes parity backlog.
-2. **Bonded-DSI command-sync orientation (ours DSI0, theirs DSI1).**
+2. **Bonded-DSI command-sync orientation (ours DSI0, theirs DSI1).** [This was the wall — flown exactly as described and promoted as permanent 0010 on 2026-11-01.]
    [V opposite; I impact] Our ours-only display commit (`5892773b169d`);
    Fedora dropped it deliberately and runs the upstream orientation their
    touch has always used; the broadcast path carries every DCS the paired
@@ -509,7 +511,7 @@ before any of this (porting-log :1015-1016).
    already mitigates); adopt with the next queue refresh, default-off
    (`msm.dpu_idle_refresh_ms=0`) exactly as theirs. Not an engine-start
    candidate. [V]
-7. **Driver/DT cosmetics for the C2 exit**: their 0036 (BTN_STYLUS,
+7. **Driver/DT cosmetics for the C2 exit** [their 0036 landed as 0037 + 0038/0039 on 2026-11-02; the assert unit was not needed — touch auto-loads on every boot]: their 0036 (BTN_STYLUS,
    `touchscreen-x-mm` resolution — module-only) once events flow;
    phonewave-style systemd assert unit for T6; keep our 0007 ordering.
 8. **Config knobs**: set `GPIO_SHARED_PROXY=y` at the next kernel refresh
@@ -520,7 +522,7 @@ before any of this (porting-log :1015-1016).
    `intr_target_width = 4` in *both* trees while the fix cluster patched
    four sibling SoCs; our IRQ delivery is proven, so purely a correctness
    note for the next upstream sync. [V]
-10. **Watch the provenance gap**: if 1-5 all fail, the remaining
+10. **Watch the provenance gap** [moot: 2 was the wall, and the q90 queue has since been fetched — see §Method]: if 1-5 all fail, the remaining
     explanation space is the q90-era Fedora work we cannot read here
     (`stock_power_timing`, `bl_after_video`, the glitch-fix set). The
     recorded param names alone say where they went: panel power-on timing

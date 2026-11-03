@@ -6,7 +6,7 @@
 # the controller is on SPI (0x1c), which it rejects, so present the bus as
 # I2C to libwacom only (libwacom-2.18 libwacom.c get_bus_vid_pid). The
 # kernel keeps the truth; nothing else reads PRODUCT or ID_BUS here.
-# Vendor 0603 is Novatek, product 6536 the controller (kernel patch 0043);
+# Vendor 0603 is Novatek, product 6536 the controller (kernel patch 0063);
 # the tablet definition is /etc/libwacom/oneplus-pad4.tablet.
 ACTION=="remove", GOTO="iceland_pen_end"
 SUBSYSTEM!="input", GOTO="iceland_pen_end"

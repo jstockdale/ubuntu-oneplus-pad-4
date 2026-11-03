@@ -50,9 +50,25 @@ case "$1" in
 			# this unit witnesses the card after boot and repairs a miss.
 			systemctl enable iceland-audio-check.service >/dev/null 2>&1 || true
 			# 0.2.28: the Stylo Pro handshake bridge; the unit's conditions
-			# keep it idle until the kernel exposes pen_uplink and the pen
-			# is bonded (ladder A.3c N4/N5).
-			systemctl enable iceland-pen.service >/dev/null 2>&1 || true
+			# keep it idle until the kernel exposes pen_uplink, and the daemon
+			# itself waits for the bonded pen. A running daemon keeps the old
+			# code across an upgrade (0.2.29's ServicesResolved wait had to be
+			# restarted by hand), so restart it when it is active.
+			# 0.2.29/0.2.30: udevd re-reads a changed rules directory by
+			# itself, but the PRODUCT/ID_BUS that 74-iceland-pen.rules sets
+			# and the Standard that 75-iceland-charging.rules writes only
+			# arrive with an event, and the supply's add event happens at
+			# boot (0.2.30 was verified after a trigger by hand). Re-run the
+			# three devices where udevd is running — never in the build
+			# chroot, whose /sys may be the host's.
+			if [ -S /run/udev/control ]; then
+				udevadm control --reload >/dev/null 2>&1 || true
+				udevadm trigger --action=change --subsystem-match=input \
+					--attr-match='name=NVTCapacitive*' >/dev/null 2>&1 || true
+				udevadm trigger --action=add --subsystem-match=power_supply \
+					--sysname-match=sc8547-svooc >/dev/null 2>&1 || true
+			fi
+			systemctl try-restart iceland-pen.service >/dev/null 2>&1 || true
 		fi
 		# 0.2.21: compile the dconf system db when dconf is present (it is not
 		# on the minimal profile; the desktop install runs dconf's own trigger).

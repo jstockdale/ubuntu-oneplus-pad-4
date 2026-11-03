@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
-# Not enabled by the package: ladder A.3c N5 enables it once the pen's GATT
-# identifiers are in /etc/iceland/pen.conf and the pen is bonded (N4).
+# Enabled by the package since 0.2.28 (ladder A.3c N5 passed on 2026-11-03);
+# the conditions below keep it idle until the kernel exposes pen_uplink, and
+# the daemon itself waits for the bonded pen (bonded once with bluetoothctl).
 [Unit]
 Description=OnePlus Pad 4: pen handshake bridge (Stylo Pro over Bluetooth)
 After=bluetooth.service

@@ -7,6 +7,8 @@ Subject: [PATCH] media: iris: Release the MVP NoC low-power request on vpu4x
 Like the other VPU generations, clear the request after the handshake.
 Otherwise the next session after a power collapse hangs the firmware.
 
+[Carried by the Ubuntu port from infiniti-mainline's iris fixes (0069 there), with the author's sign-off. Exit: drop when Perpetua carries it.]
+
 Fixes: dde659d37036 ("media: iris: Introduce vpu ops for vpu4 with necessary hooks")
 
 Signed-off-by: Victor Fuentes <victor@vlinkz.dev>

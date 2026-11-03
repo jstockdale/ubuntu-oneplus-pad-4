@@ -9,6 +9,8 @@ Primary MI2S, which the amplifiers never sync to. Move the link to PRIMARY_TDM_R
 (dai-tdm-slot-*; the q6apm TDM DAI takes them through set_tdm_slot). The matching topology puts an Audio
 Interface sink in TDM mode on that port (audioreach-topology: module_audio_if.m4).
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off; a board-dts patch, BSD-3-Clause. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---

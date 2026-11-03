@@ -9,6 +9,8 @@ bit clock requested from the PRM before the graph starts: give the DAI its "bclk
 controller, as the OnePlus 15 device tree does for its MI2S speakers; the machine driver sets it to
 8 slots x 32 bit x 48 kHz = 12.288 MHz.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off; a board-dts patch, BSD-3-Clause. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---

@@ -1,9 +1,9 @@
 Package: ubuntu-iceland-device
-Version: 0.2.30
+Version: 0.2.31
 Section: admin
 Priority: optional
 Architecture: arm64
-Maintainer: Ubuntu iceland port contributors <noreply@example.invalid>
+Maintainer: John Stockdale <jstockdale@gmail.com>
 Depends: systemd, kmod, e2fsprogs, util-linux, cloud-guest-utils,
  systemd-zram-generator, alsa-ucm-conf, alsa-utils, pipewire, pipewire-pulse,
  wireplumber, swh-plugins, libspa-0.2-modules, bluez, iproute2,
@@ -17,6 +17,14 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     cmdline carries no root= and is deliberately never rewritten;
   * first-boot root filesystem expansion to the whole userdata partition;
   * two-tier swap: zstd-compressed zram in front of the storage;
+  * first-boot access path: the USB gadget (an ACM getty on ttyGS0 and an
+    ECM link, usb0 at 192.168.7.2/24 from 80-iceland-usb0.network; the
+    getty waits for the node instead of binding to a device unit udev may
+    never announce), the only way in before the panel and Wi-Fi exist;
+  * initramfs assembly: the /rescue/mainline-init symlink the device tree's
+    bootargs name, a wait-for-root shim for the udev-less archive, the trim
+    that fits it into the 8 MiB init_boot partition, and the opt-in early
+    USB debug gadget (bootargs marker iceland-dbg);
   * speaker protection: PipeWire filter-chain "Speakers" (HPF, stock-tone EQ,
     SC4 compressor, -1 dBFS look-ahead limiter via swh-plugins), raw sink
     demoted, protected sink set as the configured default (A6);
@@ -33,9 +41,10 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     0.2.21 made `dconf update` fail and broke the desktop install's
     configure step);
   * radio identity (0.2.24): the controller's own Bluetooth address and
-    the WLAN MAC from /etc/iceland/{bdaddr,wlan-mac} (owner-supplied from
-    the device label; generated once from /etc/machine-id when absent —
-    never from the SoC serial), applied by iceland-radio-ids.service, a
+    the WLAN MAC from /etc/iceland/{bdaddr,wlan-mac} (the MAC owner-supplied
+    from the device label, the Bluetooth address the factory one recovered
+    from the stock OS's log store on 2026-11-02; either generated once from
+    /etc/machine-id when absent — never from the SoC serial), applied by iceland-radio-ids.service, a
     systemd .link file and iceland-bdaddr.service (bluetooth.target, re-run
     by udev on hci0 add);
   * audio stability (0.2.23): WirePlumber must not turn the card's
@@ -60,7 +69,7 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     udev PRODUCT property and rejects SPI, so 74-iceland-pen.rules presents
     the NT36536 pen and touch devices as I2C for matching, and
     /etc/libwacom/oneplus-pad4.tablet describes the tablet (kernel patch
-    0043 supplies the vendor/product ids);
+    0063 supplies the vendor/product ids);
   * pen handshake bridge (0.2.28): iceland-pen brokers the Stylo Pro's
     "OPP" handshake — the touch controller's uplink timing block (sysfs
     pen_uplink from kernel patch 0041) written to the pen over its bonded

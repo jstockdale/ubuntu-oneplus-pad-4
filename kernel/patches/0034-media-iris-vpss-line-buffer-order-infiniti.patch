@@ -7,6 +7,8 @@ size_vpss_line_buf_vpu33() expects (num_pipes, height, width) but was
 called with width and height swapped, miscalculating VPSS line buffer
 size for non-square resolutions.
 
+[Carried by the Ubuntu port from Qualcomm's kaanapali iris series as carried by infiniti-mainline and the Fedora iceland queue, sign-offs kept. Exit: drop when Perpetua carries the iris support (none at b7d639cfb282).]
+
 Fixes: df816dce1b01 ("media: iris: Introduce buffer size calculations for vpu4")
 
 Signed-off-by: Wangao Wang <wangao.wang@oss.qualcomm.com>

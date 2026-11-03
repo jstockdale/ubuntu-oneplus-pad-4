@@ -4,8 +4,11 @@ Date: Mon, 2 Nov 2026 23:40:00 -0800
 Subject: [PATCH] Input: nt36536: broker the OPP pen handshake between the
  controller and userspace
 
-Ours (2026-11-02, A.3c N1/N2/N5). Exit: offer to Perpetua once the handshake
-is proven end to end (there is no upstream precedent for it).
+Ours (2026-11-02, A.3c N1/N2/N5). Exit: offer to Perpetua with 0040/0042 and
+the bridge daemon's interface (there is no upstream precedent for it); the
+handshake was proven end to end on build #44 (2026-11-03): uplink frame within
+a second of the enable, every downlink command accepted, the pen tracking once
+the block had been written to it over Bluetooth.
 
 The OnePlus Stylo Pro transmits only after a three-party handshake that the
 stock stack runs over Bluetooth: after the pen-scan enable the firmware

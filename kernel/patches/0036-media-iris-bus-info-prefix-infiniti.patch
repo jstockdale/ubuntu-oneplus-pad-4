@@ -14,6 +14,8 @@ missing bus_info prefix ('plat:aa00000.video-codec:dec')
 Update the format string in iris_querycap() to use "platform:" so
 that v4l2-compliance bus_info check passes.
 
+[Carried by the Ubuntu port from Qualcomm's kaanapali iris series as carried by infiniti-mainline and the Fedora iceland queue, sign-offs kept. Exit: drop when Perpetua carries the iris support (none at b7d639cfb282).]
+
 Fixes: 94ef75095d5e ("media: iris: Enumerate cap->bus_info to differentiate between encoder and decoder")
 Cc: stable@vger.kernel.org
 Signed-off-by: Vishnu Reddy <busanna.reddy@oss.qualcomm.com>

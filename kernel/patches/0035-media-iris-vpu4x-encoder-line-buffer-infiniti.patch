@@ -7,6 +7,8 @@ iris_vpu4x_enc_line_size was reading resolutions directly from
 inst->fmt_dst. Use iris_vpu_enc_get_bitstream_{width,height}() which
 account for the 90/270-degree rotation case.
 
+[Carried by the Ubuntu port from Qualcomm's kaanapali iris series as carried by infiniti-mainline and the Fedora iceland queue, sign-offs kept. Exit: drop when Perpetua carries the iris support (none at b7d639cfb282).]
+
 Fixes: df816dce1b01 ("media: iris: Introduce buffer size calculations for vpu4")
 Signed-off-by: Wangao Wang <wangao.wang@oss.qualcomm.com>
 Reviewed-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>

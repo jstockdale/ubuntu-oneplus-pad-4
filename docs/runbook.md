@@ -1,11 +1,10 @@
 # Runbook: from zero to Ubuntu on the dev unit
 
-Last revised: 2026-10-29. This is the bench document: every command in order,
+Last revised: 2026-11-03. This is the bench document: every command in order,
 with what success looks like and what to do when it isn't. It assumes the
 repo is at `~/projects/ubuntu-oneplus-pad-4` and nothing has been run yet.
 
-Phases 1–2 need no tablet and no OTA. Phase 5 is the first hardware contact
-and writes nothing. Flashing happens only in phase 7.
+Phases 1–2 need no tablet and no OTA. Phase 5 was the first hardware contact; on this ABL a RAM boot of our chain needed `init_boot_b` flashed first (§5b, 2026-10-30 — the bootloader never uses a downloaded ramdisk), so the first persistent write came there, with the stock image kept for a one-command restore. Phase 7 is the full install.
 
 ## 0. What you need
 
@@ -20,6 +19,11 @@ and writes nothing. Flashing happens only in phase 7.
 - The safety rules, which every tool here enforces but you should know cold:
   never `fastboot set_active`; never flash vbmeta/dtbo/vendor_boot; keep the
   stock OTA zip forever.
+  The standing rails in full, as the project states them: never `fastboot
+  set_active`; never write vbmeta, dtbo, vendor_boot or the partition table;
+  no EDL; one variable per flight; RAM-boot before flash; versioned bundle
+  copies before each build; licensing BSD-3-Clause by default, copyleft only
+  where the source material requires it.
 
 ## 1. Build host setup
 
@@ -69,7 +73,7 @@ bash scripts/fetch-perpetua.sh
 bash scripts/build-mainline-kernel.sh
 ```
 
-- `fetch-perpetua.sh` clones ~3 GB and pins commit `7c98a10e…`; it fails if
+- `fetch-perpetua.sh` clones ~3 GB and pins commit `b7d639cf…` (perpetua/v7.3 head of 2026-11-02; the pin moved from `7c98a10e…` on 2026-11-03 with build #45 — it also MOVES an existing checkout, which `build-mainline-kernel.sh` builds as found); it fails if
   the pinned tree is missing any iceland file it needs.
 - The build takes a while; success ends with `=== kernel ===` and
   `BUILD-METADATA.txt` naming the release (expect `7.3.x` + suffix) under
@@ -82,6 +86,13 @@ Failure modes seen in advance:
   (`kernel/config/*.fragment`). Read the symbol's dependencies in the
   Perpetua tree and fix the fragment; do not delete the check.
 - Ancient clang: Perpetua tracks mainline; use the distro's current clang/lld.
+- A patch of `kernel/patches/` fails to apply (the script applies the whole
+  series — 0001–0063 except the retired 0020, 62 files — before configuring):
+  the build stops at that patch. 0031 did it twice, once from a stale re-diff
+  (2026-11-02) and once because the pinned checkout had not been moved to the
+  new pin (2026-11-03). Check `git -C $UBUNTU_WORKDIR/linux-perpetua rev-parse
+  HEAD` against `scripts/fetch-perpetua.sh` first; on a pin bump the series is
+  replayed with `git am -3` and re-diffed (§8).
 
 ## 3. Tablet preparation (destructive step clearly marked)
 
@@ -145,8 +156,7 @@ python3 scripts/stage-firmware.py record \
     --stock "$UBUNTU_WORKDIR/stock/current"
 ```
 
-Expect `NOT FOUND` lines on the first run: the template's `source` paths are
-conventional guesses. Find the real ones by extracting the images yourself:
+The `source` paths are no longer guesses: they were replaced by the verified 11.A.38 map on 2026-10-29 and the record run came back 28/28 clean against the owner's own OTA, so a clean exit is the expectation on that build. A `NOT FOUND` now means a different stock build or a renamed path; find the real one by extracting the images yourself:
 
 ```bash
 mkdir /tmp/vendor-tree /tmp/odm-tree
@@ -162,6 +172,17 @@ sha256), and commit it. This list will still grow in phase 7 from dmesg;
 that is expected and each addition repeats this loop.
 
 ## 5. First hardware contact: the RAM boot (writes nothing)
+
+Status 2026-11-03 — superseded as a procedure, kept as the record of the
+first contact. On this ABL `fastboot boot` never uses the downloaded image's
+ramdisk (control pair, 2026-10-30; §5b), so the kernel+initramfs image from
+`make-test-bootimg.sh` cannot exercise our initramfs. The RAM-boot vehicle
+has been a kernel-only image over the flashed `init_boot_b` since Phase A,
+and today it is the bundle's own `boot.img` — `fastboot boot
+out/bundles/boot-NN-<sha>.img`, kernel with built-in DTB and nothing else —
+over the installed `init_boot_b`. The outcome ladder below answered itself in
+Phase A (flight 18, 2026-10-30): assumptions 1 and 3 of boot-strategy.md are
+closed.
 
 Build the minimal development rootfs — known password, your SSH key:
 
@@ -216,8 +237,10 @@ The script printed the outcome ladder; what to do with each:
    flashing the bundle on the active slot directly (phase 7) — more care,
    same images — and note it in boot-strategy.md.
 
-A power cycle fully undoes a RAM boot. Iterate kernel → `make-initramfs.sh`
-→ `make-test-bootimg.sh` → `fastboot boot` as often as needed.
+A power cycle fully undoes a RAM boot. The iteration today is kernel →
+`INITRAMFS=… bash scripts/build-boot-bundle.sh` → a versioned copy under
+`out/bundles/` → `fastboot boot` of that copy (§8); `make-test-bootimg.sh` is
+retired on this ABL (§5b).
 
 ## 5b. Slot-retry rules (learned 2026-10-30, from the sibling ports)
 
@@ -305,14 +328,35 @@ userdata.
 
 ## 8. The iteration loops
 
-- **Kernel-only change** (flashed install): `build-mainline-kernel.sh` →
-  `RESUME_ROOTFS=1 bash scripts/build-ubuntu-rootfs.sh` (restages modules) →
-  `make-initramfs.sh` → `build-boot-bundle.sh` → flash just
-  `boot_<slot>` + `init_boot_<slot>`. Or RAM-boot it first, always an option.
-- **Perpetua pin bump**: edit `PERPETUA_COMMIT` (and branch, on a kernel
-  version change) in `scripts/fetch-perpetua.sh`, log why in
-  `porting-log.md`, rebuild from phase 2. Camera/mic support is landing
-  upstream — expect to want this often at first.
+- **Kernel-only change** (flashed install — the loop every build since #41
+  has used): `build-mainline-kernel.sh` (it builds the pinned checkout's HEAD
+  and applies `kernel/patches/*.patch`; it does NOT assemble the bundle) → the
+  module tree onto the tablet (one changed driver as a module swap, previous
+  copy kept under /var/backups/iceland; a new pin replaces the rootfs module
+  tree wholesale, because CONFIG_MODVERSIONS is off and trees are never mixed
+  across pins — backup tar on the host) →
+  `INITRAMFS=$UBUNTU_WORKDIR/out/initrd.img-7.3.0+.post-0.2.21 bash
+  scripts/build-boot-bundle.sh` (INITRAMFS is mandatory; the script rewrites
+  `out/bundle`) → a versioned copy `out/bundles/boot-NN-<sha8>.img` plus its
+  metadata BEFORE the next build starts → RAM-boot that copy first, always
+  (`fastboot boot`, retries per §9) → `fastboot flash boot_b
+  out/bundles/boot-NN-<sha8>.img`: boot_b only, and the "Writing 'boot_b'
+  OKAY" line is the tell (`fastboot boot` from shell history is not a flash);
+  `init_boot_b` is rewritten only when the initramfs itself changes, userdata
+  never. Lock-in after the reboot: `boot_b` sha256 equals the bundle, `boot_a`
+  1f11e2c6… untouched, slot _b bootable + successful, `qbootctl` active.
+- **Perpetua pin bump** (done once, 2026-11-03: 7c98a10e6bb7 → b7d639cfb282
+  for rung P): edit the `commit=` default (and the branch, on a kernel version
+  change) in `scripts/fetch-perpetua.sh`, then RUN it — `build-mainline-
+  kernel.sh` builds whatever the pinned checkout's HEAD is, which is how the
+  first #45 attempt built the old pin and died at the re-diffed 0031; replay
+  the series with `git am -3` in a scratch worktree and re-diff what conflicts
+  (four did: 0028, 0031, 0058, 0061 — notes in `kernel/patches/README`);
+  re-merge the config fragments against the head's `devices/iceland/
+  kernel.config`; log why in `porting-log.md`; rebuild from phase 2 and
+  replace the tablet's module tree wholesale (CONFIG_MODVERSIONS is off, so
+  trees are never mixed across pins). Camera/mic support is landing upstream
+  — expect to want this often at first.
 - **New firmware request in dmesg**: add to `iceland.toml`, `record`,
   commit, re-run phase 6 from the overlay onward.
 - **Rootfs package changes**: edit the package sets in
@@ -321,24 +365,41 @@ userdata.
 Every session ends with a `porting-log.md` entry: what was observed, which
 assumption it answered, what the next session starts with.
 
-## 9. Operating the flashed tablet (Phase B complete, 2026-11-01)
+## 9. Operating the flashed tablet (Phase B complete, 2026-10-31)
 
 The tablet now boots Ubuntu from power-on; fastboot is only for diag
 RAM boots and future kernel updates (RAM-boot gate first, always).
 
+`fastboot boot` can fail with "Write to device failed … Protocol error" or
+"Status read failed (No such device)" while the bootloader's USB device
+re-enumerates every few seconds (device numbers climbing in the host log;
+#45 needed four attempts on 2026-11-03): wait for it to settle and try again.
+A failed attempt touches nothing on storage, and a RAM boot leaves nothing
+behind either way.
+
 - Access, in order of preference: ssh ubuntu@192.168.7.2 (or
   ubuntu-iceland.local) over the gadget network; the serial getty on
-  /dev/ttyACM0; the panel console (when the DSI lottery wins — census
-  pending). Host side is automatic: fixed gadget MAC → iface
+  /dev/ttyACM0; the panel console (the DSI census closed 20/20 boots on
+  2026-11-02, kernels #36–#39). Host side is automatic: fixed gadget MAC → iface
   enx026963656c68 → NM profile "iceland-usb" (autoconnect-retries 0).
+- Wi-Fi is the access path whenever the single USB-C port holds a charger —
+  every charging flight, the 24 h soak, the SuperVOOC stages: `ssh
+  ubuntu@ubuntu-iceland.local`. The tablet joins its network by itself since
+  C3 (2026-11-01), on the label MAC since 0.2.25 — use the mDNS name, never a
+  remembered address, the lease moved when the MAC did; station power save
+  is off since 0.2.27, after the tablet twice went unreachable while idle.
 - ONE serial listener only. Before any flight:
   `sudo lsof /dev/ttyACM0` and kill extras — concurrent readers eat
   the echo and look exactly like a dead console (the "deaf-RX"
   false mystery of 2026-10-31).
-- Clean shutdown from any state: single short power press (logind).
-  Hard reset: hold power+vol-up. On a charger the tablet auto-boots
-  after poweroff.
-- Internet on the tablet: host NAT (ip_forward + MASQUERADE out the
+- Clean shutdown: on the desktop a short power press opens GNOME's power
+  dialog (logind ignores the key since 0.2.21, gsd's action is interactive;
+  a long press powers off); from a console, `systemctl poweroff`. Hard
+  reset: hold power+vol-up. On a charger the tablet auto-boots after
+  poweroff.
+- Internet on the tablet: over Wi-Fi directly since C3 (2026-11-01; the
+  wifi default route at metric 600 beats usb0's 1024 by design). Gadget-only
+  fallback — host NAT (ip_forward + MASQUERADE out the
   uplink, FORWARD accepts for 192.168.7.0/24) — not yet persistent on
   the host; tablet side ships in 0.2.14 (route metric 1024 + DNS).
 - Clock: syncs via NTP once internet is up. If apt says Release files
@@ -348,16 +409,29 @@ RAM boots and future kernel updates (RAM-boot gate first, always).
   factory-flagged unbootable: there is NO automatic fallback. Recovery
   is button-combo fastboot + `fastboot flash boot_b
   /srv/ubuntu-iceland/factory/fcap/part-boot_b.img` (sha-verified
-  stock copy; init_boot_b restore per section 7).
+      stock copy; init_boot_b restore per section 7).
+- Kernel fallback short of stock: the last image flashed before #45 was #42
+  (`out/bundles/boot-42-82219574.img`) and the last RAM-booted one #44
+  (`boot-44-f97398b2.img`, never flashed — the fallback image of record for
+  the pin bump). Either is a `fastboot boot` or a `fastboot flash boot_b`
+  away, but both are old-pin kernels and CONFIG_MODVERSIONS is off: the
+  rootfs module tree, replaced wholesale for #45, must go back with them from
+  the backup tar on the host. Never mix trees across pins.
 - Factory restore kit: /srv/ubuntu-iceland/factory/fcap (169 images +
   SHA256SUMS) and the 723 MB tarball on Drive
-  (oneplus-pad4-iceland-2fe096b5-factory-2026-10-31.tar.zst,
+  (oneplus-pad4-iceland-<serial>-factory-2026-10-31.tar.zst,
   sha256 25749ef9…).
 - Module policy lives in /usr/lib/modprobe.d/iceland.conf (package):
-  pwrseq_qcom_wcn (probe hard-resets the SoC — XPU pin suspicion,
-  split-node hunt in C3) and nt36536_ts (probe resets the panel IC —
-  C2). Manual modprobe bypasses blacklists by design: that is the
-  bisect lever, use it deliberately.
+  nothing is blacklisted any more — the file is the tombstone of the two
+  bring-up blacklists, pwrseq_qcom_wcn (2026-10-31 .. 2026-11-01: the
+  pre-0003/0004/0005 supply description reset the SoC; the corrected DT was
+  flashed and the radios coldplug cleanly since 0.2.15) and nt36536_ts
+  (2026-10-31 .. 2026-11-01: fixed by patches 0007–0010, retired in 0.2.16
+  after the C2 ladder). The audio chain has the opposite policy since
+  0.2.26: /usr/lib/modules-load.d/iceland-audio.conf lists it for
+  systemd-modules-load and iceland-audio-check witnesses the card. Manual
+  modprobe bypasses a kmod blacklist by design: that was the bisect lever,
+  worth remembering if one ever returns.
 - GPU: firmware per docs/firmware-manifest.md. Weston launch for
   tests: mkdir/export XDG_RUNTIME_DIR (no --tty in weston 14; the
   --continue-without-input workaround retired with the touch blacklist in
@@ -373,12 +447,20 @@ RAM boots and future kernel updates (RAM-boot gate first, always).
   clean compile. Edit scripts between runs, or run a copy.
 - Audio gone in a GNOME session (no sinks, "No Input Devices", `pw-play`
   into the chain says I/O error) while the card is still in /proc/asound:
-  WirePlumber lost the UCM HiFi profile — root cause (2026-11-02): the
+  WirePlumber lost the UCM HiFi profile. Four root causes so far, each with
+  its package fix, so read `journalctl -t iceland-audio-check -b` first:
+  (1) the pd-mapper race (0.2.20, the userspace mapper masked); (2) the
   card's compress node became a second card object that stole the device
-  reservation; fixed by 52-iceland-compress.conf in ubuntu-iceland-device
-  0.2.23. If it ever recurs, check `journalctl --user -u wireplumber` for
-  "owner_id == 0" / "Audio0 busy" and recover with `systemctl --user
-  restart wireplumber`; check with
+  reservation — "owner_id == 0" / "Audio0 busy" in `journalctl --user -u
+  wireplumber` — fixed by 52-iceland-compress.conf (0.2.23); (3) four chain
+  modules not loaded by one boot's coldplug, no card at all (0.2.26
+  modules-load list; the check modprobes what is missing and logs it);
+  (4) the card registering during WirePlumber's first pass so its UCM
+  profile never attaches — no sink, profiles off/pro-audio only — which
+  repeats on every boot of #45: the 0.2.29 guard restarts WirePlumber once
+  and logs it, scoped to the owner's session in 0.2.30 ("session of ubuntu
+  has its ALSA sink" is the healthy line). Anything outside those four:
+  recover with `systemctl --user restart wireplumber`; check with
   `wpctl status` that the raw sink and the microphone source are back and
   `pw-metadata 0 default.audio.sink` still names effect_input.speakers.
   Note: `pactl` is not installed; use `wpctl` and `pw-dump`.

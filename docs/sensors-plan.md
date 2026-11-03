@@ -3,9 +3,10 @@
 > **Corrections from the 2026-11-02 readiness review** (checked against the
 > pinned tree, the live tablet, the Debian/Ubuntu archives and the Fedora
 > port's current tree, now cloned under /srv/ubuntu-iceland/ref/):
-> - Patch numbering is stale: the series is 0001–0028 plus the VPU set
->   0029–0036; the non-secure-domain DT fix (G1) and the hall node (G8)
->   take the next free numbers after that.
+> - Patch numbering is stale: the series is 0001–0063 less the retired
+>   0020 (as of 2026-11-03: 0029–0036 and 0043–0055 iris, 0037–0042 and
+>   0063 pen, 0056–0062 pen charger); the non-secure-domain DT fix (G1)
+>   and the hall node (G8) take the next free numbers after that (0064+).
 > - S0/S2 baseline is wrong: `qrtr-lookup` on the flashed system ALREADY
 >   lists QMI service 400 "Snapdragon Sensor Core service" (node 5) with no
 >   hexagonrpcd ever run, so "SSC absent until attached" is false and
@@ -15,7 +16,7 @@
 >   /sys/devices/soc0 has only family, machine, revision, serial_number,
 >   soc_id (661, 2.0). hw_platform/platform_subtype/platform_subtype_id/
 >   platform_version come from Fedora's generic socinfo set (hw_platform =
->   "MTP"; three values still to fetch).
+>   "MTP"; the three were fetched 2026-11-02 from the Fedora firmware repo: platform_subtype=Unknown, platform_subtype_id=0, platform_version=65536 — with family=Snapdragon, machine=CANOEP, revision=2.0, soc_id=661 beside them).
 > - Archive facts: Debian sid libssc is 0.4.4-2 (binaries libssc2,
 >   libssc-bin, libssc-dev); hexagonrpc is 0.4.0-2 in sid and 0.5.0-1 in
 >   experimental (rebase G3 on the 0.5.0-1 packaging, not Ubuntu's 0.4.0
@@ -35,14 +36,16 @@
 > - Secure-node attach (open question 2) is reconfirmed in code at the pin
 >   (fastrpc.c is_session_rejected only rejects a non-secure fd on a secure
 >   channel; INIT_ATTACH_SNS has no secure gate) but is untested on the
->   device. Perpetua's head b7d639cfb282 touches none of fastrpc.c,
+>   device. Perpetua's head b7d639cfb282 — our pin since 2026-11-03 — touches none of fastrpc.c,
 >   qcom_pd_mapper.c, the adsp fastrpc node or a lid/hall node.
 > - The per-unit registry (352 files) is calibration data: never in the
 >   repo, never in a published overlay. Idle datum for S4: ipcc_0 ≈ 1.3
 >   interrupts/s.
+>
+> **Status 2026-11-03 (interim checkpoint):** nothing of phase S has flown; sensors are ❓ in hardware-status.md and auto-rotation is the owner's standing report (2026-11-02, on glass: orientation lock off, 0 IIO devices, the desktop task's iio-sensor-proxy 3.8-1 exports nothing and exits, hexagonrpcd absent, the hub alive with SSC on QRTR — exactly §1.2's gap, nothing to tune in GNOME). What moved around the plan: the pin is b7d639cfb282 since 2026-11-03 (build #45, flashed) — the bullet above's "Perpetua's head" is now the pin, and every file:line below is against 7c98a10e6bb7; the series is 0001–0063 less the retired 0020, so G1 and G8 take 0064 and up (every "0011"/"0012" in §§3–5 means "the next free number"); the three socinfo values S0 could not read were taken from the Fedora firmware repo on 2026-11-02 (family=Snapdragon, hw_platform=MTP, machine=CANOEP, platform_subtype=Unknown, platform_subtype_id=0, platform_version=65536, revision=2.0, soc_id=661; sparse clone under ref/iceland-firmware, whose README grants use with a Pad 4 only — nothing from it is redistributable under our license). The hexagonrpcd this plan builds is also the prerequisite for the audio rung that follows sensors (the Goodix SpeakerBoost DSP engine needs the audio-PD file server, AMDB registration and ACDB; blobs stay device-local), so the daemon's packaging should expect a second protection domain. S6's precondition, the C5 desktop, is up since 2026-11-02.
 
 Written 2026-11-01 from source research only — no device contact, no tree
-edits. Kernel of record: perpetua pin `7c98a10e6bb7` (pristine
+edits. Kernel of record: perpetua pin `7c98a10e6bb7` [the pin when this was written; b7d639cfb282 since 2026-11-03 — status note above] (pristine
 `/srv/ubuntu-iceland/linux-perpetua`, worktree
 `/srv/ubuntu-iceland/build/linux-src-iceland` + our patches 0001–0010; the
 DTS/dtsi lines cited below are identical in both — the fastrpc/adsp region
@@ -389,7 +392,7 @@ independent of the whole SSC stack — a separate mini-ladder (§5 H1).
     (binary `libssc2`; deps libqmi-glib5, libqrtr-glib0, protobuf-c),
     `hexagonrpc` source 0.3.2-2. [superseded 2026-11-02 — see the correction block at the top]
   So the Ubuntu story is: backport Debian's `iio-sensor-proxy 3.9-1` and
-  `libssc 0.4.2-2`, and rebuild `hexagonrpc` at the Fedora pin + 2
+  `libssc 0.4.4-2` (0.4.2-2 when written — corrections block), and rebuild `hexagonrpc` at the Fedora pin + 2
   patches (Debian's packaging, newer orig). All three are small
   meson/glib builds.
 
@@ -424,8 +427,8 @@ same SoC, same board, same firmware generation).
 |---|---|---|---|
 | G1 | DT: `qcom,non-secure-domain` on adsp fastrpc | 1 line (≙ Fedora 0061) | `kernel/patches/0011-…` (S3 flight; S2 works around it via the secure node) | [superseded 2026-11-02 — see the correction block at the top]
 | G2 | DSP file tree `/usr/share/qcom/kaanapali/OnePlus/iceland` | host assembly script from held artifacts (§1.4), ~tens of MB | overlay / device package; registry part stays unit-private |
-| G3 | hexagonrpcd at `598b591` + Fedora patches 0001/0002 | rebuild of the Ubuntu source package with new orig + 2 patches | local deb `hexagonrpc 0.5.0+git598b591-0iceland1` (> 0.4.0-1) |
-| G4 | libssc | backport Debian sid `libssc 0.4.2-2` (build-deps all in 26.04: libqmi-glib-dev, libqrtr-glib-dev, protobuf-c) | local deb |
+| G3 | hexagonrpcd at `598b591` + Fedora patches 0001/0002 | rebuild from Debian experimental's 0.5.0-1 packaging (not Ubuntu's 0.4.0 source — corrections block) with new orig + 2 patches | local deb `hexagonrpc 0.5.0+git598b591-0iceland1` (> 0.4.0-1) |
+| G4 | libssc | backport Debian sid `libssc 0.4.4-2` (binaries libssc2/libssc-bin/libssc-dev — corrections block; build-deps all in 26.04: libqmi-glib-dev, libqrtr-glib-dev, protobuf-c) | local deb |
 | G5 | iio-sensor-proxy 3.9 with SSC | backport Debian sid `3.9-1` (arm64 enables ssc; build against G4) | local deb `3.9-1~iceland1` (wins over archive 3.8-1) |
 | G6 | udev rule + unit drop-in + mount matrix | adopt Fedora's `81-iceland-ssc.rules` + `hexagonrpcd…iceland.conf` nearly verbatim (systemd paths, same matrix) | `ubuntu-iceland-device` |
 | G7 | suspend/resume + watchdog hygiene | Fedora's sleep hook / resume unit / ssc-watch pattern, trimmed to what our s2idle phase (C6) needs | `ubuntu-iceland-device`, after S6 |
@@ -454,7 +457,7 @@ ships; the hub's dynamic libs travel in G2, not in /lib/firmware).
    Pin/hold note: `3.9-1~iceland1` naturally outranks resolute's 3.8-1;
    add the same apt-pin style we use for other held packages if an SRU
    ever ships a 3.9 without ssc.
-3. **`kernel/patches/0011-kaanapali-fastrpc-non-secure-domain.patch`**
+3. **`kernel/patches/0064-kaanapali-fastrpc-non-secure-domain.patch`** (the next free number as of 2026-11-03 — 0011 went to the audio chain on 2026-11-01)
    (G1, with 0193's double-free pick appended or as 0011b) staged but NOT
    applied to any release build until its flight (S3).
 
@@ -506,7 +509,7 @@ build misses — one clean exit+restart, never a loop.
 **If the secure node refuses the attach** (errno from the ioctl): no
 debugging on the secure path — S3's DT line is the fix; fly it next.
 
-### S3 — DT flight: `/dev/fastrpc-adsp` (patch 0011)
+### S3 — DT flight: `/dev/fastrpc-adsp` (patch 0011 → the next free number, 0064 as of 2026-11-03)
 
 **Change (one):** 0011 in a RAM-boot bundle. Re-run the S2 procedure on
 `/dev/fastrpc-adsp` as user `fastrpc` via the packaged unit + Fedora-style
@@ -554,7 +557,7 @@ proxy restarts, battery UI still updating (ADSP shared-health check).
    its manifest; registry directory marked config/no-replace analog
    (dpkg conffile or shipped by a postinst copy — decide at packaging
    time; never in a public artifact).
-2. 0011 (+0193) ride the next planned boot_b flash (flash-first rule;
+2. G1's patch (0064+ as of 2026-11-03; "0011" when written) (+0193) rides the next planned boot_b flash (flash-first rule;
    RAM-boot-gated). Until that flash, the flashed system keeps working
    via S2's secure-node drop-in override — remove the override in the
    same 0.2.x that assumes `/dev/fastrpc-adsp`.
@@ -570,7 +573,7 @@ proxy restarts, battery UI still updating (ADSP shared-health check).
 
 ### H1 — hall/lid mini-ladder (independent, any time after S0)
 
-**Change (one):** patch 0012 = lid `switch-lid` gpio-keys node on TLMM 98
+**Change (one):** patch 0012 (now the next free number after G1's — 0065+ as of 2026-11-03) = lid `switch-lid` gpio-keys node on TLMM 98
 (+ pinctrl bias-disable) + `regulator-always-on` on L1B (≙ Fedora
 0030+0115 — their 0115 rationale is s2idle-specific but the rail
 ownership point stands as soon as the hub *isn't* streaming hall). RAM
@@ -661,7 +664,7 @@ edge-latch fix) to the C6 s2idle ladder where it's testable.
   :2176, :7055-7058, :7132, :7154, :7156. Modules:
   `out/kernel-iceland/modules-root/lib/modules/7.3.0+/…` (fastrpc, qrtr,
   qrtr-smd, qcom_pd_mapper). Patches dir: `kernel/patches/` (0001–0010
-  today; 0011+ are this plan's).
+  when written; 0001–0063 less 0020 since 2026-11-03, so 0064+ are this plan's).
 - **Stock artifacts**: `stock/vendor-extracted/etc/sensors/
   {config,sns_reg_config,hals.conf}`, `etc/init/vendor.sensors.sscrpcd.rc`;
   `stock/current/odm.img` → `/etc/sensor/` (extraction in this session's
@@ -692,4 +695,4 @@ edge-latch fix) to the C6 s2idle ladder where it's testable.
 - **Archives [W]** (checked 2026-11-01): Ubuntu resolute —
   iio-sensor-proxy 3.8-1, hexagonrpcd 0.4.0-1, no libssc. Debian sid —
   iio-sensor-proxy 3.9-1 (`-Dssc-support=enabled` on arm64 per d/rules),
-  libssc 0.4.2-2, hexagonrpc 0.3.2-2.
+  libssc 0.4.2-2, hexagonrpc 0.3.2-2. [superseded 2026-11-02 — see the correction block at the top: libssc 0.4.4-2, hexagonrpc 0.4.0-2 (sid) / 0.5.0-1 (experimental)]

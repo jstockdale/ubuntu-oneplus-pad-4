@@ -19,7 +19,14 @@ What this daemon does, in order:
   3. on every new uplink frame writes its payload to the timing
      characteristic, then sends the configured "after_timing" downlink
      sequence to the controller;
-  4. maps notifications to downlink commands through the [rules] table.
+  4. maps notifications to downlink commands through the [rules] table;
+  5. mirrors the pen's Bluetooth pressure stream and barrel button into the
+     pen input device through pen_input (driver patch 0042: contact is the
+     controller's call, magnitude the pen's; the barrel button is the first
+     stylus button, which GNOME treats as right click while hovering);
+  6. replays the handshake whenever the pen's console reports "sleep exit"
+     (it sleeps on the charger and when idle and applies the timing only
+     awake) and once at start-up if the controller's frame predates us.
 
 Everything protocol-specific lives in /etc/iceland/pen.conf so the N4/N5
 flights can tune it without a code change. Rung N5's PASS gate: pen events

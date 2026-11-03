@@ -17,6 +17,8 @@ that existing error path.
 iceland queue's 0041 (q90x@c060e3b), so the Date above is this port's, not
 the author's; the original carried no Signed-off-by.]
 
+Exit: drop when Perpetua takes the Fedora port's TDM speaker chain (0011–0024 here), which is the Fedora port's to submit.
+
 Signed-off-by: John Stockdale <jstockdale@gmail.com>
 ---
  sound/soc/qcom/qdsp6/audioreach.c | 90 +++++++++++++++++++++++++++++++

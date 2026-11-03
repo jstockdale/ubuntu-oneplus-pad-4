@@ -1,10 +1,12 @@
 # WLAN bring-up plan: the pwrseq_qcom_wcn hard reset
 
+> **Outcome and status 2026-11-03 (interim checkpoint; the plan below is history — porting-log entries "The WLAN power-on hunt: a day of falsifications", "WIFI WORKS: hypothesis 2 confirmed, chain complete" and "C3 COMPLETE", all 2026-11-01).** F0/F1 ran as written and killed H1 before the §3 fix 1 revert ever flew: all four bind-time writes of §1.1 executed under trace on a diag boot and the boot lived — the reset came later, when the deferred PCIe bridge found the WCN alive on bootloader power. The real discriminator (4/4 across flights) was the S1J vote, and it was environment-bound: the identical power-on that reset four diag flights ran clean on the release kernel's normal cmdline (pd/clk_ignore_unused and the suppressed late regulator/genpd init turn a legal RPMh sequence lethal; the exact interaction is a documented open question — we ship the normal environment). What stayed: 0003 (= §3 fix 2, Fedora 0167's supply map), 0004 (the driver's vendor supply roles — adopting 0167 alone left S1J never enabled, chip half-alive), 0005 (S1J floor 892 mV; correct, falsified as the trigger). The §5 firmware set was staged and booted (WLAN.GNG.2.0-01536). Kernel #31 (0001–0005) was flashed and 0.2.15 dropped the blacklist (iceland.conf is tombstones only): Wi-Fi ✅, auto-join on every boot. Since then: the interface is wlan0 and carries the label MAC from a device-local .link file (0.2.25); station power save is off since 0.2.27 — Ubuntu's default-wifi-powersave-on.conf in /etc outranked the 0.2.x drop-in in /usr/lib and the tablet dropped off the network within minutes of idling, so the powersave=2 file is /etc/NetworkManager/conf.d/zz-iceland-wifi.conf now. Watch item: ath12k roaming/regulatory timeouts (a DFS roam, "Timeout while waiting for regulatory update"). Appendix C's questions were never sent — the answer was ours. The pin moved to b7d639cfb282 on 2026-11-03; every file:line here is against 7c98a10e6bb7. §6's 0040 note is superseded: Fedora's final DT drops wake-gpios entirely (their 0301), see media-misc-plan.md §4.
+
 Date: 2026-11-01 (research overnight, flights tomorrow).
 Problem: `modprobe pwrseq_qcom_wcn` hard-resets the SoC at driver *bind* time,
 confirmed twice in the module bisect; every radio depends on it
 (pcie0 host init defers on the pwrctrl consumer, which defers on this
-provider). Module currently blacklisted in `/usr/lib/modprobe.d/iceland.conf`.
+provider). Module blacklisted in `/usr/lib/modprobe.d/iceland.conf` at the time of writing (freed by 0.2.15 on 2026-11-01 — outcome note above).
 
 All file:line references are against the worktree
 `/srv/ubuntu-iceland/build/linux-src-iceland` at HEAD `7c98a10e6bb7`
@@ -214,7 +216,7 @@ lend active until some handshake) survives as a variant. **[inferred, strong]**
 | mzakamin Fedora | v7.3-rc7 (pre-dbd674) | **GPIOD_ASIS** (no write) + same pinctrl | map220v | 11.A.38 | **works** (Wi-Fi + s2idle debug) |
 | DocLogix perpetua | v7.3 tip (has dbd674) — runtime unverified | OUT_LOW if tip | map220v | unknown | BT bring-up implies pwrseq binds |
 | SuperTurtleDev | v7.3 + map220v | OUT_LOW | map220v | unknown (their fw differs from 11.A.38 per manifest diff column) | untested on device |
-| **us** | v7.3 perpetua | **OUT_LOW** | map220v | 11.A.38 | **hard reset at bind, twice** |
+| **us** | v7.3 perpetua | **OUT_LOW** | map220v | 11.A.38 | **hard reset at bind, twice** — resolved 2026-11-01: the bind writes were harmless under trace, the diag cmdline was the killer context (outcome note at the top) |
 
 Upstream history of exactly this line (for context and for the eventual
 report): 2024-08 `a9aaf1ff88a8` switched to ASIS because OUT_LOW broke
@@ -280,7 +282,7 @@ last paragraph.)
 
 ## 3. Fix candidates, ranked (apply after the matrix identifies the branch)
 
-1. **Local driver patch: request the WLAN enable GPIO `GPIOD_ASIS` again**
+1. **Local driver patch: request the WLAN enable GPIO `GPIOD_ASIS` again** [never flown: F0/F1 showed the OUT_LOW write is harmless here — v23 obsolete before flying, 2026-11-01; kept as the upstream-history note only]
    (revert of `dbd674ccf30f`, or better: only for `qcom,wcn7860-pmu`
    pdata via a `power_off_on_probe` flag) — if H1 confirms.
    Mechanics: drop a patch into `kernel/patches/` of this repo (both
@@ -296,7 +298,7 @@ last paragraph.)
    Golaszewski / linux-pm with our bisect is exactly the missing regression
    evidence. Likely upstream shape: per-compatible opt-out or a DT property
    (e.g. honouring an existing `wlan-enable` state), not a blanket revert.
-2. **DT supply-name correction to the downstream map** (vddaon→L2G,
+2. **DT supply-name correction to the downstream map** [adopted: 0003 = their 0167 DT map, 0004 = the vendor supply roles in our driver — the pair is required, 0167 alone leaves S1J never enabled; permanent since 2026-11-01, with 0005's S1J floor] (vddaon→L2G,
    vddcx→S1J + driver pdata gaining "vddcx"; drop "vddio") — **not a reset
    fix** (rail *set* is identical today, §1.3), but required for honest
    bindings and for per-rail voltages/loads later; adopt the Fedora pair
@@ -583,7 +585,7 @@ was, once validated — but only after gate 3 passes.
    up and the gadget path survives when WLAN drops. Reboot once (RAM boot)
    and re-verify blacklist/modprobe sequencing still gives a stable boot.
 
-Suspend/wake (mzakamin 0040: wake-gpios should be ACTIVE_LOW) is **phase
+Suspend/wake (mzakamin 0040: wake-gpios should be ACTIVE_LOW — superseded on their side by 0301, which drops wake-gpios entirely; media-misc-plan.md §4 carries the C6 version) is **phase
 C+1**, not tomorrow — but when s2idle testing starts, apply their 0040 DT
 fix first.
 

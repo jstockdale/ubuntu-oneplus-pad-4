@@ -13,6 +13,8 @@ Add the Pad 4 card with a channel map of FL FR FL FR FL FR FL FR on
 PRIMARY_TDM_RX_0, set in prepare as on the Ayaneo Pocket S2. Otherwise it
 is the same as the Kaanapali card.
 
+[Carried by the Ubuntu port from the Fedora iceland queue's TDM speaker chain (0011–0024 here), with the author's sign-off. Exit: drop when Perpetua takes that chain, which is the Fedora port's to submit.]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 ---
  sound/soc/qcom/sc8280xp.c | 32 ++++++++++++++++++++++++++++++++

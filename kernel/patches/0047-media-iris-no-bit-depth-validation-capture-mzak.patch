@@ -27,6 +27,9 @@ Signed-off-by: Vishnu Reddy <busanna.reddy@oss.qualcomm.com>
 Reviewed-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>
 Signed-off-by: Bryan O'Donoghue <bod@kernel.org>
 [ upsync: commit 40e9c3b3e35c in media-committers next (for 7.4, Cc stable) ]
+
+[Carried by the Ubuntu port from the Fedora iceland queue (0158 there), sign-offs kept. Exit: drop when Perpetua carries upstream 40e9c3b3e35c (media-committers next, 7.4).]
+
 Signed-off-by: mzak <mzak.amin@gmail.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
