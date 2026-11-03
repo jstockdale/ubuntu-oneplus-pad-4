@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # Last-word hook (zzz- sorts after every other hook): guarantee the
 # pieces the boot cannot live without are in the staging tree, whatever
 # earlier stages did, and leave a staging snapshot in the build

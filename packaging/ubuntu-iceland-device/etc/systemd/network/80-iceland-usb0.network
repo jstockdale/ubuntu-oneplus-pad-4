@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # The USB gadget network: the tablet is 192.168.7.2, the host side is
 # conventionally 192.168.7.1 (assign it there; no DHCP on this link).
 # First-boot access path: ssh ubuntu@192.168.7.2 over the cable.

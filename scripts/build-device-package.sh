@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Build the ubuntu-iceland-device .deb from packaging/ubuntu-iceland-device.
 #
 # Same contract as the gts9u port's package builders: deterministic
@@ -27,7 +28,7 @@ find "$build" -type f -exec chmod 0644 {} +
 # initramfs-tools SILENTLY skips a non-executable hook, which is how the
 # first initramfs shipped without rescue/mainline-init.
 find "$build"/usr/libexec -type f -exec chmod 0755 {} +
-chmod 0755 "$build"/DEBIAN/postinst \
+chmod 0755 "$build"/DEBIAN/postinst "$build"/DEBIAN/postrm \
 	"$build"/etc/initramfs-tools/hooks/* "$build"/etc/initramfs-tools/scripts/init-top/* 2>/dev/null || true
 
 # dpkg-deb refuses stray editor droppings and so should we.

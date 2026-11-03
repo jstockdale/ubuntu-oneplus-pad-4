@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 [Unit]
 Description=USB gadget access (ACM getty + ECM network)
 DefaultDependencies=no

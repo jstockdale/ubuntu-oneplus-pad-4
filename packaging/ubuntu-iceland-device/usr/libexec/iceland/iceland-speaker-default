@@ -1,5 +1,7 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: MIT
+# Origin: tb323fu-linux tb323fu-speaker-gain (Copyright (c) 2026 Joonhoe Kim, MIT - LICENSES/MIT.txt), via the
+# Fedora iceland port's adaptation (mzakamin-hub/iceland-mainline, no license declared; attribution kept, see README).
 # iceland-speaker-default (iceland-device 0.28-3; 0.28-7): the protected "Speakers" sink becomes the CONFIGURED default output
 # of this account, unless the account chose another output itself (headphones, Bluetooth, HDMI, ...): WirePlumber 0.5 lists
 # filter-chain sinks as filters and does not pick them by priority alone (the idea of tb323fu-linux's

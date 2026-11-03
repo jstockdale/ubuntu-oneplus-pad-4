@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.19
+Version: 0.2.20
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -23,6 +23,12 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     bring-up cap, internal mics at stock levels) and the WirePlumber
     soft-mixer rule, in front of the AudioReach topology the firmware
     overlay ships.
+  * audio service discovery: the userspace protection-domain mapper and
+    name service (protection-domain-mapper, qrtr-tools) are masked, because
+    the kernel's own qcom_pd_mapper serves this SoC and the userspace one,
+    which only knows the ADSP root domain here, answered first on about
+    one boot in fourteen and left the audio domain unpublished (no sound
+    card until the next reboot).
  .
  This package grows the way its gts9u counterpart did: one integration at a
  time, each added only when the matching regression has been observed on this

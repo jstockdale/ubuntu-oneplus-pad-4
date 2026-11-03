@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # Grow the root filesystem to the whole userdata partition, once.
 #
 # The shipped image is deliberately small (download size) and was created with

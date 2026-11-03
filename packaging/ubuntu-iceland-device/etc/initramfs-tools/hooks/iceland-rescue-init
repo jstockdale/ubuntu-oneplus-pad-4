@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # The iceland device tree's built-in /chosen bootargs say
 # rdinit=/rescue/mainline-init (Perpetua's own boot userspace layout).  Our
 # kernel is unpatched, so our initramfs must answer to that path.  A symlink

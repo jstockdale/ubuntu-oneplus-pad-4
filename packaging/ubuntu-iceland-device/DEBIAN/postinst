@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 set -e
 
 case "$1" in
@@ -31,6 +32,13 @@ case "$1" in
 			# account's configured default output (WirePlumber 0.5 does not
 			# pick filter sinks by priority alone). Global user-unit enable.
 			systemctl --global enable iceland-speaker-default.service >/dev/null 2>&1 || true
+			# 0.2.20: the kernel's qcom_pd_mapper answers the ADSP's domain
+			# query for this SoC; Ubuntu's userspace pd-mapper (only adspr.jsn
+			# here) raced it and, when first, left the audio PD unpublished
+			# (PDR "service lookup for avs/audio failed: -6", never retried).
+			# qrtr-ns is the kernel name service's dormant twin. Masked, not
+			# removed, so the packages can stay installed.
+			systemctl mask pd-mapper.service qrtr-ns.service >/dev/null 2>&1 || true
 		fi
 		# A changed conf.d must reach the installed initramfs; harmless in
 		# the image build, where make-initramfs.sh regenerates anyway.

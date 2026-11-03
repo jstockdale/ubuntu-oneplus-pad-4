@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # Trim the generated initramfs to fit iceland's 8 MiB init_boot partition.
 # Runs last (zz-). Measured on the first oversized build (13.2 MB packed,
 # 37 MB raw): the weight was never kernel modules but stock Ubuntu payload

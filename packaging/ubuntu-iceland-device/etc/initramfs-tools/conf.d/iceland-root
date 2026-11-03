@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # Root filesystem discovery for iceland.
 #
 # The kernel cmdline comes from the STOCK vendor_boot — this port never

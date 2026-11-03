@@ -1,0 +1,16 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+set -e
+
+case "$1" in
+	purge)
+		# Undo the 0.2.20 masks so Ubuntu's own units come back with the
+		# package gone; a plain remove keeps them masked on purpose (the
+		# race they cause does not care whether this package is installed).
+		if command -v systemctl >/dev/null 2>&1; then
+			systemctl unmask pd-mapper.service qrtr-ns.service >/dev/null 2>&1 || true
+		fi
+		;;
+esac
+
+exit 0

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # Early USB debug channel for bring-up: an ACM serial gadget streaming the
 # kernel log, so the host can read what this machine thinks even when the
 # panel shows nothing. Every step tolerates failure — a debug aid must

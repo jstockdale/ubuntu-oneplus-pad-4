@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # Bring up the USB gadget that makes a headless iceland reachable: one
 # composite device with an ACM serial port (a login getty binds to
 # ttyGS0) and an ECM network interface (usb0, 192.168.7.2/24, the host
