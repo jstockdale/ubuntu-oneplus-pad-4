@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Mon, 2 Nov 2026 18:23:27 -0800
+Subject: [PATCH] arm64: dts: qcom: kaanapali-oneplus-iceland: touchscreen
+ physical size in the controller frame
+
+Ours (2026-11-02, A.3 stylus), after the Fedora iceland port's board patch
+(mzak, "give the touchscreen its physical size"): the common touchscreen-x-mm
+/ touchscreen-y-mm properties let the nt36536 driver set a resolution on the
+touch and pen axes, which libinput requires before it accepts the pen as a
+tablet and the compositors use for the touch-to-output mapping. Exit: submit
+to Perpetua together with the two driver patches.
+
+The panel's active area is 274 x 193 mm (the panel driver reports it on the
+DSI connector; 3392 x 2400 px). The touch controller's own frame is portrait,
+the one touchscreen-size-x = 24000 / touchscreen-size-y = 33920 describe: the
+stock device tree gives that range to the finger and the pen alike
+(touchpanel,panel-coords = touchpanel,pen-panel-coords = <0x5dc0 0x8480>)
+against touchpanel,display-coords = <0x960 0xd40> (2400 x 3392, ten units per
+pixel). The lengths belong to the controller's axes, like the sizes: its X
+axis (24000 units) runs along the panel's 193 mm short side, its Y axis
+(33920 units) along the 274 mm long side, and touchscreen-swapped-x-y (after
+touchscreen-inverted-x) turns that into the panel's landscape frame. The
+Fedora board file carries the opposite pairing (x-mm = 274, y-mm = 193)
+because its driver hard-codes the swap and registers the axes in the
+landscape frame already; ours describes the controller, as the size
+properties do.
+
+The driver pairs each registered axis with the length of the controller axis
+it carries (the lengths are swapped together with the ranges), so both
+devices end up with 33920 / 274 = 124 units/mm on the landscape X axis and
+24000 / 193 = 124 units/mm on the Y axis (123.8 and 124.4 before rounding),
+the scale of ten units per pixel on a 3392 x 2400 px panel of 274 x 193 mm.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index 6e907e4c8f2b..2f55b7f8c494 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -1315,6 +1315,15 @@ touchscreen@0 {
+ 		touchscreen-size-y = <33920>;
+ 		touchscreen-inverted-x;
+ 		touchscreen-swapped-x-y;
++
++		/*
++		 * Physical size in the controller's own (portrait) frame: its X
++		 * axis, 24000 units, runs along the panel's 193 mm short side and
++		 * its Y axis, 33920 units, along the 274 mm long side; the swap
++		 * above turns the frame into the panel's landscape one.
++		 */
++		touchscreen-x-mm = <193>;
++		touchscreen-y-mm = <274>;
+ 	};
+ };
+ 
+-- 
+2.53.0
+

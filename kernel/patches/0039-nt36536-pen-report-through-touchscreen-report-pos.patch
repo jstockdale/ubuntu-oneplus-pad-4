@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Mon, 2 Nov 2026 18:23:28 -0800
+Subject: [PATCH] Input: nt36536: report the pen through touchscreen_report_pos
+ like the finger
+
+Ours (2026-11-02, A.3 stylus). Exit: submit to Perpetua together with the pen
+capabilities patch.
+
+The finger goes through touchscreen_report_pos() with the properties parsed
+from the device tree (touchscreen-size-x/-y, -inverted-x, -swapped-x-y), so
+it comes out in the panel's landscape frame. The pen's ABS_X/ABS_Y were
+reported raw, in the controller's portrait frame, on axes sized from the
+header defaults TOUCH_DEFAULT_MAX_WIDTH/HEIGHT (33920 x 24000, the landscape
+pair): a raw Y of up to 33919 on an axis declared 0..23999, nothing inverted
+or swapped, so the pen agreed with the finger nowhere but at the origin.
+
+The pen shares the finger's coordinate frame: the stock device tree gives
+both the same range (touchpanel,panel-coords = touchpanel,pen-panel-coords =
+<0x5dc0 0x8480>, 24000 x 33920), and the packet's 16-bit X/Y need no scaling.
+Size the pen's ABS_X/ABS_Y from the finger's parsed ABS_MT_POSITION_X/Y
+(minimum, maximum and fuzz after the swap), which touchscreen_parse_properties()
+already holds in the landscape frame, and report the pen's position with
+touchscreen_report_pos(..., false) through the same properties; a raw
+coordinate beyond the controller's range is clamped first so the inversion
+cannot wrap. The resolution the previous patch sets on the pen's axes is
+computed from these ranges and comes after them, so it follows along. The
+release paths keep parking the pen at 0/0, which is inside the range on both
+axes.
+
+INPUT_PROP_DIRECT stays set on the pen device: systemd's input_id tags the
+device ID_INPUT_TABLET from BTN_TOOL_PEN/BTN_STYLUS whatever the property, and
+libinput (1.31) accepts a tablet once it has ABS_X/ABS_Y, BTN_TOOL_PEN or
+BTN_STYLUS and a resolution on both axes (tablet_reject_device), then uses
+INPUT_PROP_DIRECT to treat it as a display-integrated tablet: the calibration
+matrix is offered (tablet_init_calibration) and the area configuration of
+external tablets is not (tablet_init_area).
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ drivers/input/touchscreen/nt36536/nt36xxx.c | 23 +++++++++++++++++----
+ 1 file changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index 5df045d6d6db..85601b857c86 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -1017,8 +1017,11 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ //				printk("x=%d,y=%d,p=%d,tx=%d,ty=%d,d=%d,b1=%d,b2=%d,bat=%d\n", pen_x, pen_y, pen_pressure,
+ //						pen_tilt_x, pen_tilt_y, pen_distance, pen_btn1, pen_btn2, pen_battery);
+ 
+-				input_report_abs(ts->pen_input_dev, ABS_X, pen_x);
+-				input_report_abs(ts->pen_input_dev, ABS_Y, pen_y);
++				/* the finger's frame; clamp so the inversion cannot wrap */
++				pen_x = min_t(uint32_t, pen_x, ts->prop.max_x);
++				pen_y = min_t(uint32_t, pen_y, ts->prop.max_y);
++				touchscreen_report_pos(ts->pen_input_dev, &ts->prop,
++						       pen_x, pen_y, false);
+ 				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, pen_pressure);
+ 				input_report_key(ts->pen_input_dev, BTN_TOUCH, !!pen_pressure);
+ 				input_report_abs(ts->pen_input_dev, ABS_TILT_X, pen_tilt_x);
+@@ -1415,8 +1418,20 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 		//ts->pen_input_dev->keybit[BIT_WORD(BTN_TOOL_RUBBER)] |= BIT_MASK(BTN_TOOL_RUBBER);
+ 		ts->pen_input_dev->propbit[0] = BIT(INPUT_PROP_DIRECT);
+ 
+-		input_set_abs_params(ts->pen_input_dev, ABS_X, 0, ts->abs_x_max - 1, 0, 0);
+-		input_set_abs_params(ts->pen_input_dev, ABS_Y, 0, ts->abs_y_max - 1, 0, 0);
++		/*
++		 * The pen reports in the finger's controller frame (the stock
++		 * device tree gives both 24000 x 33920 units): its axes take the
++		 * finger's parsed ranges and its position goes through the same
++		 * touchscreen_report_pos() transform.
++		 */
++		input_set_abs_params(ts->pen_input_dev, ABS_X,
++				     input_abs_get_min(ts->input_dev, ABS_MT_POSITION_X),
++				     input_abs_get_max(ts->input_dev, ABS_MT_POSITION_X),
++				     input_abs_get_fuzz(ts->input_dev, ABS_MT_POSITION_X), 0);
++		input_set_abs_params(ts->pen_input_dev, ABS_Y,
++				     input_abs_get_min(ts->input_dev, ABS_MT_POSITION_Y),
++				     input_abs_get_max(ts->input_dev, ABS_MT_POSITION_Y),
++				     input_abs_get_fuzz(ts->input_dev, ABS_MT_POSITION_Y), 0);
+ 		input_set_abs_params(ts->pen_input_dev, ABS_PRESSURE, 0, PEN_PRESSURE_MAX, 0, 0);
+ 		input_set_abs_params(ts->pen_input_dev, ABS_DISTANCE, 0, PEN_DISTANCE_MAX, 0, 0);
+ 		input_set_abs_params(ts->pen_input_dev, ABS_TILT_X, PEN_TILT_MIN, PEN_TILT_MAX, 0, 0);
+-- 
+2.53.0
+

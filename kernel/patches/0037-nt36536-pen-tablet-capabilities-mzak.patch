@@ -1,0 +1,160 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Mon, 28 Sep 2026 22:28:26 +0300
+Subject: [PATCH] Input: nt36536: give the pen its tablet capabilities
+
+libinput ignores the driver's pen device (cage and GNOME Shell on the OnePlus Pad 4 log "NVTCapacitivePen:
+libinput bug: missing tablet capabilities: btn-stylus resolution. Ignoring this device"): a tablet device needs
+a stylus button and a resolution on its axes. Declare BTN_STYLUS/BTN_STYLUS2 and report the two pen buttons the
+firmware already decodes (pen_btn1/pen_btn2 were parsed and dropped), and set the axes' resolution from the
+common touchscreen properties "touchscreen-x-mm"/"touchscreen-y-mm" (units per mm from the controller's
+abs_x_max/abs_y_max), for the pen's ABS_X/ABS_Y and the touch's ABS_MT_POSITION_X/Y alike.
+
+[adapted for the Ubuntu iceland port: our probe sizes the touch axes with
+input_set_capability() + touchscreen_parse_properties() (touchscreen-size-x/-y,
+-inverted-x and -swapped-x-y from the device tree, Perpetua cf1638aad05e)
+instead of input_set_abs_params(abs_x_max/abs_y_max), so the original hunk 5
+(resolution right after the touch abs params) is replaced by a call after the
+parse and its size check. nvt_set_abs_res() no longer divides the controller's
+abs_x_max/abs_y_max by the lengths: each axis takes its own registered range
+(input_abs_get_max() + 1 units) over the length of the controller axis it
+carries, which is the other length when touchscreen-swapped-x-y is set, the
+same swap touchscreen_parse_properties() applied to the ranges. Both properties
+are required together (the binding declares them dependent on each other, and
+libinput's evdev_device_get_size() needs a resolution on both axes; a lone one
+only earns the "kernel has only x or y resolution" complaint). The helper sits
+before the probe's comment block rather than between the comment and the
+function, and the linux/property.h include is re-diffed around our
+linux/input/touchscreen.h include. With touchscreen-x-mm = 193 and
+touchscreen-y-mm = 274 (the controller's portrait frame, the board patch that
+follows) both touch axes get 124 units/mm (33920/274, 24000/193); the pen's
+axes receive the same frame and ranges in the next driver patch. The pen
+battery byte stays parsed and unreported: evdev has no battery axis, the clean
+way is a power_supply like hid-input's stylus battery, a later rung together
+with the pen charger.]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ drivers/input/touchscreen/nt36536/nt36xxx.c | 41 +++++++++++++++++++++
+ drivers/input/touchscreen/nt36536/nt36xxx.h |  1 +
+ 2 files changed, 42 insertions(+)
+
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index 9d4d2d195c44..5df045d6d6db 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -725,6 +725,8 @@ static void release_pen_event(void) {
+ 		input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
+ 		input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
+ 		input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
++		input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
++		input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
+ 		input_sync(ts->pen_input_dev);
+ 	}
+ }
+@@ -1023,6 +1025,8 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ 				input_report_abs(ts->pen_input_dev, ABS_TILT_Y, pen_tilt_y);
+ 				input_report_abs(ts->pen_input_dev, ABS_DISTANCE, pen_distance);
+ 				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, !!pen_distance || !!pen_pressure);
++				input_report_key(ts->pen_input_dev, BTN_STYLUS, pen_btn1);
++				input_report_key(ts->pen_input_dev, BTN_STYLUS2, pen_btn2);
+ 				// TBD: pen battery event report
+ 				// NVT_LOG("pen_battery=%d\n", pen_battery);
+ 			} else if (pen_format_id == 0xF0) {
+@@ -1040,6 +1044,8 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ 			input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
+ 			input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
+ 			input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
++			input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
++			input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
+ 		}
+ 
+ 		input_sync(ts->pen_input_dev);
+@@ -1200,6 +1206,36 @@ static void nvt_resume_work(struct work_struct *work)
+ 	nvt_ts_resume(&ts_core->client->dev);
+ }
+ 
++/*
++ * Resolution of a pair of position axes, in units per mm, from the common
++ * touchscreen-x-mm / touchscreen-y-mm properties.  libinput refuses a tablet
++ * (pen) device without a resolution on both axes, and the compositors use it
++ * to map the touch surface onto the panel.
++ *
++ * The two lengths describe the controller's own axes, the frame of
++ * touchscreen-size-x/-y.  With touchscreen-swapped-x-y the parsed input X axis
++ * carries the controller's Y range (and vice versa), so the lengths swap the
++ * same way; each axis then gets its own registered range over its own length.
++ */
++static void nvt_set_abs_res(struct nvt_ts_data *ts, struct input_dev *input,
++			    unsigned int axis_x, unsigned int axis_y)
++{
++	struct device *dev = &ts->client->dev;
++	u32 x_mm = 0, y_mm = 0;
++
++	if (device_property_read_u32(dev, "touchscreen-x-mm", &x_mm) || !x_mm ||
++	    device_property_read_u32(dev, "touchscreen-y-mm", &y_mm) || !y_mm)
++		return;
++
++	if (ts->prop.swap_x_y)
++		swap(x_mm, y_mm);
++
++	input_abs_set_res(input, axis_x,
++			  DIV_ROUND_CLOSEST((u32)input_abs_get_max(input, axis_x) + 1, x_mm));
++	input_abs_set_res(input, axis_y,
++			  DIV_ROUND_CLOSEST((u32)input_abs_get_max(input, axis_y) + 1, y_mm));
++}
++
+ /*******************************************************
+ Description:
+ 	Novatek touchscreen driver probe function.
+@@ -1348,6 +1384,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 		ret = -EINVAL;
+ 		goto err_input_register_device_failed;
+ 	}
++	nvt_set_abs_res(ts, ts->input_dev, ABS_MT_POSITION_X, ABS_MT_POSITION_Y);
+ 
+ 	sprintf(ts->phys, "input/ts");
+ 	ts->input_dev->name = NVT_TS_NAME;
+@@ -1374,6 +1411,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 		ts->pen_input_dev->evbit[0] = BIT_MASK(EV_SYN) | BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
+ 		ts->pen_input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
+ 		ts->pen_input_dev->keybit[BIT_WORD(BTN_TOOL_PEN)] |= BIT_MASK(BTN_TOOL_PEN);
++		ts->pen_input_dev->keybit[BIT_WORD(BTN_STYLUS)] |= BIT_MASK(BTN_STYLUS) | BIT_MASK(BTN_STYLUS2);
+ 		//ts->pen_input_dev->keybit[BIT_WORD(BTN_TOOL_RUBBER)] |= BIT_MASK(BTN_TOOL_RUBBER);
+ 		ts->pen_input_dev->propbit[0] = BIT(INPUT_PROP_DIRECT);
+ 
+@@ -1383,6 +1421,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 		input_set_abs_params(ts->pen_input_dev, ABS_DISTANCE, 0, PEN_DISTANCE_MAX, 0, 0);
+ 		input_set_abs_params(ts->pen_input_dev, ABS_TILT_X, PEN_TILT_MIN, PEN_TILT_MAX, 0, 0);
+ 		input_set_abs_params(ts->pen_input_dev, ABS_TILT_Y, PEN_TILT_MIN, PEN_TILT_MAX, 0, 0);
++		nvt_set_abs_res(ts, ts->pen_input_dev, ABS_X, ABS_Y);
+ 
+ 		sprintf(ts->pen_phys, "input/pen");
+ 		ts->pen_input_dev->name = NVT_PEN_NAME;
+@@ -1636,6 +1675,8 @@ static int32_t nvt_ts_suspend(struct device *dev)
+ 		input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
+ 		input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
+ 		input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
++		input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
++		input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
+ 		input_sync(ts->pen_input_dev);
+ 	}
+ 
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.h b/drivers/input/touchscreen/nt36536/nt36xxx.h
+index ebac0d57fd06..f9ee94e6b040 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.h
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.h
+@@ -22,6 +22,7 @@
+ #include <linux/input.h>
+ #include <linux/input/touchscreen.h>
+ #include <linux/of.h>
++#include <linux/property.h>
+ #include <linux/spi/spi.h>
+ #include <linux/uaccess.h>
+ #include <linux/version.h>
+-- 
+2.53.0
+

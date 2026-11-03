@@ -44,6 +44,11 @@ Provenance
 | 0028 | this port: q6apm READ/WRITE_DONE payload-size fix (microphones, WCD playback) | John Stockdale | READ_DONE half **merged upstream independently** on 2026-11-02 (Perpetua 9ba37ef1db70, same approach; also Reixo0/linux fcabe5fd25c7) — drop that hunk at the next pin bump; the WRITE_DONE half is offered as a consistency patch, docs/upstreaming.md |
 | 0029, 0030, 0032–0036 | Qualcomm's kaanapali iris (VPU) series, carried by infiniti-mainline and the Fedora iceland queue (`/srv/ubuntu-iceland/ref/iceland-linux/patches/0001-infiniti` 0033, 0035, 0032, 0034, 0037, 0038, 0036) | Vikash Garodia, Jingyi Wang, Wangao Wang, Vishnu Reddy (oss.qualcomm.com), sign-offs kept | drop when Perpetua carries the iris support (none at b7d639cfb282) |
 | 0031 | this port: board enable for the iris codec (firmware-name vpu40_2v.mbn, status okay) — BSD-3-Clause (board dts) | John Stockdale | to be offered upstream with the series |
+| 0037 | Fedora iceland port's "give the pen its tablet capabilities" (0036), adapted to our DT-property probe: BTN_STYLUS/2, axis resolution from touchscreen-x-mm/y-mm | mzak (original); adaptation by this port | offer with 0039 to Perpetua |
+| 0038 | this port: touchscreen-x-mm/y-mm in the controller frame (193/274) — BSD-3-Clause (board dts) | John Stockdale | to be offered upstream |
+| 0039 | this port: the pen reports through touchscreen_report_pos like the finger (coordinates were raw) | John Stockdale | to be offered upstream |
+| 0043–0045 | infiniti-mainline iris fixes 0069–0071 (MVP NoC low-power release on vpu4x, hierarchical-B only, no picture state on decoder input) | Victor Fuentes | drop when Perpetua carries them |
+| 0046–0055 | Fedora iceland port's iris fixes 0157–0160, 0246–0250, 0292 (iova restrict region, capture bit-depth validation, hfi_sys_ops guard, uc_region boot failure, AHB bridge reset, power-off ordering, core lock, open limit, instance refcount, SMPTE 170M signalling) | Vishnu Reddy, Dmitry Baryshkov, mzak | drop as Perpetua picks them up |
 
 Numbering note: the number 0029 was first used on 2026-11-02 for infiniti's
 ADSP reserved-memory change (0x4c00000 -> 0x5000000) and withdrawn the same
