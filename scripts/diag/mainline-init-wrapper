@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # DIAGNOSTIC rescue/mainline-init for RAM-boot flights: feed the watchdog
 # BEFORE anything else, then hand over to the real initramfs init.
 #

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # DIAGNOSTIC variant of scripts/init-top/iceland-usb-debug, for RAM-boot
 # flights only — never shipped in the device package.  Identical ACM gadget
 # and kmsg stream, plus a reboot beacon: when no UDC appears within the poll

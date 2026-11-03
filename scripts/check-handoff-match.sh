@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Check whether the Perpetua kernel's FDT handoff will accept THIS unit's
 # bootloader device tree — before anything touches the tablet.
 #

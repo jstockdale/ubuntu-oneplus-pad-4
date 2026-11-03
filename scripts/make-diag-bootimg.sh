@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Build the DIAGNOSTIC RAM-boot image for iceland: one `fastboot boot` that
 # answers as much as possible while writing nothing to the device.
 #

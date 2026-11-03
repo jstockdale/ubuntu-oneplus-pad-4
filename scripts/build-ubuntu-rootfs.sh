@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Portions derived from ubuntu-galaxy-tab-s9-ultra (scripts/build-ubuntu-rootfs.sh), Copyright (c) 2026 Ubuntu gts9uwifi port
+# contributors, MIT License: see LICENSES/MIT.txt.
 # Build a reproducible Ubuntu 26.04 LTS arm64 root filesystem for the OnePlus
 # Pad 4 (OPD2514, iceland).
 #

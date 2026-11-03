@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Report which host tools the Ubuntu image pipeline needs and which are
 # missing.  Read-only: it installs nothing and touches no device.
 set -uo pipefail

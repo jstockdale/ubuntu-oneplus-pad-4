@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Prove capture-device-data.sh end-to-end without a tablet: a mock ssh
 # serves fixture partitions, and the test asserts byte-exact round-trips,
 # clean skipping of absent partitions, and the archive's integrity files.

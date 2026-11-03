@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Produce a complete, installable release: kernel, rootfs, overlay, userdata
 # image, boot bundle, the fastboot installer and a SHA-256 manifest, in one
 # ZIP.

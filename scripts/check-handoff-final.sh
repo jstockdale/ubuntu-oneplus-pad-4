@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # The last handoff question: what root `model` and `compatible` does ABL's
 # COMPOSED tree carry on this unit — base DTB (vendor_boot, ro.boot.dtb_idx)
 # merged with the board overlay (dtbo, ro.boot.dtbo_idx)?

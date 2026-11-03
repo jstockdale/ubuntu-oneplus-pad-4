@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Capture this unit's factory data — the partitions no OTA carries and no
 # reflash can recreate — from the tablet over SSH, into the stock archive.
 #

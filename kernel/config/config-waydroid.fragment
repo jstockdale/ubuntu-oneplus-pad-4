@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # Kernel options Waydroid needs.  Phase-1 scope: Android apps in an LXC
 # container sharing this kernel, as on the gts9u port.
 #

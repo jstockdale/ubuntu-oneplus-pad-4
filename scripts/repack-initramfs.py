@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
 """Repack an initramfs as ONE LZ4-legacy frame, vendor-chain-proof.
 
 Two transforms, both required by the GKI boot chain on iceland:

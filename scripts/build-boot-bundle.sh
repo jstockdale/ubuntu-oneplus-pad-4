@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Package the Perpetua kernel and the Ubuntu initramfs as the two Android GKI
 # boot images this device flashes, using Perpetua's own tool.
 #

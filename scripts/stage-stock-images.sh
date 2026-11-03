@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Stage the stock boot.img / init_boot.img templates and the firmware source
 # images from the owner's OnePlus OTA package, and record their provenance.
 #

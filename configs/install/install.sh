@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Install Ubuntu on the OnePlus Pad 4 (iceland) over fastboot.
 #
 # Shipped inside the release ZIP next to the images it flashes.  It flashes

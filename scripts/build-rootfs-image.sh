@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Portions derived from ubuntu-galaxy-tab-s9-ultra (scripts/build-ufs-image.sh), Copyright (c) 2026 Ubuntu gts9uwifi port
+# contributors, MIT License: see LICENSES/MIT.txt.
 # Assemble the ext4 root filesystem image that the installer writes into the
 # tablet's userdata partition.
 #

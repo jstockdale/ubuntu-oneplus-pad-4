@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Portions derived from ubuntu-galaxy-tab-s9-ultra (scripts/build-mainline-kernel.sh), Copyright (c) 2026 Ubuntu gts9uwifi port
+# contributors, MIT License: see LICENSES/MIT.txt.
 # Build the Perpetua kernel for iceland (OnePlus Pad 4) with this port's
 # Ubuntu fragments merged in, and stage the artifacts in the shared layout.
 #

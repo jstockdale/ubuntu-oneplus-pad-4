@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Build qcom/kaanapali/OnePlus-Pad4-tplg.bin (AudioReach topology, C4/A0).
 #
 # Recipe = the Fedora iceland port's: Linaro base + the Pad 4 overlay

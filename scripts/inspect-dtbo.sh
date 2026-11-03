@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Enumerate the overlays inside a stock dtbo partition image and print what
 # each one says about board identity — model strings and the id/rev fields
 # the bootloader selects by. Cross this with the running tablet's

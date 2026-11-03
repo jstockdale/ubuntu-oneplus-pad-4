@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Obtain the pinned Perpetua kernel checkout this port builds against.
 #
 # Perpetua (denialwm/linux-perpetua) is the device source for iceland: the

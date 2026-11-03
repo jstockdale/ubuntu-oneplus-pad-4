@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Prove the initramfs is self-contained: every ELF inside it must find its
 # interpreter and every DT_NEEDED library inside the same archive. This is
 # the gate that makes trimming safe — a kept binary linked against a

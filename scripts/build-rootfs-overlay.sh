@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Assemble the overlay that the image build merges over the rootfs: the
 # verified proprietary firmware staging, and nothing else yet.
 #

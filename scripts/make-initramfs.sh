@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Generate the Ubuntu initramfs inside the built rootfs and check that it is
 # the stream the GKI boot chain accepts and that it fits init_boot.
 #

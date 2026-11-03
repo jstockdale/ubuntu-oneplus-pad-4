@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # Build the RAM-boot test image: one from-scratch Android v4 boot image
 # carrying BOTH the Perpetua kernel and the Ubuntu initramfs, for
 # `fastboot boot` only.

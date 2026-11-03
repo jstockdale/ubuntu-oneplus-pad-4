@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: BSD-3-Clause
+# Portions derived from ubuntu-galaxy-tab-s9-ultra (scripts/stage-firmware.py), Copyright (c) 2026 Ubuntu
+# gts9uwifi port contributors, MIT License: see LICENSES/MIT.txt.
 """Stage the proprietary firmware for iceland and record its provenance.
 
 A manifest under configs/firmware/ declares every staged file: where it lands

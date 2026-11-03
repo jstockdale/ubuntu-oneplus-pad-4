@@ -1,0 +1,34 @@
+MIT License
+
+This file carries the MIT permission notice for the third-party work that
+parts of this repository derive from. Each derived file names its origin in
+its header; the copyright holders are:
+
+  Copyright (c) 2026 Ubuntu gts9uwifi port contributors
+      (github.com/agcarbajo/ubuntu-galaxy-tab-s9-ultra: the stage scripts
+      this port's scripts/build-mainline-kernel.sh, build-ubuntu-rootfs.sh,
+      build-rootfs-image.sh and stage-firmware.py were derived from)
+
+  Copyright (c) 2026 Joonhoe Kim
+      (github.com/joonhoekim/tb323fu-linux: the PipeWire speaker-protection
+      chain, the raw-sink demotion rule and the default-sink helper that
+      packaging/ubuntu-iceland-device's 62-iceland-speakers.conf,
+      62-iceland-speaker-raw.conf and iceland-speaker-default derive from)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
