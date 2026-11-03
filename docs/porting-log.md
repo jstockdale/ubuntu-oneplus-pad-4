@@ -1879,3 +1879,16 @@ the top), hardware-status.md and runbook.md. Load-bearing findings:
   vs Fedora's −64 dBFS quiet room — parity, item closed.
 - mem_sleep default is "deep" on this kernel: an accidental suspend today
   would be PSCI deep, hence the masked sleep targets in 0.2.21.
+
+## 2026-11-02 — VP0 build attempt 1 failed on 0031 (my error); regenerated
+
+The first 0031 was generated with `git format-patch -1` on a scratch
+worktree where 0001–0030 were only STAGED (git apply --index), so the
+commit — and the patch file — contained the whole series plus the four
+new lines; the build script, which applies each file on the pristine pin,
+died on it ("patch failed: kaanapali-oneplus-iceland.dts:39 …"), and my
+own apply-check had never re-applied 0031 as a file. Regenerated from a
+committed baseline: 0031 is now one file, +4 lines; all 36 patch FILES
+apply in order on a fresh worktree (checked the way the build does it).
+Rule: apply-checks test the patch files, never the worktree they were
+made from. Build re-kicked (build-vp0.log) with the 0.2.21 initramfs.
