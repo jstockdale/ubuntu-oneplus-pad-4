@@ -2031,3 +2031,5 @@ compositor. The clean-image path (guards folded into the desktop
 profile) and the 24 h soak follow. Phase order so far today: C4 closed,
 0029 withdrawn, pd-mapper race fixed, repo published, VP0 built, C5
 landed.
+Owner confirmed the in-session tone through the protected Speakers sink
+("good speaker output") — audio in the GNOME session closed as well.
