@@ -1,0 +1,297 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Mon, 2 Nov 2026 23:40:00 -0800
+Subject: [PATCH] Input: nt36536: broker the OPP pen handshake between the
+ controller and userspace
+
+Ours (2026-11-02, A.3c N1/N2/N5). Exit: offer to Perpetua once the handshake
+is proven end to end (there is no upstream precedent for it).
+
+The OnePlus Stylo Pro transmits only after a three-party handshake that the
+stock stack runs over Bluetooth: after the pen-scan enable the firmware
+emits an "uplink" frame (input id 30 in the first contact slot, function
+page 6, then type, length and payload), the stock daemon writes that block
+to the pen, and the pen's answers come back into the controller as
+"downlink" commands: extended host command 0x7F 0x40 with the value in bits
+7..5 and the opcode in bits 4..0 (0 connection state, 1 config id, 2 timing
+acknowledged, 3 hop-frequency acknowledged, 4 geometry registers, 7
+pressure state, 8 pen type). Stock refuses downlink commands until a fresh
+uplink frame has arrived after the last enable. (Protocol facts read from
+OnePlus's GPL-2.0 vendor driver for this SoC; nothing copied.)
+
+Keep the controller's uplink frames out of the touch parser (their payload
+would otherwise parse as contacts), expose the last one on the SPI device
+as pen_uplink ("<seq> <type> <len> <hex>", with sysfs_notify and a uevent),
+and accept the downlink commands through pen_downlink with the stock gate.
+pen_debug=1 logs every protocol frame and allows raw downlink bytes for the
+bench. The enable is also sent after the boot-time firmware download, which
+had only happened on the panel-follower resume path.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index d6b7afeb58dc..4df3fd54e8fc 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -69,10 +69,41 @@ static uint8_t bTouchIsAwake = 0;
+ 
+ static unsigned int pen_type = 1;
+ 
++/*
++ * OPP pen handshake.  The pen generation this tablet ships with transmits
++ * only once it has been told the panel's scan timing: after the enable the
++ * firmware emits an "uplink" frame (input id 30 in the first slot, function
++ * page 6, then type, length and payload) which the stock stack writes to the
++ * pen over Bluetooth, and the pen's answers come back as "downlink" commands,
++ * extended host command 0x7F 0x40 with the value in bits 7..5 and the opcode
++ * in bits 4..0.  The driver only brokers: the last uplink frame is readable
++ * from sysfs (pen_uplink; a uevent and sysfs_notify announce each new one)
++ * and userspace writes the downlink commands to pen_downlink.  As on stock,
++ * downlink commands are refused until a fresh uplink frame has arrived after
++ * the last enable; "req_cfg" (the enable itself) is always allowed.
++ */
++#define NVT_PEN_PROTO_ID	30
++#define NVT_PEN_PAGE_TIMING	6
++#define NVT_EXT_OPP_CMD		0x40
++#define NVT_PEN_UPLINK_MAX	76
++
++static struct {
++	bool fresh;			/* an uplink frame arrived since the last enable */
++	bool press;			/* last pressure state told to the firmware (ts->lock) */
++	u8 type, len;
++	u8 data[NVT_PEN_UPLINK_MAX];
++	u32 seq;
++} pen_uplink;
++static DEFINE_MUTEX(pen_uplink_lock);
++
++static bool pen_debug;
++module_param(pen_debug, bool, 0644);
++MODULE_PARM_DESC(pen_debug, "log every pen protocol frame; allow raw downlink bytes");
++
+ /* host command: the bytes after EVENT_MAP_HOST_CMD; the firmware clears the first to 0x00 once taken */
+ static int32_t nvt_host_cmd(const uint8_t *cmd, uint8_t len)
+ {
+-	uint8_t buf[8] = { 0 };
++	uint8_t buf[16] = { 0 };
+ 	int32_t i;
+ 
+ 	if (len == 0 || len + 1 > sizeof(buf))
+@@ -97,7 +128,7 @@ static int32_t nvt_host_cmd(const uint8_t *cmd, uint8_t len)
+ }
+ 
+ /* called with ts->lock held and the firmware running */
+-static void nvt_pen_mode(void)
++void nvt_pen_mode(void)
+ {
+ 	static const uint8_t sub[] = { 0x10, 0x12, 0x13, 0x15, 0x18, 0x19 };
+ 	uint8_t cmd[3] = { NVT_HOST_CMD_EXT, NVT_EXT_PEN_OFF, NVT_PEN_UPLINK_RESUME };
+@@ -110,6 +141,11 @@ static void nvt_pen_mode(void)
+ 		if (pen_type == 1)
+ 			len = 3;
+ 	}
++	/* every enable restarts the handshake, as on stock */
++	mutex_lock(&pen_uplink_lock);
++	pen_uplink.fresh = false;
++	mutex_unlock(&pen_uplink_lock);
++	pen_uplink.press = false;
+ 	if (nvt_host_cmd(cmd, len) == 0)
+ 		NVT_LOG("pen scanning %s (0x%02X)\n", cmd[1] == NVT_EXT_PEN_OFF ? "off" : "on", cmd[1]);
+ }
+@@ -135,6 +171,146 @@ static const struct kernel_param_ops nvt_pen_type_ops = {
+ module_param_cb(pen_type, &nvt_pen_type_ops, &pen_type, 0644);
+ MODULE_PARM_DESC(pen_type, "pen protocol to scan for: 1 (default) .. 6, 0 = off");
+ 
++/* an uplink frame from the interrupt thread (ts->lock held); d is point_data */
++static void nvt_pen_uplink_frame(const uint8_t *d)
++{
++	const uint8_t page = d[2], type = d[3], len = d[4];
++
++	if (pen_debug)
++		print_hex_dump(KERN_INFO, "nt36536 pen frame: ", DUMP_PREFIX_OFFSET, 16, 1,
++			       d + 1, 90, false);
++	if (page != NVT_PEN_PAGE_TIMING) {
++		NVT_LOG("pen frame page %u type %u len %u ignored\n", page, type, len);
++		return;
++	}
++	if (len > NVT_PEN_UPLINK_MAX) {
++		NVT_ERR("pen uplink frame type %u claims %u bytes, dropped\n", type, len);
++		return;
++	}
++	mutex_lock(&pen_uplink_lock);
++	pen_uplink.type = type;
++	pen_uplink.len = len;
++	memcpy(pen_uplink.data, d + 5, len);
++	pen_uplink.fresh = true;
++	pen_uplink.seq++;
++	mutex_unlock(&pen_uplink_lock);
++	NVT_LOG("pen uplink frame type %u, %u bytes\n", type, len);
++	sysfs_notify(&ts->client->dev.kobj, NULL, "pen_uplink");
++	kobject_uevent(&ts->client->dev.kobj, KOBJ_CHANGE);
++}
++
++/* "<seq> <type> <len> <payload hex>" */
++static ssize_t pen_uplink_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	ssize_t n;
++	int i;
++
++	mutex_lock(&pen_uplink_lock);
++	n = sysfs_emit(buf, "%u %u %u", pen_uplink.seq, pen_uplink.type, pen_uplink.len);
++	for (i = 0; i < pen_uplink.len; i++)
++		n += sysfs_emit_at(buf, n, "%s%02x", i ? "" : " ", pen_uplink.data[i]);
++	n += sysfs_emit_at(buf, n, "\n");
++	mutex_unlock(&pen_uplink_lock);
++	return n;
++}
++static DEVICE_ATTR_RO(pen_uplink);
++
++/* called with ts->lock held */
++static int32_t nvt_pen_opp_cmd(unsigned int value, uint8_t opcode)
++{
++	const uint8_t cmd[3] = { NVT_HOST_CMD_EXT, NVT_EXT_OPP_CMD,
++				 ((value & 0x07) << 5) | (opcode & 0x1f) };
++
++	return nvt_host_cmd(cmd, 3);
++}
++
++/*
++ * Downlink commands, one per write:
++ *   req_cfg                 re-send the enable (restarts the handshake)
++ *   con_sta <v>             connection state            (opcode 0x00)
++ *   cfg_id <v>              configuration id            (0x01)
++ *   timing_ack <v>          timing table acknowledged   (0x02)
++ *   hopfrq_ack <v>          hop frequency acknowledged  (0x03)
++ *   size_info <6 bytes>     pen geometry registers 1..6 (0x04)
++ *   press <0|1>             pressure state              (0x07, written on change)
++ *   pen_info <v>            pen type                    (0x08)
++ *   raw <byte>              any 0x7F 0x40 <byte>, pen_debug only, ungated
++ * <v> is 0..7 and lands in bits 7..5 of the command byte.
++ */
++static ssize_t pen_downlink_store(struct device *dev, struct device_attribute *attr,
++				  const char *buf, size_t count)
++{
++	char word[16];
++	unsigned int a[6] = { 0 };
++	bool gated = true, fresh;
++	int32_t ret;
++	int n;
++
++	n = sscanf(buf, "%15s %u %u %u %u %u %u", word, &a[0], &a[1], &a[2], &a[3], &a[4], &a[5]);
++	if (n < 1)
++		return -EINVAL;
++	if (!ts || !bTouchIsAwake)
++		return -EAGAIN;
++	if (!strcmp(word, "req_cfg") || (pen_debug && !strcmp(word, "raw")))
++		gated = false;
++	mutex_lock(&pen_uplink_lock);
++	fresh = pen_uplink.fresh;
++	mutex_unlock(&pen_uplink_lock);
++	if (gated && !fresh) {
++		NVT_LOG("pen downlink %s refused: no uplink frame since the last enable\n", word);
++		return -ENODATA;
++	}
++
++	mutex_lock(&ts->lock);
++	if (!strcmp(word, "req_cfg")) {
++		nvt_pen_mode();
++		ret = 0;
++	} else if (!strcmp(word, "con_sta") && n >= 2) {
++		ret = nvt_pen_opp_cmd(a[0], 0x00);
++	} else if (!strcmp(word, "cfg_id") && n >= 2) {
++		ret = nvt_pen_opp_cmd(a[0], 0x01);
++	} else if (!strcmp(word, "timing_ack") && n >= 2) {
++		ret = nvt_pen_opp_cmd(a[0], 0x02);
++	} else if (!strcmp(word, "hopfrq_ack") && n >= 2) {
++		ret = nvt_pen_opp_cmd(a[0], 0x03);
++	} else if (!strcmp(word, "size_info") && n >= 7) {
++		const uint8_t cmd[9] = { NVT_HOST_CMD_EXT, NVT_EXT_OPP_CMD, (1 << 5) | 0x04,
++					 a[0], a[1], a[2], a[3], a[4], a[5] };
++		ret = nvt_host_cmd(cmd, 9);
++	} else if (!strcmp(word, "press") && n >= 2) {
++		bool has = a[0] != 0;
++
++		ret = 0;
++		if (pen_uplink.press != has) {
++			ret = nvt_pen_opp_cmd(has, 0x07);
++			if (!ret)
++				pen_uplink.press = has;
++		}
++	} else if (!strcmp(word, "pen_info") && n >= 2) {
++		ret = nvt_pen_opp_cmd(a[0], 0x08);
++	} else if (!strcmp(word, "raw") && n >= 2 && pen_debug) {
++		const uint8_t cmd[3] = { NVT_HOST_CMD_EXT, NVT_EXT_OPP_CMD, a[0] & 0xff };
++
++		ret = nvt_host_cmd(cmd, 3);
++	} else {
++		ret = -EINVAL;
++	}
++	mutex_unlock(&ts->lock);
++	if (!ret)
++		NVT_LOG("pen downlink %s %u\n", word, a[0]);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(pen_downlink);
++
++static struct attribute *nvt_pen_attrs[] = {
++	&dev_attr_pen_uplink.attr,
++	&dev_attr_pen_downlink.attr,
++	NULL
++};
++static const struct attribute_group nvt_pen_attr_group = {
++	.attrs = nvt_pen_attrs,
++};
++
+ /*******************************************************
+ Description:
+ 	Novatek touchscreen irq enable/disable function.
+@@ -1034,6 +1210,12 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ 		goto XFER_ERROR;
+ 	}
+ 
++	/* a pen protocol frame carries no touch data: its payload would parse as contacts */
++	if (ts->pen_support && (point_data[1] >> 3) == NVT_PEN_PROTO_ID) {
++		nvt_pen_uplink_frame(point_data);
++		goto XFER_ERROR;
++	}
++
+ 	for (i = 0; i < ts->max_touch_num; i++) {
+ 		position = 1 + 6 * i;
+ 		input_id = (uint8_t)(point_data[position + 0] >> 3);
+@@ -1542,7 +1724,10 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 	if (client->irq) {
+ 		NVT_LOG("int_trigger_type=%d\n", ts->int_trigger_type);
+ 		ts->irq_enabled = true;
+-		ret = request_threaded_irq(client->irq, NULL, nvt_ts_work_func,
++		if (ts->pen_support && devm_device_add_group(&client->dev, &nvt_pen_attr_group))
++		NVT_ERR("pen handshake attributes not created\n");
++
++	ret = request_threaded_irq(client->irq, NULL, nvt_ts_work_func,
+ 				ts->int_trigger_type | IRQF_ONESHOT, NVT_SPI_NAME, ts);
+ 		if (ret != 0) {
+ 			NVT_ERR("request irq failed. ret=%d\n", ret);
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.h b/drivers/input/touchscreen/nt36536/nt36xxx.h
+index f9ee94e6b040..500b48c50c0f 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.h
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.h
+@@ -208,6 +208,7 @@ void nvt_read_fw_history(uint32_t fw_history_addr);
+ int32_t nvt_update_firmware(const char *firmware_name);
+ int32_t nvt_check_fw_reset_state(RST_COMPLETE_STATE check_reset_state);
+ int32_t nvt_get_fw_info(void);
++void nvt_pen_mode(void);
+ int32_t nvt_clear_fw_status(void);
+ int32_t nvt_check_fw_status(void);
+ int32_t nvt_set_page(uint32_t addr);
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx_fw_update.c b/drivers/input/touchscreen/nt36536/nt36xxx_fw_update.c
+index 535ddba6c6b7..ac0789d29434 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx_fw_update.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx_fw_update.c
+@@ -896,6 +896,7 @@ void Boot_Update_Firmware(struct work_struct *work)
+ 	mutex_lock(&ts->lock);
+ 	nvt_update_firmware(ts->fw_name);
+ 	nvt_get_fw_info();
++	nvt_pen_mode();
+ 	mutex_unlock(&ts->lock);
+ }
+ #endif /* BOOT_UPDATE_FIRMWARE */
+-- 
+2.47.0
