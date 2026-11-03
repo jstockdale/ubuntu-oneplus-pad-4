@@ -32,6 +32,7 @@ import select
 import signal
 import sys
 import threading
+import time
 
 import dbus
 import dbus.mainloop.glib
@@ -96,14 +97,21 @@ class Controller:
         return seq, typ, payload
 
     def downlink(self, cmd):
-        try:
-            with open(self.down, "w") as f:
-                f.write(cmd + "\n")
-            log.info("downlink: %s", cmd)
-            return True
-        except OSError as e:
-            log.warning("downlink %r refused: %s", cmd, e)
-            return False
+        # The driver answers EAGAIN while the controller is between a firmware
+        # download and its first frame (a panel unblank): wait it out.
+        for attempt in range(8):
+            try:
+                with open(self.down, "w") as f:
+                    f.write(cmd + "\n")
+                log.info("downlink: %s", cmd)
+                return True
+            except BlockingIOError:
+                time.sleep(0.25)
+            except OSError as e:
+                log.warning("downlink %r refused: %s", cmd, e)
+                return False
+        log.warning("downlink %r: controller not awake after 2 s", cmd)
+        return False
 
     def inject(self, cmd):
         """pen_input: "pressure <0..16384>" or "button <1|2> <0|1>" into the pen input device."""
