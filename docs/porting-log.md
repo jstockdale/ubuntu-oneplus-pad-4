@@ -3028,3 +3028,24 @@ lost" in the 50 s window, no regulatory timeout — the two timeouts of the
 previous 20 minutes (3130 s, 3141 s) belong to the associations made with
 the old module between the two swaps. The post-reload loss at 3369 s did
 not reproduce; it stays a watch item.
+
+
+## 2026-11-03 — #46 RAM boot: pen charger back (hBoost client matched), SDP typed, policy at boot, Wi-Fi join in 27 s — flash-ready
+
+`fastboot boot boot-46-23711786.img` on the first try. Gate, the one
+variable first: pmic_glink.hboost.0 exists; MT5806 at 1-002b reads
+chip_id 0x5806, firmware 0x20022, "supply 7000 mV, transmitter looking for
+a pen" at 5.6 s, "pen attached (id 3)" at 6.9 s, state charging at
+7.975 V × 106 mA with the pen on the magnet edge — the #45 regression is
+gone. Standard-charging regression, SDP: on the PC cable the firmware
+types the source SDP with ICL 500 mA (5.10 V, no current at 98 %). The
+charging policy unit wrote Standard at 2.71 s. Wi-Fi with the swapped
+module (enable_11d off, 0064–0067) in the rootfs tree: activation
+successful at 27.2 s, 0 handshake failures, 0 "Failed to set the requested
+Country", 0 regulatory timeouts (the #45 connected boot had taken 293 s,
+with one of each). Audio: the WirePlumber race netted by the guard as on
+every boot of this pin; pen daemon up, pen connected, libwacom lists the
+tablet; no failed units at all (NetworkManager-wait-online passes now that
+the join is fast); 71 error lines; deferred only 111b8000.tn; boot_b
+untouched (3cfb46cf). Flash of #46 next, then the module tree is already
+the right one (zero differences from #45 apart from the swapped ath12k).
