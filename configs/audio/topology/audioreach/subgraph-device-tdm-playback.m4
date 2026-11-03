@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: BSD-3-Clause
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 # Device back-end subgraph on a classic TDM sink: [MFC] -> [LOG] -> [TDM SINK]
 # The MFC converts the stream (e.g. 2 ch / 16 bit) to the endpoint format the ADSP needs on the Pad 4 speaker
 # port (8 slots x 32 bit, 48 kHz): the kernel configures every back-end module with the back end's hw_params, so

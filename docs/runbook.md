@@ -167,7 +167,7 @@ Build the minimal development rootfs — known password, your SSH key:
 
 ```bash
 ICELAND_PROFILE=minimal ICELAND_PW='choose-something' \
-ICELAND_AUTHORIZED_KEYS=/home/jstockdale/.ssh/id_ed25519.pub \
+ICELAND_AUTHORIZED_KEYS=~/.ssh/id_ed25519.pub \
     bash scripts/build-ubuntu-rootfs.sh
 bash scripts/make-initramfs.sh
 bash scripts/make-test-bootimg.sh

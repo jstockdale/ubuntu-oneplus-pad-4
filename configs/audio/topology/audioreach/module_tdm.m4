@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: BSD-3-Clause
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 # Classic TDM hardware endpoint: MODULE_ID_TDM_SINK / MODULE_ID_TDM_SOURCE (0x0700100E / 0x0700100F), the modules
 # an ADSP build without the Audio Interface (QAIF) module offers (the OnePlus Pad 4's stock firmware and its ACDB
 # use them for TDM-LPAIF-RX-PRIMARY). The kernel's audioreach_tdm_set_media_format() sends PARAM_ID_TDM_INTF_CFG +

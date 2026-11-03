@@ -1,4 +1,5 @@
 # Copyright, Linaro Ltd, 2023
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 # OnePlus Pad 4 copy of upstream audioreach-topology module_vol_ctrl.m4 (993a17d) with the control maximum
 # taken from VOL_CTRL_MAX, so the stream gain feeding the unprotected TFA9865 speakers is capped.
 # SPDX-License-Identifier: BSD-3-Clause

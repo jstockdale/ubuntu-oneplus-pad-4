@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: BSD-3-Clause
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 # Audio Interface (QAIF) hardware endpoint: MODULE_ID_AUDIO_IF_SINK / SOURCE (TDM, PCM or I2S mode) as the kernel's
 # audioreach_audio_if_set_media_format() configures it (PARAM_ID_AUDIO_IF_INTF_CFG + HW_EP_MF + frame duration).
 # The slot mask / slots / slot width here are the defaults; the machine driver overrides them from the DT's

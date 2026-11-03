@@ -118,7 +118,7 @@ software-side get). The flight matrix separates them.
 ### 1.2 What the sibling ports do about iceland WLAN
 
 **mzakamin / Fedora port — WLAN works on a Pad 4.** Clone at
-`/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/29772f33-9e3d-45de-9bdd-4279cde4b0f0/scratchpad/mzakamin-review/iceland-linux/`:
+`<scratch>/mzakamin-review/iceland-linux/`:
 
 - Base = **v7.3-rc7** (`kernel.pin`: UPSTREAM_TAG=v7.3-rc7) + the
   infiniti-mainline (OnePlus 15, same SoC) series + iceland series.
@@ -513,7 +513,7 @@ whatever the matrix selected — not a reduced-DT diagnostic survival):
 ## 5. Firmware staging (hash-verified, from the Fedora clone)
 
 Source tree (already on disk):
-`/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/29772f33-9e3d-45de-9bdd-4279cde4b0f0/scratchpad/mzakamin-review/iceland-firmware/root/usr/lib/firmware/updates/ath12k/WCN7860/hw2.0/`
+`<scratch>/mzakamin-review/iceland-firmware/root/usr/lib/firmware/updates/ath12k/WCN7860/hw2.0/`
 Manifest: `../../iceland-firmware/MANIFEST.tsv` (extraction provenance:
 stock 11.A.38 `modem_a:/image/peach/*` and `odm:/etc/wifi/peach/*` — same
 OTA as our unit, §1.3).
@@ -531,7 +531,7 @@ the files on disk by the manifest's own claim; re-verify at staging time):
 | regdb.bin | 365026525f6a9a1ebf0668b8c61fb1300bfdb2450148e994b9a4ca66257e7e43 | 24278 |
 
 ```sh
-FW=/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/29772f33-9e3d-45de-9bdd-4279cde4b0f0/scratchpad/mzakamin-review/iceland-firmware
+FW=<scratch>/mzakamin-review/iceland-firmware
 cd "$FW/root/usr/lib/firmware/updates/ath12k/WCN7860/hw2.0"
 sha256sum -c - <<'EOF' || { echo "HASH MISMATCH - STOP"; false; }
 23811bd6abe91a89ef00057e0a4d2e85ea3d0defcad377334cdef987ec4df820  amss.bin
@@ -592,7 +592,7 @@ fix first.
 ## Appendix A — downstream DT extraction (documented + trial-run tonight)
 
 Everything below ran tonight read-only against the fcap captures; outputs in
-`/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/737a94a9-ba23-47ec-b0b2-3004a998b10e/scratchpad/dtb-work/`
+`<scratch>/dtb-work/`
 (ephemeral — regenerate at will; takes ~1 min):
 
 ```sh

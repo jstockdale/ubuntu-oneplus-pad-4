@@ -62,7 +62,7 @@ modes/DSC/flags/reset (§4).
 ## Method and provenance
 
 - **Their stack** (read-only on disk):
-  `/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/29772f33-9e3d-45de-9bdd-4279cde4b0f0/scratchpad/mzakamin-review/iceland-linux/`
+  `<scratch>/mzakamin-review/iceland-linux/`
   — kernel.pin: base v7.3-rc7 (`24a19b953e2a`) + patches/0001-infiniti (132)
   + patches/0002-iceland (294) = queue state **q89g**
   (7.3.0-rc7-iceland-00426). Sibling repos: `mzakamin-review/iceland-mainline`

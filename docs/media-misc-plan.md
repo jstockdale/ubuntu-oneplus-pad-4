@@ -18,7 +18,7 @@ inferred, not observed.
 ## Reference stacks used (provenance)
 
 - **Fedora port (mzakamin)** — clone at
-  `/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/29772f33-9e3d-45de-9bdd-4279cde4b0f0/scratchpad/mzakamin-review/`
+  `<scratch>/mzakamin-review/`
   (referenced below as `FED/`):
   - `FED/iceland-linux` — `main` = queue **q89g** (v7.3-rc7 base, the first
     install image; patches on disk in `patches/0001-infiniti/` (132) +
@@ -40,7 +40,7 @@ inferred, not observed.
 - **Stock, our own unit** (11.A.38, `OPD2514_16.0.10.501_GLO`):
   `/srv/ubuntu-iceland/stock/vendor-extracted/` (vendor.img, EROFS) and the
   decoded factory DTBO at
-  `/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/737a94a9-ba23-47ec-b0b2-3004a998b10e/scratchpad/dtb-work/dtbo_dtbs/00.dts`
+  `<scratch>/dtb-work/dtbo_dtbs/00.dts`
   (regenerable per wifi-plan.md appendix A). [V]
 
 Fedora runtime proof points quoted below come from `FED/iceland-mainline/

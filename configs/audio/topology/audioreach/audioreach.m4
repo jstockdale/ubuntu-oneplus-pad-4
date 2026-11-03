@@ -1,5 +1,6 @@
 # Copyright, Linaro Ltd, 2023
 # SPDX-License-Identifier: BSD-3-Clause
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 define(`APM_SG_PERF_MODE_LOW_POWER', `0x1') dnl
 define(`APM_SG_PERF_MODE_LOW_LATENCY', `0x2') dnl
 define(`APM_SUB_GRAPH_DIRECTION_TX', `0x1') dnl

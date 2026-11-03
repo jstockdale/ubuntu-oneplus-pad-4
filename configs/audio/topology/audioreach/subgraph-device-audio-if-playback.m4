@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: BSD-3-Clause
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 # Device back-end subgraph on an Audio Interface (QAIF) sink in TDM mode: [LOG] -> [AUDIO_IF SINK]
 # Used with DEVICE_SG_ADD(); the TDM_* macros must be defined by the caller before the include.
 include(`audioreach/audioreach.m4') dnl

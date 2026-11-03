@@ -191,7 +191,7 @@ Other load-bearing driver facts:
 ### 1.4 Sibling ports: what they did about exactly this
 
 **Fedora port (mzakamin iceland-linux, old-session clone, read-only at
-`/tmp/claude-1000/-home-jstockdale-projects-arch-oneplus-pad-4/29772f33-…/scratchpad/mzakamin-review/iceland-linux/`,
+`<scratch>/mzakamin-review/iceland-linux/`,
 base v7.3-rc7 + 132 infiniti + ~300 iceland patches):**
 
 Touch-relevant queue, in order (`patches/0002-iceland/`):

@@ -8,9 +8,10 @@ the build fails loudly when one stops applying.
 A kernel patch is licensed like the file it changes (the kernel's own rule,
 Documentation/process/license-rules.rst): the driver and sound patches here
 modify GPL-2.0-only files and are GPL-2.0-only (LICENSES/GPL-2.0-only.txt);
-the device-tree patches (0001, 0005, 0022–0024, 0026) modify Qualcomm's
-`kaanapali*.dts*`, which carry `SPDX-License-Identifier: BSD-3-Clause`, and
-are BSD-3-Clause. Authorship is the `From:` line of each patch; the
+the device-tree patches (0001, 0003, 0005, 0022–0024, 0026) modify files that
+carry `SPDX-License-Identifier: BSD-3-Clause` — Qualcomm's `kaanapali.dtsi` and
+the Denial project's board file `kaanapali-oneplus-iceland.dts` (map220v) —
+and are BSD-3-Clause. Authorship is the `From:` line of each patch; the
 `Signed-off-by:` lines are the Developer Certificate of Origin (DCO 1.1) of
 the people who wrote or carried it, which is what the kernel and Perpetua
 require instead of a contributor agreement.

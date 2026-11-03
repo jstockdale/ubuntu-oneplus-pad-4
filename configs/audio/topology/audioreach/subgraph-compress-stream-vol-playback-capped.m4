@@ -1,5 +1,6 @@
 # Copyright, Linaro Ltd, 2023
 # SPDX-License-Identifier: BSD-3-Clause
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 # OnePlus Pad 4: subgraph-compress-stream-vol-playback.m4 (upstream 993a17d) using the capped volume module.
 include(`audioreach/audioreach.m4') dnl
 include(`util/pcm.m4') dnl

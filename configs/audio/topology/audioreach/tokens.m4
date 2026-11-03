@@ -1,5 +1,6 @@
 # Copyright, Linaro Ltd, 2023
 # SPDX-License-Identifier: BSD-3-Clause
+# Origin: mzakamin-hub/iceland-mainline @ a7aab9f, audio/topology/ (the OnePlus Pad 4 overlay on linux-msm/audioreach-topology @ 993a17d; header kept)
 `SectionVendorTokens."audioreach_tokens" {'
 `	AR_TKN_DAI_INDEX "1"'
 `	AR_TKN_U32_SUB_GRAPH_INSTANCE_ID "2"'

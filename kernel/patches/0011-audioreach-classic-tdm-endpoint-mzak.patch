@@ -13,6 +13,11 @@ iceland rebase note: the GRAPH_OPEN error-report hunk collided with
 perpetua's own superset handling (cleanup + ERR_PTR return at
 q6apm.c:102-111); kept ours and folded their dev_err diagnostic into
 that existing error path.
+[Carried by the Ubuntu port: re-created locally on 2026-11-01 from the Fedora
+iceland queue's 0041 (q90x@c060e3b), so the Date above is this port's, not
+the author's; the original carried no Signed-off-by.]
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
 ---
  sound/soc/qcom/qdsp6/audioreach.c | 90 +++++++++++++++++++++++++++++++
  sound/soc/qcom/qdsp6/audioreach.h | 39 ++++++++++++++
