@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 16:43:14 +0300
+Subject: [PATCH] soc: qcom: pmic_pdcharger_ulog: add the SoCCP channel
+
+On SoCs where the battery and USB-C firmware runs on the SoCCP instead
+of the ADSP, such as Kaanapali, the firmware offers its log on the
+"PMIC_LOGS_SOCCP_APPS" channel, just as pmic_glink itself uses
+"PMIC_RTR_SOCCP_APPS" there. The messages are the same. Match that
+channel too.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+[Carried by the Ubuntu port from the Fedora iceland queue (0132 there), with the author's sign-off. Why here: the charger firmware's own log (owner 32778, opcodes 0x18/0x19) is the witness the PD PPS rung needs for what the firmware does with APDO requests, hard resets and the 5 V exit; on Kaanapali it is offered on the SoCCP channel. Built as a module (CONFIG_QCOM_PMIC_PDCHARGER_ULOG=m, kernel/config/config-charging.fragment), loaded by hand on the bench — the driver has no device table by design. Exit: offer to Perpetua / upstream with the port's first PPS series, or drop when either carries it.]
+---
+ drivers/soc/qcom/pmic_pdcharger_ulog.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/soc/qcom/pmic_pdcharger_ulog.c b/drivers/soc/qcom/pmic_pdcharger_ulog.c
+index 39f412bbf2c1..50f52ca757de 100644
+--- a/drivers/soc/qcom/pmic_pdcharger_ulog.c
++++ b/drivers/soc/qcom/pmic_pdcharger_ulog.c
+@@ -148,6 +148,7 @@ static void pmic_pdcharger_ulog_rpmsg_remove(struct rpmsg_device *rpdev)
+ 
+ static const struct rpmsg_device_id pmic_pdcharger_ulog_rpmsg_id_match[] = {
+ 	{ "PMIC_LOGS_ADSP_APPS" },
++	{ "PMIC_LOGS_SOCCP_APPS" },
+ 	{}
+ };
+ /*
+-- 
+2.43.0
+

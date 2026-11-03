@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4, rung Q (PD PPS through the charge pumps): the charger
+# firmware's log as a bench witness (patches 0069/0070 make it reach the
+# SoCCP channel); a module with no device table, loaded by hand.
+CONFIG_QCOM_PMIC_PDCHARGER_ULOG=m

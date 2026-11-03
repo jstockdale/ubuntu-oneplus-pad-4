@@ -58,6 +58,8 @@ Provenance
 | 0064–0067 | Baochen Qiang's ath12k series "fix timeout while waiting for regulatory update on bring-up" (ath/ath-next for 7.4: f2576dc0f894, af8d103b2b23, 04497f2a7721, 8ab8a5ee16b2), carried through the Fedora iceland queue (their 0139–0142; their 0143 is not needed — Perpetua 25c660d8bee0 in the pin covers it) | Baochen Qiang (oss.qualcomm.com), sign-offs kept | adopted 2026-11-03 for the per-association 3 s regulatory timeout and the boot-time "Failed to set the requested Country" on kernel #45; flown as a live ath12k module swap first; drop when the pin passes ath-next for 7.4 |
 | 0068 | Fedora iceland port's "make the firmware 802.11d scan optional, off on this tablet" (their 0189): module parameter enable_11d, default off, matching the vendor driver's g11dSupportEnabled=0 | mzak | adopted 2026-11-03 for the "Connection to AP lost" 10–12 s after a reconnect; its own flight after 0064–0067; drop when upstream offers an opt-out or Perpetua carries it |
 
+| 0069–0070 | Fedora iceland port's pmic_pdcharger_ulog patches (their 0132 SoCCP channel, 0232 remove-path use-after-free) | mzak | adopted 2026-11-03 as the firmware charger-log witness for the PD PPS rung (config-charging.fragment builds the module); offer upstream with the PPS series |
+
 Numbering note: the number 0029 was first used on 2026-11-02 for infiniti's
 ADSP reserved-memory change (0x4c00000 -> 0x5000000) and withdrawn the same
 day — the OnePlus board file already deletes and redefines that node with
