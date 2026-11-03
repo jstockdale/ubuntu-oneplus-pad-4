@@ -9,7 +9,7 @@
 > - S0/S2 baseline is wrong: `qrtr-lookup` on the flashed system ALREADY
 >   lists QMI service 400 "Snapdragon Sensor Core service" (node 5) with no
 >   hexagonrpcd ever run, so "SSC absent until attached" is false and
->   "qrtr-lookup now lists SSC" cannot be the S2 pass signal; use
+>   "qrtr-lookup now lists SSC" cannot be the S2 pass signal; use [superseded 2026-11-02 — see the correction block at the top]
 >   hexagonrpcd's file-request stream and, in S4, `ssccli` output.
 > - S0 step 3 cannot harvest socinfo from the tablet: mainline
 >   /sys/devices/soc0 has only family, machine, revision, serial_number,
@@ -102,7 +102,7 @@ The chips, from the per-unit sensor registry in persist
 (`/sensors/registry/registry`, **352 files** — same count as the registry
 Fedora publishes) cross-checked against the ODM partition's sensor configs
 (stock `odm.img` EROFS, `/etc/sensor/config/`, 11 JSONs + `json_list`,
-extracted to scratchpad with `fsck.erofs --nid`) **[V]**:
+extracted to scratchpad with `fsck.erofs --nid`) **[V]**: [superseded 2026-11-02 — see the correction block at the top]
 
 | Function | Chip | Bus as the hub sees it (ODM registry JSON) | Rails | IRQ pin | Per-unit cal in persist |
 |---|---|---|---|---|---|
@@ -385,9 +385,9 @@ independent of the whole SSC stack — a separate mini-ladder (§5 H1).
     method-36 call needs, and both Fedora patches; `iio-sensor-proxy
     3.8-1` — **3.8 has no SSC backend**; **no libssc at all**.
   - Debian sid/forky: `iio-sensor-proxy 3.9-1` with
-    `-Dssc-support=enabled` **on arm64** (d/rules), `libssc` 0.4.2-2
+    `-Dssc-support=enabled` **on arm64** (d/rules), `libssc` 0.4.2-2 [superseded 2026-11-02 — see the correction block at the top]
     (binary `libssc2`; deps libqmi-glib5, libqrtr-glib0, protobuf-c),
-    `hexagonrpc` source 0.3.2-2.
+    `hexagonrpc` source 0.3.2-2. [superseded 2026-11-02 — see the correction block at the top]
   So the Ubuntu story is: backport Debian's `iio-sensor-proxy 3.9-1` and
   `libssc 0.4.2-2`, and rebuild `hexagonrpc` at the Fedora pin + 2
   patches (Debian's packaging, newer orig). All three are small
@@ -422,14 +422,14 @@ same SoC, same board, same firmware generation).
 
 | # | Gap | Size | Where it lands |
 |---|---|---|---|
-| G1 | DT: `qcom,non-secure-domain` on adsp fastrpc | 1 line (≙ Fedora 0061) | `kernel/patches/0011-…` (S3 flight; S2 works around it via the secure node) |
+| G1 | DT: `qcom,non-secure-domain` on adsp fastrpc | 1 line (≙ Fedora 0061) | `kernel/patches/0011-…` (S3 flight; S2 works around it via the secure node) | [superseded 2026-11-02 — see the correction block at the top]
 | G2 | DSP file tree `/usr/share/qcom/kaanapali/OnePlus/iceland` | host assembly script from held artifacts (§1.4), ~tens of MB | overlay / device package; registry part stays unit-private |
 | G3 | hexagonrpcd at `598b591` + Fedora patches 0001/0002 | rebuild of the Ubuntu source package with new orig + 2 patches | local deb `hexagonrpc 0.5.0+git598b591-0iceland1` (> 0.4.0-1) |
 | G4 | libssc | backport Debian sid `libssc 0.4.2-2` (build-deps all in 26.04: libqmi-glib-dev, libqrtr-glib-dev, protobuf-c) | local deb |
 | G5 | iio-sensor-proxy 3.9 with SSC | backport Debian sid `3.9-1` (arm64 enables ssc; build against G4) | local deb `3.9-1~iceland1` (wins over archive 3.8-1) |
 | G6 | udev rule + unit drop-in + mount matrix | adopt Fedora's `81-iceland-ssc.rules` + `hexagonrpcd…iceland.conf` nearly verbatim (systemd paths, same matrix) | `ubuntu-iceland-device` |
 | G7 | suspend/resume + watchdog hygiene | Fedora's sleep hook / resume unit / ssc-watch pattern, trimmed to what our s2idle phase (C6) needs | `ubuntu-iceland-device`, after S6 |
-| G8 | hall/lid switch (independent) | DT node + L1B always-on (≙ Fedora 0030+0115); 0116 only when C6 touches s2idle | `kernel/patches/0012-…` (H1) |
+| G8 | hall/lid switch (independent) | DT node + L1B always-on (≙ Fedora 0030+0115); 0116 only when C6 touches s2idle | `kernel/patches/0012-…` (H1) | [superseded 2026-11-02 — see the correction block at the top]
 | G9 | contingency: ADSP FastRPC remote heap (≙ Fedora 0170+0194, as one no-map patch) | ~20 lines DT | prepared patch, flown only on evidence; shared interest with C4 audio |
 | G10 | QoL patches: Fedora iio-sensor-proxy 0001–0004, libssc hall | cherry-picks | after S6, evidence-driven |
 

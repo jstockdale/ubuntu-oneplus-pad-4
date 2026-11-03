@@ -1925,3 +1925,40 @@ C5 flight started: `ubuntu-desktop-minimal` installing on the tablet as a
 transient systemd unit (iceland-desktop-install.service, log in
 /var/log/iceland-desktop-install.log), detached from ssh; 844 packages.
 VP0 build running in parallel on the host (36 patches, build-vp0.log).
+
+## 2026-11-02 — C5 flight: desktop installed; one self-inflicted dpkg error
+## (dconf key syntax), fixed in 0.2.22
+
+`ubuntu-desktop-minimal` (844 packages) installed on the dev rootfs as a
+transient unit. apt exited 100: `dpkg: error processing package ibus` and
+`ibus-table` (configure). Cause: the 0.2.21 dconf keyfile wrote
+`[org/gnome/mutter] experimental-features=[]`; dconf cannot type an empty
+`[]` ("unable to infer type"), so the dconf trigger those packages' postinst
+runs failed — on the minimal rootfs there had been no dconf binary, so the
+file was never compiled before the desktop install. Fix: the GVariant-typed
+`@as []`; `dconf update` then compiled (584 B), `dpkg --configure -a`
+finished, `dpkg --audit` empty, `apt -f install` nothing to do. The system
+db reads back as intended: sleep-inactive-battery-type 'nothing',
+power-button-action 'interactive', experimental-features @as []. fwupd
+still absent (the pin held through 844 packages), suspend.target masked.
+Shipped as 0.2.22. Lesson: compile every dconf keyfile on the host
+(`dconf compile`) before it ships.
+
+Critic verdict (readiness workflow, 6 agents, 278 tool uses): the executed
+order is the recommended one — C5 (rootfs-only) first, the VP build gate in
+parallel, VP1 RAM boot with the owner at the device, VP2 then flash,
+sensors S1 as a host-side track, C6 suspend last (can hang/reset; the
+hard-reset gesture is undrilled). Its own re-checks caught my broken first
+0031 (already fixed) and three stale statements, now corrected: GStreamer
+and clips are staged, the dconf db needed compiling, "tmux" is not on the
+tablet. Also noted: the build's `rm -rf out/kernel-iceland` discards the
+host copy of #39's modules — the tablet's tree is backed up
+(backups/tablet-modules-7.3.0+-kernel39-20261102-1712.tar.gz, 938 .ko).
+
+Fedora firmware repo sparse-cloned (ref/iceland-firmware): socinfo values
+family=Snapdragon hw_platform=MTP machine=CANOEP platform_subtype=Unknown
+platform_subtype_id=0 platform_version=65536 revision=2.0 soc_id=661 (the
+three the sensors plan lacked). Its README grants only the right to use
+the files with a Pad 4 ("all rights remain with their owners") — the
+thermal-model.json there is NOT redistributable under our license; the
+thermal daemon rung must either get permission or re-derive the model.

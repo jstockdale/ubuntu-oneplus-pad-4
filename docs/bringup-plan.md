@@ -49,7 +49,9 @@ all present and unused; kernel config already builds iris, V4L2 mem2mem,
 videobuf2, MDT loader, PAS, UBWC as modules/built-in; vpu40_2v.mbn
 (sha256 69d4e215…) is on the tablet, in the overlay and in the manifest;
 Perpetua's head (b7d639cf, 100 commits past the pin) has no iris work, so
-the series is carried locally. v4l-utils is installed; GStreamer is not.
+the series is carried locally. v4l-utils, gstreamer1.0-tools/-base/-good/
+-bad and three 1080p test clips (~/clips: H.264, HEVC, VP9) are on the
+tablet since 2026-11-02.
 
 - VP0 import — done 2026-11-02: 0029 platform data (Qualcomm via
   infiniti 0033), 0030 kaanapali.dtsi iris node (0035), 0031 our board
@@ -66,12 +68,16 @@ the series is carried locally. v4l-utils is installed; GStreamer is not.
   /dev/video0 and /dev/video1 exist, `v4l2-ctl -d /dev/video0
   --list-formats-out` lists H264/HEVC/VP9/AV1. FAIL = any PAS error, a
   0x19xx/0x1a20 fault or a defer loop: stop, capture dmesg, power-cycle
-  back to flashed #39, do not iterate blind.
-- VP2 decode proof (rootfs-only): apt install gstreamer1.0-tools
-  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad; test clips (1080p
-  H.264 + VP9, generated on the host); `gst-launch-1.0 filesrc ! qtdemux
-  ! h264parse ! v4l2h264dec ! filesink`, checksum identical twice, then
-  on-screen under Weston with low CPU. Then flash the VP bundle.
+  back to flashed #39, do not iterate blind. Module staging rule: the
+  build's `rm -rf out/kernel-iceland` discards the host copy of #39's
+  modules, so back up the tablet's /lib/modules/7.3.0+ first (done
+  2026-11-02, backups/tablet-modules-7.3.0+-kernel39-*.tar.gz), then push
+  only the modules whose hash differs (expected: qcom-iris only) and
+  depmod; no reboot or RAM boot while dpkg is configuring.
+- VP2 decode proof (rootfs-only; tools and clips already staged):
+  `gst-launch-1.0 filesrc ! qtdemux ! h264parse ! v4l2h264dec ! filesink`,
+  checksum identical twice, then on-screen under the compositor with low
+  CPU. Then flash the VP bundle.
 - VP3 encode proof: v4l2h264enc; GNOME screen recording once C5 is up.
 - VP4 hardening, next bundle: iceland 0157–0160, 0246–0250, 0292 and
   infiniti 0069–0071 (all in /srv/ubuntu-iceland/ref/iceland-linux);
@@ -104,8 +110,13 @@ pick 2.2857× with fractional scaling and then refuse display changes; the
    2026-11-02): backlight followed the panel each cycle, no kernel
    messages, both touch devices still registered. Tap confirmation after
    the cycles owed from the owner (IRQ 254 msmgpio counter must advance).
-3. Flight — `sudo apt install ubuntu-desktop-minimal` in tmux over usb0
-   (844 packages, ~531 MB, 1.8 GB); GDM starts on install. PASS: greeter
+3. Flight — `apt install ubuntu-desktop-minimal` as a transient systemd
+   unit (`systemd-run --unit=iceland-desktop-install …`; tmux is not on
+   the dev rootfs, and a unit survives an ssh or usb0 drop) — started
+   2026-11-02 evening, 844 packages. After dpkg is idle: `dpkg --audit`
+   clean, `dconf update` (the minimal rootfs had no dconf binary, so the
+   0.2.21 system db compiles only now) and `ls /etc/dconf/db/local`.
+   PASS: greeter
    on glass at 3392×2400, `loginctl` session Type=wayland, `journalctl -b
    -u gdm3` clean, touch login as ubuntu with the on-screen keyboard,
    gnome-shell is DRM master, taps land under the finger at four corners,

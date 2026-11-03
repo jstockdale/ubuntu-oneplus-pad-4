@@ -12,4 +12,4 @@ sleep-inactive-battery-type='nothing'
 power-button-action='interactive'
 
 [org/gnome/mutter]
-experimental-features=[]
+experimental-features=@as []

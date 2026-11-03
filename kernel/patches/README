@@ -42,9 +42,11 @@ Provenance
 | 0025, 0026 | infiniti-mainline (OnePlus 15, same SoC): GPR callback before probe, 1024-byte GPR intent | Victor Fuentes <victor@vlinkz.dev> | carried with their sign-off |
 | 0027 | this port: revert of Perpetua aad249d15433 (tx-macro capture mutes) | John Stockdale | the revert restores upstream v7.3 behaviour on this codec |
 | 0028 | this port: q6apm READ/WRITE_DONE payload-size fix (microphones, WCD playback) | John Stockdale | READ_DONE half **merged upstream independently** on 2026-11-02 (Perpetua 9ba37ef1db70, same approach; also Reixo0/linux fcabe5fd25c7) — drop that hunk at the next pin bump; the WRITE_DONE half is offered as a consistency patch, docs/upstreaming.md |
+| 0029, 0030, 0032–0036 | Qualcomm's kaanapali iris (VPU) series, carried by infiniti-mainline and the Fedora iceland queue (`/srv/ubuntu-iceland/ref/iceland-linux/patches/0001-infiniti` 0033, 0035, 0032, 0034, 0037, 0038, 0036) | Vikash Garodia, Jingyi Wang, Wangao Wang, Vishnu Reddy (oss.qualcomm.com), sign-offs kept | drop when Perpetua carries the iris support (none at b7d639cfb282) |
+| 0031 | this port: board enable for the iris codec (firmware-name vpu40_2v.mbn, status okay) — BSD-3-Clause (board dts) | John Stockdale | to be offered upstream with the series |
 
-Dropped: 0029 (infiniti's ADSP reserved-memory size, 0x4c00000 -> 0x5000000)
-was adopted on 2026-11-02 and removed the same day: the OnePlus board file
-`kaanapali-oneplus-iceland.dts` already deletes and redefines that node with
-0x5000000, so the change had no effect on this device (docs/porting-log.md,
-2026-11-02 "0029 was a no-op").
+Numbering note: the number 0029 was first used on 2026-11-02 for infiniti's
+ADSP reserved-memory change (0x4c00000 -> 0x5000000) and withdrawn the same
+day — the OnePlus board file already deletes and redefines that node with
+0x5000000, so it had no effect here (docs/porting-log.md, "0029 was a
+no-op"). The number was then reused for the iris platform data.

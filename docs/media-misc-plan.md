@@ -3,10 +3,10 @@
 > **Corrections from the 2026-11-02 readiness review** (checked against the
 > pinned tree, the build config, the overlay and the live tablet):
 > - Patch numbering: the VPU set does not start at "0011"; the series is
->   0001–0028 (0029 withdrawn), so the VPU patches are 0029–0036 as
+>   0001–0028 (0029 withdrawn), so the VPU patches are 0029–0036 as [superseded 2026-11-02 — see the correction block at the top]
 >   imported on 2026-11-02 (0029 platform data, 0030 dtsi node, 0031 our
 >   board enable, 0032–0035 buffer-size fixes, 0036 bus_info).
-> - §1.4/§1.5 cite a board patch "0062-…-enable-the-video-codec"; no such
+> - §1.4/§1.5 cite a board patch "0062-…-enable-the-video-codec"; no such [superseded 2026-11-02 — see the correction block at the top]
 >   entry exists in the current queue — the four-line `&iris` override was
 >   written as our own patch 0031 (content verified against the Fedora
 >   board dts).
@@ -22,7 +22,7 @@
 >   addition to -plugins-good; none of the three is installed (rootfs-only).
 > - Perpetua's head b7d639cfb282 (100 commits past the pin) still carries
 >   no iris work; nothing to adopt from a pin bump.
-> - The dtb-work scratch directory cited in the camera section is gone; the
+> - The dtb-work scratch directory cited in the camera section is gone; the [superseded 2026-11-02 — see the correction block at the top]
 >   firmware choice (vpu40_2v.mbn) rests on the manifest and the Fedora
 >   port's working choice, not on a fresh stock-DT read.
 > - The config of record is /srv/ubuntu-iceland/out/kernel-iceland/
@@ -269,7 +269,7 @@ the same "carried until merged" pattern.) **[V queue; I timing]**
 
 ### 1.5 Ladder
 
-- **VP0 — queue the patch set.** Import as our `kernel/patches/0011…`:
+- **VP0 — queue the patch set.** Import as our `kernel/patches/0011…`: [superseded 2026-11-02 — see the correction block at the top]
   infiniti 0031/0032/0033/0034/0035/0037/0038 + iceland 0062, adjusting
   only context. Build release bundle; `make modules` for iris; stage
   modules on the rootfs. Gate: clean build; `modinfo qcom-iris` shows
