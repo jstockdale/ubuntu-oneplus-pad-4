@@ -11,13 +11,11 @@ Status legend: ✅ verified here · 🟡 partial, limitation described ·
 ❌ tried and does not work · ❓ not yet tested · — hardware absent.
 
 Last revised: 2026-11-03. Running kernel: Perpetua perpetua/v7.3 @
-`b7d639cfb282` + patches 0001–0062 less the retired 0020 (build #45, 61
-patch files; 0063, the pen/touch input identity, was compiled into #45's
-touch module by hand and is in the series for the next build), flashed to
-`boot_b` on 2026-11-03; device package `ubuntu-iceland-device` 0.2.33.
-Known regression on #45: the pen charger has no hBoost client (patch 0058
-matched the board's old pmic-glink compatible; corrected in the series,
-flies with build #46).
+`b7d639cfb282` + patches 0001–0063 less the retired 0020 (build #46,
+flashed to `boot_b` on 2026-11-03 after its RAM-boot gate; the ath12k
+module in the rootfs tree additionally carries 0064–0068, and the
+firmware charger-log module 0069/0070 is loaded by hand on the bench);
+device package `ubuntu-iceland-device` 0.2.33.
 
 | Component | Status | Evidence / notes |
 |---|---:|---|

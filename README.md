@@ -47,7 +47,7 @@ earn a ✅ here.
 | Display (dual-DSI NT36536, 3392×2400, 144 Hz) | ✅ | console and Wayland on glass; stock timings |
 | GPU (Adreno 840, Mesa 26 / freedreno) | ✅ | OpenGL ES 3.2, GL-composited Weston |
 | Touchscreen (10-point) | ✅ | auto-loads every boot, 30-minute soak clean; touch-to-wake not yet (planned) |
-| Stylus | 🟡 | writes with pressure, taps (click) and hovers, barrel button = right click, listed in GNOME's Graphics Tablets panel — kernel #45 with the Bluetooth-brokered handshake (bond + the iceland-pen bridge daemon since device package 0.2.28, the libwacom definition since 0.2.29); charged on the magnet edge on #44 (on #45 the charger's hBoost client is unmatched after a compatible rename in the pin — fix in the series, flies with build #46); the barrel's double/long-press codes, the middle-click mapping and the pen's battery in UPower still owed |
+| Stylus | 🟡 | writes with pressure, taps (click) and hovers, barrel button = right click, listed in GNOME's Graphics Tablets panel — kernel #46 with the Bluetooth-brokered handshake (bond + the iceland-pen bridge daemon since device package 0.2.28, the libwacom definition since 0.2.29); charges on the magnet edge (back on #46 after a one-build regression); the barrel's double/long-press codes, the middle-click mapping and the pen's battery in UPower still owed |
 | Backlight, buttons | ✅ | |
 | Wi-Fi (WCN7860 / ath12k) | ✅ | auto-joins; ssh over the air |
 | Bluetooth | 🟡 | controller up on the device's factory address; BLE bonding verified — the Stylo Pro is bonded with LE Secure Connections and served by HOGP over uhid; classic pairing and A2DP untested (A2DP needs libspa-0.2-bluetooth) |
@@ -55,7 +55,7 @@ earn a ✅ here.
 | Speakers (6× TFA9865) | ✅ | stock loudness behind a PipeWire protection chain |
 | Microphones | ✅ | the capture fix is upstream at the pin (Perpetua `9ba37ef1db70`; our 0028 now carries only the WRITE_DONE half, see [Upstreaming](#upstreaming)); the processed "voice processing" input with stock's recorder gain has been the default since device package 0.2.26, the raw source stays selectable |
 | Wired headphones (USB-C analog) | ❓ | untestable without a USB-C analog headset — with no jack detected the HPH endpoint stays off and playback starves, which is what the earlier "starts then stops" was, not a bug |
-| Battery telemetry, charging | 🟡 | telemetry ✅; 9 V PD contract on kernel #45 (flashed 2026-11-03; 13.1 W measured at 84 %, the firmware's PD cap); SuperVOOC (≈55 W) drivers bound, held in Standard until the staged validation with the OnePlus brick |
+| Battery telemetry, charging | 🟡 | telemetry ✅; 9 V PD contract (13.1 W measured at 84 %, the firmware's PD cap; kernel #46 flashed 2026-11-03); SuperVOOC (≈55 W) drivers bound, held in Standard until the staged validation with the OnePlus brick |
 | Thermal | 🟡 | zones registered; no policy daemon yet |
 | Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)); no auto-rotation until then |
 | Suspend / resume | ❓ | deliberately untested so far |

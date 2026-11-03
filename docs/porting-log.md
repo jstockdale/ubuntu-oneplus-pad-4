@@ -3089,3 +3089,20 @@ status, the firmware log and the kernel log per second, with a dead-man
 rule for the modes that will hold the input vote. The A1–A3 patches are
 being written against the pin (one implementer, three reviewers); F1 on the
 Anker — the APDO list — decides whether the rung is worth the rest.
+
+
+## 2026-11-03 — #46 FLASHED to boot_b; lock-in PASS; the 0.2.33 policy verified on a connected boot with the Anker
+
+`fastboot flash boot_b boot-46-23711786.img` OKAY; rebooted with the Anker
+attached. Lock-in at 71 s: kernel 7.3.0+ #46, boot_b 23711786, boot_a
+1f11e2c6 untouched, slot _b, qbootctl active. Pen charger: hboost client
+present, MT5806 firmware 0x20022, charging at 7.99 V. The policy unit wrote
+Standard at 2.78 s with the source typed PD_PPS at 1.5 A — the connected-boot
+verification the PPS plan requires before any PPS-capable module. Wi-Fi
+joined at 27.4 s with 0 handshake failures and 0 regulatory timeouts (the
+0064–0068 ath12k module in the rootfs tree, now under the flashed kernel).
+Audio sink present without a WirePlumber restart on this boot; iris video
+nodes, pen daemon, pen connected, libwacom listing; no failed units; 63
+error lines; deferred only 111b8000.tn. Rung P item (e) is done; the
+rootfs module tree is unchanged apart from the swapped ath12k (0064–0068)
+and the hand-loaded firmware-log module (0069/0070).
