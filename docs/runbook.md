@@ -363,3 +363,10 @@ RAM boots and future kernel updates (RAM-boot gate first, always).
   touch is blacklisted (no --tty in weston 14); stop with
   `pkill -x weston` (never pkill -f from an ssh one-liner — it
   matches itself).
+- Never edit a script while it is running. bash reads a script file
+  incrementally, by byte offset; inserting or removing lines above the
+  current position of a long-running build script (even a comment or an
+  SPDX header) makes bash resume at a shifted offset when the current
+  command returns. On 2026-11-02 a `# ----` comment lost its `#` that
+  way and the kernel build died with `------: command not found` after a
+  clean compile. Edit scripts between runs, or run a copy.
