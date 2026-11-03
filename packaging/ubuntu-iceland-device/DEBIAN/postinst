@@ -49,6 +49,10 @@ case "$1" in
 			# 0.2.26: the audio chain's modules are listed in modules-load.d;
 			# this unit witnesses the card after boot and repairs a miss.
 			systemctl enable iceland-audio-check.service >/dev/null 2>&1 || true
+			# 0.2.28: the Stylo Pro handshake bridge; the unit's conditions
+			# keep it idle until the kernel exposes pen_uplink and the pen
+			# is bonded (ladder A.3c N4/N5).
+			systemctl enable iceland-pen.service >/dev/null 2>&1 || true
 		fi
 		# 0.2.21: compile the dconf system db when dconf is present (it is not
 		# on the minimal profile; the desktop install runs dconf's own trigger).
