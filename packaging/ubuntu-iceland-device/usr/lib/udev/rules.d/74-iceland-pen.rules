@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4: let libwacom match the NT36536 pen and touch devices.
+# libwacom resolves a device through ID_BUS and the kernel's vendor/product
+# ids; it has no notion of SPI, so present the bus as i2c for matching
+# (/etc/libwacom/oneplus-pad4.tablet). Nothing else reads ID_BUS here.
+ACTION=="remove", GOTO="iceland_pen_end"
+SUBSYSTEM!="input", GOTO="iceland_pen_end"
+ATTRS{name}=="NVTCapacitivePen", ENV{ID_BUS}="i2c"
+ATTRS{name}=="NVTCapacitiveTouchScreen", ENV{ID_BUS}="i2c"
+LABEL="iceland_pen_end"

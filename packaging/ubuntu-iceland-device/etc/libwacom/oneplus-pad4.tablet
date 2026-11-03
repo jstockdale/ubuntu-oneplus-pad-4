@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4 (OPD2514): the NT36536 touch controller's pen device as a
+# libwacom tablet, so GNOME's Graphics Tablets panel lists it and maps the
+# stylus buttons. libwacom knows the buses usb, bluetooth, serial and i2c;
+# the controller is on SPI, so the udev rule 74-iceland-pen.rules presents
+# the two input devices as i2c for matching purposes (the kernel keeps the
+# truth). Vendor 0603 is Novatek, product 6536 the controller.
+[Device]
+Name=OnePlus Pad 4
+ModelName=OPD2514
+DeviceMatch=i2c|0603|6536
+Class=ISDV4
+Width=11
+Height=8
+IntegratedIn=Display;System
+Styli=@generic-no-eraser;
+
+[Features]
+Stylus=true
+Touch=true
+Reversible=false
+NumRings=0
+NumStrips=0

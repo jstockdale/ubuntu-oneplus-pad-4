@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 3 Nov 2026 01:40:00 -0800
+Subject: [PATCH] Input: nt36536: give the touch and pen devices an identity
+ and the pen its parent
+
+Ours (2026-11-03, A.3c N6). Exit: offer upstream with the series.
+
+Both input devices registered with vendor and product 0, and the pen
+device had no parent, so it lived under /devices/virtual. libwacom, and
+with it GNOME's Graphics Tablets panel, identifies a tablet by bus,
+vendor and product and found nothing to match ("is a tablet but not
+supported by libwacom"). Report Novatek's vendor id and the controller
+as the product on both devices, and hang the pen device off the SPI
+controller it belongs to.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index 28a8e70c86bb..a7af60c9822e 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -67,6 +67,10 @@ static uint8_t bTouchIsAwake = 0;
+ #define NVT_EXT_PEN_OFF		0x11
+ #define NVT_PEN_UPLINK_RESUME	1
+ 
++/* input device identity: Novatek Microelectronics' vendor id, the controller as the product */
++#define NVT_ID_VENDOR		0x0603
++#define NVT_ID_PRODUCT		0x6536
++
+ static unsigned int pen_type = 1;
+ 
+ /*
+@@ -1718,6 +1722,9 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 	ts->input_dev->name = NVT_TS_NAME;
+ 	ts->input_dev->phys = ts->phys;
+ 	ts->input_dev->id.bustype = BUS_SPI;
++	/* Novatek's vendor id and the controller, so userspace (libwacom) can tell the devices apart */
++	ts->input_dev->id.vendor = NVT_ID_VENDOR;
++	ts->input_dev->id.product = NVT_ID_PRODUCT;
+ 
+ 	//---register input device---
+ 	ret = input_register_device(ts->input_dev);
+@@ -1767,6 +1774,10 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 		ts->pen_input_dev->name = NVT_PEN_NAME;
+ 		ts->pen_input_dev->phys = ts->pen_phys;
+ 		ts->pen_input_dev->id.bustype = BUS_SPI;
++		ts->pen_input_dev->id.vendor = NVT_ID_VENDOR;
++		ts->pen_input_dev->id.product = NVT_ID_PRODUCT;
++		/* the pen belongs to the controller, not to the virtual tree */
++		ts->pen_input_dev->dev.parent = &client->dev;
+ 
+ 		//---register pen input device---
+ 		ret = input_register_device(ts->pen_input_dev);
+-- 
+2.47.0
