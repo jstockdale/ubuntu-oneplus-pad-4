@@ -6,7 +6,8 @@ Architecture: arm64
 Maintainer: Ubuntu iceland port contributors <noreply@example.invalid>
 Depends: systemd, kmod, e2fsprogs, util-linux, cloud-guest-utils,
  systemd-zram-generator, alsa-ucm-conf, alsa-utils, pipewire, pipewire-pulse,
- wireplumber, swh-plugins, libspa-0.2-modules, bluez, iproute2
+ wireplumber, swh-plugins, libspa-0.2-modules, bluez, iproute2,
+ python3, python3-dbus, python3-gi, python3-pyudev
 Description: Device support for the OnePlus Pad 4 (iceland)
  Board-specific integration for the OPD2514 running an Ubuntu userspace on
  the Perpetua mainline kernel:
@@ -41,6 +42,13 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     compressed-audio node into a second card object — the two objects
     fought over the ALSA device reservation and the loser was switched to
     profile "off", silencing the session (52-iceland-compress.conf);
+  * pen handshake bridge (staged, not enabled): iceland-pen brokers the
+    Stylo Pro's "OPP" handshake — the touch controller's uplink timing
+    block (sysfs pen_uplink from kernel patch 0041) written to the pen
+    over its bonded BLE link through BlueZ, the pen's replies mapped to the
+    controller's downlink commands (pen_downlink); everything
+    protocol-specific lives in /etc/iceland/pen.conf (example under
+    /usr/share/doc), filled in once the pen is bonded (ladder A.3c N4/N5);
   * clock domains (0.2.27): the card's playback and capture PCMs are timed
     independently by the DSP and the capture PCM reports its delay in whole
     40 ms periods, so whenever both ran PipeWire hard-resynced the follower

@@ -1,0 +1,245 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: BSD-3-Clause
+"""OnePlus Pad 4: broker the Stylo Pro's pen handshake between the touch
+controller and the pen's Bluetooth link (ladder A.3c, rung N5).
+
+The controller (NT36536, driver patch 0041) exposes each "uplink" frame it
+emits after the pen-scan enable as /sys/bus/spi/devices/spi0.0/pen_uplink
+("<seq> <type> <len> <hex payload>") and announces it with a uevent; the pen
+expects that block over a bonded BLE connection (on stock: a vendor GATT
+characteristic written with response), and its answers must be written back
+to the controller through pen_downlink as the stock daemon does.
+
+What this daemon does, in order:
+  1. finds the bonded pen through BlueZ (by name, or by the address in the
+     config), connects when it is not connected, and resolves the GATT
+     characteristics named in the config;
+  2. subscribes to the pen's notifications and logs every one in hex
+     (never the pen's address);
+  3. on every new uplink frame writes its payload to the timing
+     characteristic, then sends the configured "after_timing" downlink
+     sequence to the controller;
+  4. maps notifications to downlink commands through the [rules] table.
+
+Everything protocol-specific lives in /etc/iceland/pen.conf so the N4/N5
+flights can tune it without a code change. Rung N5's PASS gate: pen events
+within 2 s of the pen touching the glass after a resume.
+"""
+import configparser
+import logging
+import os
+import select
+import signal
+import sys
+import threading
+
+import dbus
+import dbus.mainloop.glib
+import pyudev
+from gi.repository import GLib
+
+CONF = "/etc/iceland/pen.conf"
+BLUEZ = "org.bluez"
+DEV_IFACE = "org.bluez.Device1"
+CHR_IFACE = "org.bluez.GattCharacteristic1"
+PROPS = "org.freedesktop.DBus.Properties"
+
+log = logging.getLogger("iceland-pen")
+
+
+class Config:
+    def __init__(self, path):
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.read(path)
+        pen = cp["pen"] if "pen" in cp else {}
+        gatt = cp["gatt"] if "gatt" in cp else {}
+        self.name = pen.get("name", "OnePlus Stylo Pro")
+        self.address = pen.get("address", "").strip().upper() or None
+        self.sysfs = pen.get("sysfs", "/sys/bus/spi/devices/spi0.0")
+        self.timing_uuid = gatt.get("timing_uuid", "").lower() or None
+        self.status_uuid = gatt.get("status_uuid", "").lower() or None
+        self.status_request = bytes.fromhex(gatt.get("status_request", "").replace(" ", "")) \
+            if gatt.get("status_request") else None
+        self.notify_uuids = [u.strip().lower() for u in gatt.get("notify_uuids", "").split(",") if u.strip()]
+        self.after_timing = [s.strip() for s in gatt.get("after_timing", "").split(",") if s.strip()]
+        # rules: "<uuid>:<hex prefix>" = "<downlink command>"
+        self.rules = []
+        if "rules" in cp:
+            for key, cmd in cp["rules"].items():
+                uuid, _, prefix = key.partition(":")
+                self.rules.append((uuid.strip().lower(), bytes.fromhex(prefix.replace(" ", "")), cmd.strip()))
+
+
+class Controller:
+    """The sysfs side: pen_uplink reader, pen_downlink writer."""
+
+    def __init__(self, sysfs):
+        self.up = os.path.join(sysfs, "pen_uplink")
+        self.down = os.path.join(sysfs, "pen_downlink")
+        self.last_seq = None
+
+    def read_uplink(self):
+        with open(self.up) as f:
+            fields = f.read().split()
+        seq, typ, ln = int(fields[0]), int(fields[1]), int(fields[2])
+        payload = bytes.fromhex(fields[3]) if ln and len(fields) > 3 else b""
+        return seq, typ, payload
+
+    def downlink(self, cmd):
+        try:
+            with open(self.down, "w") as f:
+                f.write(cmd + "\n")
+            log.info("downlink: %s", cmd)
+            return True
+        except OSError as e:
+            log.warning("downlink %r refused: %s", cmd, e)
+            return False
+
+
+class Pen:
+    """The BlueZ side."""
+
+    def __init__(self, cfg, bus, ctl):
+        self.cfg, self.bus, self.ctl = cfg, bus, ctl
+        self.dev_path = None
+        self.chars = {}        # uuid -> object path
+        self.connected = False
+
+    def _objects(self):
+        om = dbus.Interface(self.bus.get_object(BLUEZ, "/"), "org.freedesktop.DBus.ObjectManager")
+        return om.GetManagedObjects()
+
+    def find(self):
+        for path, ifaces in self._objects().items():
+            dev = ifaces.get(DEV_IFACE)
+            if not dev:
+                continue
+            if self.cfg.address and str(dev.get("Address", "")).upper() == self.cfg.address:
+                self.dev_path = path
+                break
+            if not self.cfg.address and str(dev.get("Name", "")) == self.cfg.name:
+                self.dev_path = path
+                break
+        if not self.dev_path:
+            return False
+        dev = dbus.Interface(self.bus.get_object(BLUEZ, self.dev_path), PROPS)
+        if not dev.Get(DEV_IFACE, "Paired"):
+            log.warning("the pen is known to BlueZ but not bonded: pair it first (ladder N4)")
+            return False
+        return True
+
+    def connect(self):
+        dev = dbus.Interface(self.bus.get_object(BLUEZ, self.dev_path), DEV_IFACE)
+        props = dbus.Interface(self.bus.get_object(BLUEZ, self.dev_path), PROPS)
+        if not props.Get(DEV_IFACE, "Connected"):
+            log.info("connecting to the pen")
+            dev.Connect()
+        self.connected = True
+        self.resolve()
+
+    def resolve(self):
+        self.chars = {}
+        for path, ifaces in self._objects().items():
+            chr_ = ifaces.get(CHR_IFACE)
+            if chr_ and str(path).startswith(self.dev_path + "/"):
+                self.chars[str(chr_["UUID"]).lower()] = path
+        log.info("pen GATT: %d characteristics resolved", len(self.chars))
+        for uuid in self.cfg.notify_uuids:
+            path = self.chars.get(uuid)
+            if not path:
+                log.warning("notify characteristic %s not found", uuid)
+                continue
+            obj = self.bus.get_object(BLUEZ, path)
+            props = dbus.Interface(obj, PROPS)
+            props.connect_to_signal("PropertiesChanged", lambda i, ch, inv, u=uuid: self.on_props(u, ch))
+            try:
+                dbus.Interface(obj, CHR_IFACE).StartNotify()
+                log.info("notifications on for %s", uuid)
+            except dbus.DBusException as e:
+                log.warning("StartNotify %s: %s", uuid, e)
+        if self.cfg.status_uuid and self.cfg.status_request:
+            self.write(self.cfg.status_uuid, self.cfg.status_request)
+
+    def write(self, uuid, data, with_response=True):
+        path = self.chars.get(uuid)
+        if not path:
+            log.warning("characteristic %s not resolved; cannot write %d bytes", uuid, len(data))
+            return False
+        chr_ = dbus.Interface(self.bus.get_object(BLUEZ, path), CHR_IFACE)
+        opts = {"type": dbus.String("request" if with_response else "command")}
+        try:
+            chr_.WriteValue(dbus.Array([dbus.Byte(b) for b in data], signature="y"), opts)
+            log.info("wrote %d bytes to %s: %s", len(data), uuid, data.hex())
+            return True
+        except dbus.DBusException as e:
+            log.warning("WriteValue %s: %s", uuid, e)
+            return False
+
+    def on_props(self, uuid, changed):
+        if "Value" not in changed:
+            return
+        data = bytes(bytearray(changed["Value"]))
+        log.info("notify %s: %s", uuid, data.hex())
+        for r_uuid, prefix, cmd in self.cfg.rules:
+            if r_uuid == uuid and data.startswith(prefix):
+                self.ctl.downlink(cmd)
+
+    def on_uplink(self, typ, payload):
+        if not self.connected:
+            log.info("uplink type %d (%d bytes) while the pen is not connected; kept", typ, len(payload))
+            return
+        if self.cfg.timing_uuid:
+            self.write(self.cfg.timing_uuid, payload, with_response=True)
+        else:
+            log.warning("no timing_uuid configured; uplink type %d not forwarded: %s", typ, payload.hex())
+        for cmd in self.cfg.after_timing:
+            self.ctl.downlink(cmd)
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s", stream=sys.stderr)
+    cfg = Config(CONF)
+    ctl = Controller(cfg.sysfs)
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    pen = Pen(cfg, bus, ctl)
+    loop = GLib.MainLoop()
+
+    def try_pen():
+        if not pen.connected:
+            try:
+                if pen.find():
+                    pen.connect()
+            except dbus.DBusException as e:
+                log.warning("pen: %s", e)
+        return True
+    try_pen()
+    GLib.timeout_add_seconds(10, try_pen)
+
+    # uplink frames: a uevent on the SPI device announces each one
+    ctx = pyudev.Context()
+    mon = pyudev.Monitor.from_netlink(ctx)
+    mon.filter_by("spi")
+    mon.start()
+
+    def on_udev(fd, cond):
+        dev = mon.poll(0)
+        if dev is not None and dev.action == "change" and dev.sys_path.rstrip("/").endswith(os.path.basename(cfg.sysfs)):
+            try:
+                seq, typ, payload = ctl.read_uplink()
+            except (OSError, ValueError, IndexError) as e:
+                log.warning("pen_uplink unreadable: %s", e)
+                return True
+            if seq != ctl.last_seq:
+                ctl.last_seq = seq
+                log.info("uplink #%d type %d: %s", seq, typ, payload.hex())
+                pen.on_uplink(typ, payload)
+        return True
+    GLib.io_add_watch(mon.fileno(), GLib.IO_IN, on_udev)
+
+    signal.signal(signal.SIGTERM, lambda *a: loop.quit())
+    loop.run()
+
+
+if __name__ == "__main__":
+    main()

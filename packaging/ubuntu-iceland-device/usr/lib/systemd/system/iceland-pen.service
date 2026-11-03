@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Not enabled by the package: ladder A.3c N5 enables it once the pen's GATT
+# identifiers are in /etc/iceland/pen.conf and the pen is bonded (N4).
+[Unit]
+Description=OnePlus Pad 4: pen handshake bridge (Stylo Pro over Bluetooth)
+After=bluetooth.service
+Requires=bluetooth.service
+ConditionPathExists=/etc/iceland/pen.conf
+ConditionPathExists=/sys/bus/spi/devices/spi0.0/pen_uplink
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/iceland/iceland-pen
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+# OnePlus Pad 4: /etc/iceland/pen.conf for iceland-pen (ladder A.3c N5).
+# Copy to /etc/iceland/pen.conf and fill in what rung N4 learns; the pen's
+# address is device-local and never goes into the repo.
+[pen]
+name = OnePlus Stylo Pro
+# address = AA:BB:CC:DD:EE:FF     (optional: match by address instead of name)
+sysfs = /sys/bus/spi/devices/spi0.0
+
+[gatt]
+# The characteristic that receives the controller's uplink timing block
+# (stock: attribute handle 0x0067, write-with-response). UUID from
+# `bluetoothctl menu gatt list-attributes` after bonding.
+timing_uuid =
+# The vendor status characteristic (stock: handle 0x003d) and the request
+# whose reply is "2c 01 01 01 01" (hex bytes, spaces allowed).
+status_uuid =
+status_request =
+# Characteristics to subscribe to (comma separated UUIDs).
+notify_uuids =
+# Downlink commands to the controller right after the timing block is
+# written (comma separated; see pen_downlink in the driver).
+after_timing = timing_ack 0, con_sta 1, cfg_id 1, pen_info 2
+
+[rules]
+# <notify uuid>:<hex prefix of the notification> = <downlink command>
+# 0000xxxx-2a69-11ec-8d3d-0242ac130003:2c90 = con_sta 1
