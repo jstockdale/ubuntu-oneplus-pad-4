@@ -193,10 +193,14 @@ header:
 | `packaging/…/alsa/ucm2/` | BSD-3-Clause | adapted from the Fedora iceland port's UCM2 profile |
 
 Full texts are in [LICENSES/](LICENSES/). One caveat is recorded honestly:
-the Fedora iceland port (`mzakamin-hub/iceland-mainline`) declares no license
-for its userspace files; the pieces adapted from it carry attribution and we
-are asking its author to state one. Its kernel patches are GPL-2.0 like any
-kernel change and carry the author's sign-off.
+the Fedora iceland port (`mzakamin-hub/iceland-mainline`) declares no
+repository-wide license; some of its files carry their own SPDX headers
+(for example its bdaddr, provisioning and thermal helpers are
+GPL-2.0-or-later), which govern those files, while the UCM profile and the
+topology overlay we adapted carry none beyond Linaro's. The adapted pieces
+carry attribution and we are asking its author to state a license. Its
+kernel patches are GPL-2.0 like any kernel change and carry the author's
+sign-off.
 
 No proprietary firmware, stock partition image or device dump is, or ever will
 be, committed here.

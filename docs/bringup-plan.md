@@ -157,24 +157,107 @@ predates the needed fixes.
   auto-rotation + 20-min soak · S7 ship · H1 hall/lid (Fedora 0030),
   independent.
 
+## A — Audio, Bluetooth, pen, thermal polish (rootfs-first; one kernel rung)
+
+Verified 2026-11-02 (remaining-audio reader): the wired-headphone "plays
+four periods then EIO" is not a bug — with no jack detected the common
+machine driver keeps the HPH DAPM endpoint off, the codec-DMA sink stops
+consuming and aplay starves. The Pad 4 has no 3.5 mm jack: the path needs
+a USB-C analog headset or adapter (MBHC + the WCD939x Type-C mux, both
+bound and in the pin; Fedora 0186–0192 are already in Perpetua). Bluetooth
+is up on BRAHMA 2.0.1 firmware but broadcasts the Perpetua board file's
+placeholder address AD:5A:00:00:00:25 (as every Pad 4 on Perpetua does);
+this unit's persist has no bluetooth directory, so Fedora's provisioning
+sources do not exist here; the WLAN MAC is likewise the firmware default
+00:03:7f:12:34:56. Mic noise floor at parity (−61.4/−60.7 dBFS median vs
+−64); 0059 is complete (ADPT_CTRL written). Thermal: kernel CPU/GPU loops
+exist (90 °C passive, step_wise); no NTC/skin zones in our DT, so the
+decoded shell model cannot run yet.
+
+1. BT/WLAN identity (rootfs-only, 0.2.22): /etc/iceland/bdaddr + an
+   iceland-bdaddr.service (btmgmt power on → off → public-addr, retried,
+   re-run by udev on hci0 add; Fedora's v3 ordering) and the same for the
+   WLAN MAC. Owner decision: factory values (read from stock Android:
+   persist.vendor.service.bdroid.bdaddr) or a stable per-unit derivation
+   from /sys/devices/soc0/serial_number (phonewave's method) — derivation
+   recommended unless the factory values are already known. PASS: the new
+   address survives a reboot and a power cycle of the controller.
+2. BT audio: apt install libspa-0.2-bluetooth; pair a keyboard or headset
+   (none recorded as owned). PASS: pairing persists across a reboot; an
+   A2DP sink appears in `wpctl status`.
+3. Pen (next kernel bundle after VP): adapted Fedora 0036 (BTN_STYLUS/2,
+   axis resolution from touchscreen-x-mm/y-mm; hunk 5 must be rewritten
+   for our probe) + 0037 (mm values in the controller frame) + a one-hunk
+   fix so the pen goes through touchscreen_report_pos like touch (its
+   coordinates are raw today). Evdev gate first; libinput under C5.
+4. Thermal baseline during the C5 soak (tb323fu's thermal-stress pattern:
+   600 s all-core + glmark2; CPU zones held under 95 °C, no critical
+   trip). The ADC/NTC zones (Perpetua cf2156997bf7, 573a270f7b90 +
+   CONFIG_QCOM_SPMI_ADC5_GEN3; Fedora 0056/0190 skin/XO/USB-C) come with
+   the pin bump; only then the userspace model (iceland-thermal,
+   GPL-2.0-or-later, with its decoded-model provenance question).
+5. Headphones once a USB-C analog headset exists: first gate is
+   SW_HEADPHONE_INSERT=1 and an MBHC plug line on insertion; then a
+   Headphones UCM device from the wcd939x sequences alsa-ucm-conf already
+   ships; if detection never fires, obtain Fedora's q90w2 headset fixes.
+
 ## C6 — Hardening / dailyability (after C5)
 
-- Suspend/resume campaign. Facts: /sys/power/mem_sleep is "s2idle [deep]"
-  (an accidental suspend today would be PSCI deep — one reason the sleep
-  targets are masked); the Fedora DT's instant-wake wake-gpios issue and
-  the UFS MCQ suspend fix are tracked in media-misc-plan.md; Perpetua's
-  head added "aston: suspend diagnostics". Single-variable flights over
-  the serial console with Wi-Fi down first; the usb0 gadget is expected to
-  drop across suspend; recovery = power press / power-cycle to #39.
+Verified 2026-11-02 (suspend reader): the tablet has never suspended
+(suspend_stats 0/0). /sys/power/mem_sleep is "s2idle [deep]" — a plain
+`systemctl suspend` today would attempt PSCI deep, which this SoC does not
+support (hence the masked sleep targets since 0.2.21). Two deterministic
+hazards are in the live tree: (1) PCIe WAKE# is armed as a dedicated
+level-high wake IRQ (IRQ 256, GPIO 104 pulled up) → instant wake, Fedora's
+symptom; disarmable at runtime with `power/wakeup=disabled` on
+0000:00:00.0, permanently by dropping wake-gpios as Fedora's final DT does;
+(2) the pin lacks Perpetua ebe4aed7e940 (2026-10-29, one day after our
+pin): PCIe/USB GDSCs PWRSTS_OFF_ON → RET_ON, "on resume gcc_pcie_0_gdsc
+stays stuck off and the phone resets" — must precede any flashed suspend.
+The serial console is the USB gadget, which dwc3 device-mode suspend
+disconnects, so the witnesses are the panel, the host's USB log and the
+post-hoc suspend_stats/journal. No MCQ on our UFS DT (single reg, no
+msi-parent), so the "MCQ suspend fix" does not apply. CONFIG_PM_DEBUG is
+unset (no pm_wakeup_irq); Perpetua added it for aston on 2026-11-03.
+
+- S0 once, before any flight: drill and record the hard-reset gesture on
+  the idle, synced tablet (runbook says power+vol-up; the media plan says
+  power ≥10 s; only Vol-Down+Power ~15 s → fastboot is verified).
+- F1 baseline on flashed #39, nothing built: battery ≥40 %, tethered,
+  host `journalctl -k -f`; on the tablet `nmcli radio wifi off`, `echo
+  disabled > /sys/bus/pci/devices/0000:00:00.0/power/wakeup`, snapshot
+  wakeup_sources + /proc/interrupts + suspend_stats, then `systemd-run
+  --unit=s2idle-f1 rtcwake -m freeze -s 30` (freeze = s2idle, bypasses
+  the deep default; the unit survives the gadget drop). Do not press the
+  power key during the window. PASS: suspend_stats success 0→1, fail 0;
+  "PM: suspend entry (s2idle)"/"suspend exit" ≥25 s apart; panel, gadget
+  and ssh back within 60 s. FAIL (a) wakes in <5 s → diff wakeup_sources
+  → disable that source → F1b; (b) sleeps then resets → GDSC hazard
+  confirmed → F2 = RAM boot with ebe4aed7e940 + CONFIG_PM_DEBUG=y; (c)
+  never wakes → power press, else the drilled reset → fastboot → boot_b.
+- Then the DT pair (drop wake-gpios; USB wakeup-source) as our own
+  patches, CONFIG_HOTPLUG_PCI_PCIE=y (Perpetua's route for the root port
+  to reach D3, 78b1d23d88bc) and the Wi-Fi-up rung; flash after the
+  RAM-boot gate. Policy last, rootfs-only: tmpfiles mem_sleep=s2idle,
+  sleep.conf.d MemorySleepMode=s2idle, logind HandlePowerKey=suspend,
+  unmask the sleep targets, GNOME timers back on.
+- Drain (S3) is unreachable on the pin: the single-cluster CPU PM domain
+  makes the firmware deny system power-down; d68240c6e4bb (two clusters
+  + rpmh-stats node) is pin-bump material, with cf7e4df5e479 (UFS lane
+  clocks → CXO shutdown).
 - The filed one-shots: T+60 USB bounce, early console loss, battmgr uevent
   EAGAIN, depmod modules.builtin.modinfo, on-device update-initramfs
   writing an unused /boot initrd.
-- Kernel pin bump (one flight): past 9ba37ef1db70 (drop 0028's READ_DONE
-  hunk), picking up 8bd03159587a (CPU passive cooling), 006b67a31bae
-  (battmgr 9 V PD), 476ac2f9e476 (ath12k DRV wake knobs), the dpu/dp
-  DisplayPort fixes; re-diff 0011–0024 if they move.
+- Kernel pin bump (one flight, after VP and C5): past 9ba37ef1db70 (drop
+  0028's READ_DONE hunk); suspend block ebe4aed7e940, d68240c6e4bb,
+  78b1d23d88bc, cf7e4df5e479, 8b2990f9ae9f; thermal/ADC cf2156997bf7,
+  573a270f7b90, b4ab5eb72d15 (+CONFIG_QCOM_SPMI_ADC5_GEN3=m) — note
+  8bd03159587a only relocates iceland's existing 90 °C trips; battmgr
+  006b67a31bae (9 V PD); ath12k 476ac2f9e476 (inert without
+  qcom,drv-supported); the dpu/dp DisplayPort fixes; re-diff 0011–0024 and
+  0029–0036 if they move.
 - Upstreaming: docs/upstreaming.md (WRITE_DONE consistency patch, our
-  0002/0004–0007/0010, the license request to the Fedora port).
+  0002/0004–0007/0010/0031, the license request to the Fedora port).
 
 ## Phase D — Waydroid (after C5 stable)
 
@@ -191,5 +274,6 @@ C4: audio PD → topology/UCM → amps → mics → chain → stock ceiling → 
 VP: import (done) → build gate → RAM-boot first light → decode → flash → encode → hardening.
 C5: guards (done) → T2 (done) → apt desktop → GDM on glass → taps/scale/power key → soak → clean image.
 S:  host debs + DSP tree → secure-node attach → (DT flight) → ssccli → iio-sensor-proxy → GNOME rotate → ship.
-C6: pin bump → s2idle campaign → one-shots → upstreaming.
+A:  BT/WLAN identity (0.2.22) → BT audio + pairing → pen patches (next bundle) → thermal census → headphones (needs a USB-C headset).
+C6: S0 reset drill → F1 s2idle baseline on #39 → GDSC + PM_DEBUG RAM boot → DT pair + pciehp → Wi-Fi-up → policy → pin bump → one-shots → upstreaming.
 D:  Waydroid.

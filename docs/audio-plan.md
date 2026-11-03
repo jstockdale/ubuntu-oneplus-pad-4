@@ -1,5 +1,28 @@
 # Audio bring-up plan (C4): the AudioReach topology, TDM speakers, six smart amps
 
+> **Corrections from the 2026-11-02 readiness review:**
+> - §2.2's table marks Fedora 0186/0187/0188/0192 (MBHC robustness) as
+>   "no (headset phase)": all four are already in the Perpetua pin
+>   (a715d03b1e0f, 7f6a6dfa20b1, bdb9dab399d7, e2044466fbae), as is
+>   f33c93c8b81f; the headset kernel backlog is Fedora's unpublished q90w2
+>   set (MG2_MISC switch register, class-H IQ, codec version after
+>   SoundWire attach, bandgap fine adjust), fetched only if a real headset
+>   fails to detect.
+> - 0059 is marked "partial": lpass-tx-macro writes ADPT_CTRL=0 at decimator
+>   POST_PMU (Perpetua f690330c9187) and the live regmap shows DEC0/DEC1 at
+>   0x00 — complete. Mic noise floor measured 2026-11-02: 1 s-window median
+>   −61.4/−60.7 dBFS (min −63.2/−61.9) vs Fedora's −64 — parity.
+> - The wired-headphone "4 periods then EIO" is starvation with no jack
+>   detected (common.c ties the HPH DAPM pins to the jack), not a bug; the
+>   Pad 4 has no 3.5 mm jack, the path needs a USB-C analog headset. Neither
+>   our UCM nor Fedora's public one has a Headphones device; alsa-ucm-conf
+>   ships codecs/wcd939x/Headphone*Seq.conf to build one from.
+> - Open question 5 (which USB-C analog headset) is still open; it is now
+>   the only blocker for the headphone rung.
+> - BT: the controller broadcasts the board file's placeholder
+>   AD:5A:00:00:00:25; persist has no bluetooth directory on this unit.
+>   libspa-0.2-bluetooth is not installed (A2DP/HFP need it).
+
 Date: 2026-11-01 (research night; flights when C4 opens). Companion to
 docs/porting-log.md (:981-986, the C4 doorbell) and docs/firmware-manifest.md
 ("Audio: LPASS topology + UCM2 profiles — C4").

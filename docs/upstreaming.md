@@ -122,3 +122,7 @@ and carry their sign-off, so those are fine. Draft issue text:
 > fixes saved weeks.
 
 Status: not yet sent (the port maintainer's GitHub account is needed).
+Note (2026-11-02 review): several of their files do carry SPDX headers
+(iceland-bdaddr, iceland-provision, iceland-thermal: GPL-2.0-or-later);
+anything adopted from those keeps that license per file — the request is
+about the repository default and the header-less userspace files.

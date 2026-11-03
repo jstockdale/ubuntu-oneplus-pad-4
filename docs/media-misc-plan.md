@@ -27,6 +27,22 @@
 >   port's working choice, not on a fresh stock-DT read.
 > - The config of record is /srv/ubuntu-iceland/out/kernel-iceland/
 >   kernel.config (the cited line numbers match it).
+> - Suspend (§4), from the same review: the headline hazard is Perpetua
+>   ebe4aed7e940 (2026-10-29, one day after our pin) — PCIe/USB GDSCs
+>   PWRSTS_OFF_ON→RET_ON, "on resume gcc_pcie_0_gdsc stays stuck off and the
+>   phone resets"; it precedes the DT pair. CONFIG_PM_SLEEP_DEFAULT_S2IDLE is
+>   Fedora-only; the tablet selects "[deep]" — fly with `rtcwake -m freeze`
+>   and set policy rootfs-side (tmpfiles + sleep.conf.d). pm_wakeup_irq needs
+>   CONFIG_PM_DEBUG=y (unset in our config). Fedora's final DT drops
+>   wake-gpios entirely (0301 supersedes 0040); runtime
+>   power/wakeup=disabled on 0000:00:00.0 is the no-build equivalent.
+>   Perpetua's route for the root port is CONFIG_HOTPLUG_PCI_PCIE=y
+>   (78b1d23d88bc), not Fedora 0113. No MCQ on our UFS DT, so the ESI fix
+>   is not applicable. qcom_stats needs the rpmh-stats node from
+>   d68240c6e4bb (also the two-cluster CPU PM domains the drain rung needs).
+>   The serial witness during sleep is the gadget, which drops — use the
+>   panel, the host USB log and post-hoc suspend_stats. The hard-reset
+>   gesture (power ≥10 s vs power+vol-up) is unverified; drill it once.
 
 Date: 2026-11-01 (research session; no device contact, no flights flown).
 Scope: the five remaining minor subsystems after C2/C3 — video decode/encode

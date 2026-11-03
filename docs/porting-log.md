@@ -1892,3 +1892,36 @@ committed baseline: 0031 is now one file, +4 lines; all 36 patch FILES
 apply in order on a fresh worktree (checked the way the build does it).
 Rule: apply-checks test the patch files, never the worktree they were
 made from. Build re-kicked (build-vp0.log) with the 0.2.21 initramfs.
+
+## 2026-11-02 — Suspend and polish findings integrated; C5 desktop install started
+
+Suspend reader (C6), all verified on the live tree/tablet: never suspended
+(suspend_stats 0/0); mem_sleep "s2idle [deep]"; PCIe WAKE# armed as a
+level-high dedicated wake IRQ (IRQ 256, gpio104 pull-up) = instant wake,
+disarmable via power/wakeup=disabled on 0000:00:00.0; the pin lacks
+Perpetua ebe4aed7e940 (GDSCs OFF_ON→RET_ON; "on resume gcc_pcie_0_gdsc
+stays stuck off and the phone resets") — mandatory before any flashed
+suspend; CONFIG_PM_DEBUG unset; no MCQ on our UFS DT (the "MCQ suspend
+fix" was a misreading); pciehp (CONFIG_HOTPLUG_PCI_PCIE=y) is Perpetua's
+route for root-port D3; rpmh-stats/two-cluster PM domains (d68240c6e4bb)
+gate the drain rung. The serial console is the gadget and drops across
+sleep. Plan C6 rewritten around F1 = rtcwake -m freeze on #39 with Wi-Fi
+off and WAKE# disarmed, in a transient unit, after one hard-reset drill.
+
+Remaining-audio reader: headphone "4 periods then EIO" = starvation with
+no jack detected (HPH DAPM endpoint gated by the jack), not a bug; the Pad
+4 has no 3.5 mm jack → needs a USB-C analog headset (owner question).
+Fedora 0186–0192 are already in the pin (audio-plan corrected); 0059 is
+complete; mic floor at parity. BT broadcasts the board file's placeholder
+AD:5A:00:00:00:25 and the WLAN MAC is the firmware default — persist on
+this unit has no bluetooth dir, so identity will be owner-supplied or
+derived from the SoC serial (phonewave method) in 0.2.22. Pen: Fedora 0036
+hunk 5 needs rewriting for our probe, plus a pen touchscreen_report_pos
+fix nobody carries. Thermal: kernel loops fine; NTC/skin zones need the
+ADC pin-bump work before any daemon. Licensing nuance: some Fedora files
+DO carry SPDX (GPL-2.0-or-later helpers) — README caveat refined.
+
+C5 flight started: `ubuntu-desktop-minimal` installing on the tablet as a
+transient systemd unit (iceland-desktop-install.service, log in
+/var/log/iceland-desktop-install.log), detached from ssh; 844 packages.
+VP0 build running in parallel on the host (36 patches, build-vp0.log).

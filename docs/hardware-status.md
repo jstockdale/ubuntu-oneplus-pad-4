@@ -18,7 +18,7 @@ package `ubuntu-iceland-device` 0.2.21.
 |---|---:|---|
 | Boot to initramfs | ✅ | 2026-10-30, Phase A: 18 RAM-boot flights; FDT handoff engaged (model "OnePlus Pad 4"), all six UFS LUNs seen |
 | Boot to rootfs (userdata) | ✅ | 2026-10-31, Phase B: power-on → Ubuntu with no PC attached, zero failed units; `qbootctl.service` re-marks slot B every boot |
-| Storage (UFS) | ✅ | 453 GB ext4 root on `userdata`, grown on first boot; the MCQ suspend fix is queued for the suspend phase |
+| Storage (UFS) | ✅ | 453 GB ext4 root on `userdata`, grown on first boot; legacy single-queue UFS in our DT (no MCQ), so the Fedora MCQ/ESI suspend fix does not apply |
 | Co-processors (ADSP, CDSP, SOCCP) | ✅ | adsp and cdsp booted by the kernel, soccp attached; the audio protection domain publishes on every boot since the 2026-11-02 pd-mapper fix (10/10 reboots) |
 | Display (dual-DSI NT36536, 3392×2400, up to 144 Hz) | ✅ | 2026-11-01: boot console and Wayland on glass; stock porch (0009) and sync orientation (0010). Reliability census 2026-11-02: 20/20 boots (kernels #36–#39); the 8 "DSI PLL(0) lock failed" lines per boot are cosmetic. Panel blank/unblank ×3 clean (T2) |
 | Backlight (KTZ8869) | ✅ | driver bound, brightness readable/writable (sysfs max_brightness 4095, runs at 2047); follows panel blank/unblank (T2, 2026-11-02); a full sweep is still owed |
@@ -26,19 +26,19 @@ package `ubuntu-iceland-device` 0.2.21.
 | Touchscreen (NT36536 over SPI) | ✅ | 2026-11-01, C2: 10-point multitouch, auto-loads at t≈2 s on every boot (20/20), 30-minute soak clean (patches 0007–0010); survives panel blank/unblank ×3 (T2, 2026-11-02; tap confirmation pending) |
 | Stylus / pen | 🟡 | the pen registers alongside touch; `BTN_STYLUS` and the physical-size properties are missing (sibling-port patch queued) |
 | Buttons | ✅ | power (clean shutdown), volume up/down, resin |
-| Wi-Fi (WCN7860 / ath12k) | ✅ | 2026-11-01, C3: joins the configured network by itself; ssh over the air both ways; regulatory db installed (patches 0003–0005) |
-| Bluetooth (WCN7860) | 🟡 | controller up, BRAHMA firmware loads (0006); pairing untested; the per-unit address from `persist` is not wired yet |
+| Wi-Fi (WCN7860 / ath12k) | ✅ | 2026-11-01, C3: joins the configured network by itself; ssh over the air both ways; regulatory db installed (patches 0003–0005). MAC is the firmware default 00:03:7f:12:34:56 (same per-unit identity gap as Bluetooth) |
+| Bluetooth (WCN7860) | 🟡 | controller up, BRAHMA 2.0.1 firmware loads (0006); pairing untested; broadcasts the Perpetua board file's placeholder address AD:5A:00:00:00:25 — this unit's persist holds no bluetooth directory, so the address will be owner-supplied or derived from the SoC serial (bringup-plan.md A) |
 | USB gadget (serial console + usb0 network) | ✅ | fixed-MAC ECM, 192.168.7.2, survives reboots with no manual steps; the fallback access path |
 | USB host / OTG | ❓ | |
 | USB-C DisplayPort out | ❓ | in the iceland DTS since 2026-09-21 |
 | Speakers (6× TFA9865 over TDM) | ✅ | 2026-11-02, audio ladder A0–A7: stock loudness behind the PipeWire protection chain (HPF, EQ, SC4 compressor, −1 dBFS limiter) as the default output; all six amplifiers verified in their operating state at the stock ceiling |
 | Microphones (WCD9395, codec DMA) | ✅ | 2026-11-02: kernel patch 0028 (every DSP capture completion had been dropped as "too short", 56 vs 60 bytes; the same fix landed in Perpetua as 9ba37ef1db70); voice recorded and played back on a cold boot; noise floor −61.5/−60.5 dBFS RMS vs the Fedora port's −64 (parity) |
-| Wired headphones | 🟡 | the output path starts (first buffers play) then stops with EIO — a separate issue; no headset was plugged in, and the Headphones UCM device does not exist yet |
+| Wired headphones (USB-C analog) | ❓ | untestable without a USB-C analog headset/adapter (no 3.5 mm jack on this tablet): with no jack detected the HPH endpoint stays off and playback starves (the earlier "4 periods then EIO" was that, not a bug). MBHC + Type-C mux bound; the Headphones UCM device is still to be written from the wcd939x sequences alsa-ucm-conf ships |
 | Battery telemetry | ✅ | pmic-glink battery manager: percentage, voltage, current, temperature live |
 | Charging | ✅ | charge control is autonomous on the ADSP (as stock); USB-PD negotiates on a real charger; SuperVOOC fast charge ❓ (the Fedora port reports it unsupported) |
-| Thermal | 🟡 | 63 kernel thermal zones registered; no skin-temperature model or policy daemon yet |
+| Thermal | 🟡 | 63 zones; kernel passive loops on CPU (90 °C, step_wise, cpufreq cooling) and GPU (105 °C, devfreq); no NTC/skin zones in our DT yet, so no shell-temperature model or policy daemon |
 | Sensors (IMU, compass, light, hall) | ❓ | identified (Bosch IMU, AKM compass, light sensor, lid magnet), all behind the ADSP sensor hub; factory calibration captured; plan in sensors-plan.md |
-| Suspend / resume | ❓ | deliberately untested; auto-suspend will be disabled before a desktop ships (C6) |
+| Suspend / resume | ❓ | never attempted (suspend_stats 0/0); mem_sleep defaults to deep, sleep targets masked since 0.2.21; known hazards and the F1 procedure in bringup-plan.md C6 |
 | Video decode (VPU) | ❓ | firmware vpu40_2v.mbn staged on the device; iris driver built but has no kaanapali compatible at the pin — patches 0029–0036 imported 2026-11-02, flight pending (bringup-plan.md VP) |
 | Cameras | ❓ | camss loads safely; no pipeline, sensor or firmware work yet; last phase |
 | GDM + GNOME session | ❓ | not installed yet; Weston (GL) proven; the C5 guards (fwupd pinned out, sleep targets masked, power-key policy, no-suspend dconf) shipped in 0.2.21 and verified 2026-11-02 |
