@@ -2060,3 +2060,34 @@ zero iris error lines; SMMU: only the baseline cbfrsynra=0x800 lines,
 none on 0x1940/0x1943/0x1944/0x1a20; audio card, ADSP/CDSP, touch, the
 single deferred TNOC entry all as on #39. Firmware/PAS happens at the
 first session open — VP2 (decode) is the proof.
+
+## 2026-11-02 — VP2 on kernel #41: firmware system error on the first real
+## session; the iris fix set (13 patches) goes in as 0043–0055; build #42
+
+GStreamer registered v4l2{h264,h265,vp9,av1}dec and v4l2{h264,h265}enc on
+the new nodes. H.264 and HEVC pipelines died at 0.02 s — NOT the decoder:
+`failed delayed linking some pad of GstQTDemux to GstH264Parse` (a caps
+problem between the test clip's container and the parser/decoder; the
+device opened, and `v4l2-ctl --set-fmt-video-out H264` +
+`--try-fmt-video NV12 1920x1080` are accepted). The VP9 pipeline
+(matroskademux → vp9parse → v4l2vp9dec) was the first to reach the
+firmware: 9 s in, `qcom-iris 2000000.video-codec: received system error
+of type 0x5000003`, and the pipeline hung (killed). No SMMU faults on the
+video SIDs; nothing else on the system affected (ssh, GDM, audio alive).
+My diagnostic ssh died once because `pkill -f` matched its own command
+line — the runbook rule, re-learned; use `pkill -x`.
+
+The 13 iris patches the plan had deferred as "VP4 hardening" describe
+this failure: infiniti 0069 "Release the MVP NoC low-power request on
+vpu4x — otherwise the next session after a power collapse hangs the
+firmware", 0070 (kaanapali firmware crashes on B-frames without
+hierarchical-B), 0071 (error flags on input buffers make GStreamer drop
+frames); iceland 0157 (iova allocation from the restrict region — DMA
+addressing per SMMU stream), 0158 (bit-depth validation of capture
+formats), 0159/0160 (hfi_sys_ops NULL guard, invalid uc_region boot
+failure), 0246 (reset the AHB bridge before HW-controlled power mode),
+0247 (power-off ordering), 0248–0250 (core lock, open limit, instance
+refcount), 0292 (SMPTE 170M signalling). All 13 apply on 0001–0036;
+imported as 0043–0055 (0037–0042 are reserved for the stylus patches in
+preparation), authorship kept. Build #42 = 49 patches kicked
+(build-vp1b.log). The tablet stays on the #41 RAM boot meanwhile.
