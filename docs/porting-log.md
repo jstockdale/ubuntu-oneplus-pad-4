@@ -3019,3 +3019,12 @@ rootfs tree and rides into the #46 boot; the previous one is under
 /var/backups/iceland. Package policy note: enable_11d is a module
 parameter, so a later Perpetua pin without 0068 will silently turn the
 scan back on — the pin-bump checklist gets "grep for enable_11d".
+
+Two forced reconnects with the driver's mac/reg debug on (enable_11d off):
+each one scanned, associated, logged "connection done, update reg rules …
+driver initiated regd update" at once (no wait) and had its DHCP lease
+within 0.1 s of CONNECTED; no handshake failure, no "Connection to AP
+lost" in the 50 s window, no regulatory timeout — the two timeouts of the
+previous 20 minutes (3130 s, 3141 s) belong to the associations made with
+the old module between the two swaps. The post-reload loss at 3369 s did
+not reproduce; it stays a watch item.
