@@ -2413,3 +2413,44 @@ the address is read through it. Both units complete (success). Starting
 iceland-radio-ids by hand applied the WLAN MAC live: Wi-Fi re-associated
 on the label MAC, new DHCP lease (ubuntu-iceland.local resolves; use the
 mDNS name rather than a fixed IP from now on). dpkg --audit clean.
+
+## 2026-11-02 — Stock Bluetooth address recovered; auto-rotation and touch-to-wake answered
+
+Bluetooth: the factory capture does hold the stock BD_ADDR after all —
+not in persist (no bluetooth dir) but as a line the stock OS wrote into
+the sdf LUN's log store when its HAL read the modem NV item ("Read
+MODEM_NV_BD_ADDR" followed by six little-endian bytes, two copies), and
+it sits next to the label's Wi-Fi MAC the way Qualcomm units are
+provisioned. Found by the bounded strings hunt over every capture image
+(still running while this was written; nothing else of interest so far).
+Installed on the tablet only: /etc/iceland/bdaddr now carries it, the
+machine-id-derived address kept beside it as bdaddr.derived;
+iceland-bdaddr.service restarted and programmed it on its second attempt
+as before; `btmgmt info` shows the controller on it. The value stays off
+the repo and the logs; the docs that said "not recoverable" are
+corrected. The derivation fallback in iceland-radio-ids stays for units
+without a capture.
+
+Auto-rotation (owner's report): not a desktop setting — orientation-lock
+is off — but there is no accelerometer to follow: 0 IIO devices,
+iio-sensor-proxy 3.8-1 (pulled in by the desktop task) exports nothing
+(no SensorProxy on the system bus; it exits when it finds no sensor),
+hexagonrpcd is not installed, while the hub itself is alive (the SSC QMI
+service is on QRTR). Exactly phase S's gap; nothing to tune in GNOME.
+
+Touch-to-wake (owner's report): from blank only the power key wakes
+today, by design rather than by fault. 0008's panel follower runs
+nvt_ts_suspend when the panel disables — host command 0x11 (deep
+sleep), IRQ disabled, contacts released — and the driver has no gesture
+code at all (no WAKEUP_GESTURE, KEY_WAKEUP or enable_irq_wake); the
+touch node has no wakeup-source; wakeup_sources lists the PMIC power key
+only. The Fedora queue has nothing either (their README's wake list:
+power key, alarm, cover, keyboard, charger). In our favour: the touch IRQ
+is GPIO 158 and 158 is in the kaanapali PDC wake map
+(pinctrl-kaanapali.c), so an s2idle wake needs no pinctrl work; the touch
+node declares no supplies and the driver makes no regulator calls (its
+rails are not the panel's vddio/avdd/avee, which the panel driver drops
+at unprepare — to be confirmed on glass); nvt_ts_resume re-downloads the
+firmware, which is also how Novatek's vendor driver leaves gesture mode.
+Rung W written into the plan: W1 keep-awake flight, W2 gesture mode
+(0x13, KEY_WAKEUP), W3 s2idle wake source after C6.

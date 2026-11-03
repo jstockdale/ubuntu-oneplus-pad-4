@@ -46,18 +46,18 @@ earn a ✅ here.
 | Boot from own storage (A/B slot, `qbootctl`) | ✅ | power-on → Ubuntu, no PC; slot re-marked every boot |
 | Display (dual-DSI NT36536, 3392×2400, 144 Hz) | ✅ | console and Wayland on glass; stock timings |
 | GPU (Adreno 840, Mesa 26 / freedreno) | ✅ | OpenGL ES 3.2, GL-composited Weston |
-| Touchscreen (10-point) | ✅ | auto-loads every boot, 30-minute soak clean |
+| Touchscreen (10-point) | ✅ | auto-loads every boot, 30-minute soak clean; touch-to-wake not yet (planned) |
 | Stylus | 🟡 | registers; button and size properties missing |
 | Backlight, buttons | ✅ | |
 | Wi-Fi (WCN7860 / ath12k) | ✅ | auto-joins; ssh over the air |
-| Bluetooth | 🟡 | controller up; pairing untested |
+| Bluetooth | 🟡 | controller up on the device's factory address; pairing untested |
 | USB gadget (serial console + network) | ✅ | the fallback access path |
 | Speakers (6× TFA9865) | ✅ | stock loudness behind a PipeWire protection chain |
 | Microphones | ✅ | kernel patch 0028 (see [Upstreaming](#upstreaming)) |
 | Wired headphones | 🟡 | path starts then stops; untested with a headset |
 | Battery telemetry, charging | 🟡 | telemetry ✅; charging at 5 V/≈10 W on our kernel pin — 9 V PD and SuperVOOC (≈55 W) are in Perpetua since Oct 31 and come with the pin bump |
 | Thermal | 🟡 | zones registered; no policy daemon yet |
-| Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)) |
+| Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)); no auto-rotation until then |
 | Suspend / resume | ❓ | deliberately untested so far |
 | Video decode / encode (VPU) | ✅ | 2026-11-02: hardware H.264/HEVC/VP9 decode and H.264 encode, flashed (kernel #42) |
 | Cameras | ❓ | last phase ([docs/media-misc-plan.md](docs/media-misc-plan.md)) |

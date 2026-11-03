@@ -148,7 +148,13 @@ already on QRTR); the only kernel gap is the non-secure fastrpc node
 registry, 352 entries; stock dsp/adsp libs; ODM and vendor sensor
 configs). Nothing of the userspace stack exists in Ubuntu 26.04: libssc is
 absent, iio-sensor-proxy 3.8 lacks the SSC backend, hexagonrpcd 0.4.0
-predates the needed fixes.
+predates the needed fixes. The owner's auto-rotation report (2026-11-02,
+evening) is this gap and nothing else: GNOME's orientation lock is off,
+there are 0 IIO devices, the iio-sensor-proxy 3.8-1 the desktop task
+pulled in exports nothing (no SensorProxy on the system bus — it exits
+when it finds no sensor), hexagonrpcd is absent, and the hub is alive
+(SSC on QRTR). Rotation follows S5/S6, with the mount matrix checked on
+glass in all four orientations.
 
 - S1 host (no tablet, ~1 day): arm64 mmdebstrap build chroot;
   scripts/make-dsp-tree.sh (registry 0600, never published; socinfo from
@@ -180,18 +186,20 @@ is up on BRAHMA 2.0.1 firmware but broadcasts the Perpetua board file's
 placeholder address AD:5A:00:00:00:25 (as every Pad 4 on Perpetua does);
 this unit's persist has no bluetooth directory, so Fedora's provisioning
 sources do not exist here; the WLAN MAC is likewise the firmware default
-00:03:7f:12:34:56. Mic noise floor at parity (−61.4/−60.7 dBFS median vs
+00:03:7f:12:34:56 (both replaced since — A.1). Mic noise floor at parity (−61.4/−60.7 dBFS median vs
 −64); 0059 is complete (ADPT_CTRL written). Thermal: kernel CPU/GPU loops
 exist (90 °C passive, step_wise); no NTC/skin zones in our DT, so the
 decoded shell model cannot run yet.
 
 1. BT/WLAN identity — mechanism shipped as 0.2.24 (2026-11-02), values
-   device-local: /etc/iceland/bdaddr and /etc/iceland/wlan-mac hold the
-   addresses from the DEVICE LABEL (the owner has it; the factory capture
-   holds no plaintext copy — persist has no bluetooth dir, devinfo is
-   empty, the NV stores are OPLUS "OEM~~OEM" blobs — and Android's
-   per-install BT address lived in the userdata we overwrote). When a file
-   is absent it is generated once from /etc/machine-id (random per
+   device-local: /etc/iceland/wlan-mac holds the Wi-Fi MAC from the
+   DEVICE LABEL (the owner has it) and /etc/iceland/bdaddr the stock
+   Bluetooth address, which turned up on 2026-11-02 in the factory
+   capture's log store (a modem NV read the stock OS logged; persist has
+   no bluetooth dir, devinfo is empty and the NV stores are OPLUS
+   "OEM~~OEM" blobs, so it was a log line, not a provisioning file; it
+   sits next to the Wi-Fi MAC as Qualcomm units are provisioned). When a
+   file is absent it is generated once from /etc/machine-id (random per
    install) with the locally-administered bit — never from the SoC
    serial: a public recipe over an 8-hex-digit serial would let anyone
    recover the serial from the MAC in 2^32 guesses. Applied by
@@ -276,6 +284,58 @@ decoded shell model cannot run yet.
    SW_HEADPHONE_INSERT=1 and an MBHC plug line on insertion; then a
    Headphones UCM device from the wcd939x sequences alsa-ucm-conf already
    ships; if detection never fires, obtain Fedora's q90w2 headset fixes.
+
+## W — Touch-to-wake (one driver rung after #44; W3 after C6)
+
+Verified 2026-11-02 (owner's question): with the screen blanked (GNOME
+idle-delay 300 s, DPMS off, nothing suspended) only the power key wakes
+the tablet, by design of 0008: panel_disabling → nvt_ts_suspend → host
+command 0x11 (deep sleep), IRQ disabled, contacts released. nt36xxx.c
+has no gesture code (no WAKEUP_GESTURE, KEY_WAKEUP or enable_irq_wake),
+the touch node has no wakeup-source, wakeup_sources lists the PMIC power
+key only, and the Fedora queue carries nothing (their wake list: power
+key, alarm, cover, keyboard, charger). In our favour: the touch IRQ is
+GPIO 158, which is in the kaanapali PDC wake map (pinctrl-kaanapali.c),
+so an s2idle wake needs no pinctrl work; the touch node declares no
+supplies and the driver makes no regulator calls (its rails are not the
+panel's vddio/avdd/avee that the panel driver drops at unprepare — W1
+confirms the IC answers through a blank); nvt_ts_resume re-downloads the
+firmware, which is also how Novatek's vendor driver leaves gesture mode.
+The NT36xxx gesture mode is host command 0x13: the IC keeps a low-rate
+scan and raises its IRQ on a recognised gesture (double tap, ID 15 in
+Novatek's event map); OxygenOS offers double-tap-to-wake on this unit, so
+the stock firmware blob carries the engine. Two behaviours, the owner's
+choice: (a) any-touch wake — no deep sleep on blank, IRQ left armed,
+every contact is an input event and mutter unblanks; most sensitive, a
+few mW while blank, accidental wakes in a bag until H1 lid gating; (b)
+double-tap wake (stock behaviour) — gesture mode, the driver decodes the
+gesture and reports KEY_WAKEUP; lowest power, no single-touch wakes.
+Recommended: (b), with (a) run first as W1 because it proves the whole
+pipeline with one variable.
+
+- W1 keep-awake flight (RAM boot, one driver variable): a board DT
+  property (novatek,wake-on-touch) under which panel_disabling releases
+  the contacts but sends no 0x11 and leaves the IRQ on, and panel_enabled
+  skips the firmware re-download. PASS: blank at idle, one touch brings
+  the screen back; evtest still reports after the blank; /proc/interrupts
+  shows no storm on the touch line; battmgr current while blank recorded
+  (the IC's cost). FAIL (IC dead after a blank) → its rail is panel-tied →
+  W2 must keep that rail up, or wake stays s2idle-only.
+- W2 gesture mode: 0x13 instead of 0x11, IRQ left enabled,
+  nvt_ts_work_func reads the gesture byte while !bTouchIsAwake and reports
+  KEY_WAKEUP press/release on the touch input device (EV_KEY capability
+  added; udev then tags ID_INPUT_KEY and libinput forwards the key, which
+  resets mutter's idle monitor — the gate checks `libinput debug-events`
+  shows it); the resume path is unchanged. PASS: double tap wakes from
+  blank in ≤1 s, 20/20; a single touch does not; 30-min blank soak with
+  zero spurious wakes.
+- W3 from s2idle, after C6 F1 passes: wakeup-source on the touch node,
+  device_init_wakeup + enable_irq_wake in suspend. PASS: rtcwake freeze,
+  double tap wakes, 10/10; pm_wakeup_irq (CONFIG_PM_DEBUG arrives with P)
+  names GPIO 158.
+- Patches: one driver patch (GPL-2.0-only) and one board DT patch
+  (BSD-3-Clause); offered to Perpetua together with 0037/0039 (same file,
+  so it follows them in the series).
 
 ## P — Kernel pin bump (charging: PD 9 V and SuperVOOC; suspend; thermal ADC)
 
@@ -401,13 +461,14 @@ shared-kernel Android apps. Scoped when C5 lands.
 | Step | State | What it still needs |
 |---|---|---|
 | #42 video fix set | **flashed** (boot_b 82219574) | — |
-| #43 stylus input (0037–0039) | building (52 patches) | build gate → stage nt36536_ts.ko → owner `fastboot boot` → flight-stylus gate with the Stylo Pro (buttons, resolution, four corners, tilt signs, pressure ceiling) |
+| #43 stylus input (0037–0039) | **built clean** 2026-11-02 21:07 (52 patches; boot-43-e9368756; only nt36536_ts.ko differs from #42; the DTB carries the mm properties; the initrd carries no touch module); the new module is staged on the tablet's rootfs with the #42 copy kept in /var/backups/iceland | owner `fastboot boot` (needs the USB cable back) → flight-stylus gate with the Stylo Pro (buttons, resolution 124, four corners, tilt signs, pressure ceiling) |
 | #44 pen charger (staged 0056–0062) | host-verified, staged | promote: `git mv kernel/patches/staged/00{56..62}-*.patch kernel/patches/` + `git mv kernel/config/staged/config-pen-charger.fragment kernel/config/`; build (~60 min); RAM boot; gate order: PMH0101 regulators (no cmd-db debugfs on this kernel, so the RPMh resources LS3B/LS4B can only be proven by the boot — abort criterion) → driver bound, fw 0x20022, hBoost 7000 mV acked → pen on the magnet edge → battmgr telemetry unchanged; then ONE flash for #43+#44 |
 | Checkpoint | after the #44 flash | README, hardware-status, plan, patch provenance, upstreaming ledger, the status page artifact; push |
 | P pin bump (charging 9 V / SuperVOOC, GDSC, thermistors) | dry run done: 55/59 apply, 4 re-diffs listed | a build day: re-diff 0028/0031/0058/0061, re-merge config with Perpetua's devices/iceland/kernel.config, full census RAM boot on the PD adapter (expect ≈13 W), SuperVOOC test tethered with the thermistor zones present, flash |
-| S sensors | kernel side complete; nothing of the userspace exists | S1 host day (arm64 mmdebstrap chroot; make-dsp-tree.sh from the factory persist registry; hexagonrpc 0.5.0-1 → 598b591 + Fedora 0001/0002; libssc 0.4.4-2; iio-sensor-proxy 3.9-1 with ssc) — start when the host is not building kernels (qemu-user builds crawl under a kernel build) |
+| S sensors | kernel side complete; nothing of the userspace exists (the owner's auto-rotation report is this gap) | S1 host day (arm64 mmdebstrap chroot; make-dsp-tree.sh from the factory persist registry; hexagonrpc 0.5.0-1 → 598b591 + Fedora 0001/0002; libssc 0.4.4-2; iio-sensor-proxy 3.9-1 with ssc) — start when the host is not building kernels (qemu-user builds crawl under a kernel build) |
 | C6 suspend | hazards mapped; F1 procedure written | owner: one hard-reset drill (S0); then F1 on the flashed kernel with Wi-Fi off and WAKE# disarmed; the GDSC retention fix arrives with P, so F1 may reset — that is the expected data point |
-| A polish | identity done (0.2.25: label MAC on Wi-Fi, own BT address) | BT pairing + libspa-0.2-bluetooth; a USB-C analog headset for the headphone rung; loudness comparison vs stock; Chrome/Widevine playback test |
+| A polish | identity done (0.2.25: label MAC on Wi-Fi; the stock BT address since its recovery from the capture) | BT pairing + libspa-0.2-bluetooth; a USB-C analog headset for the headphone rung; loudness comparison vs stock; Chrome/Widevine playback test |
+| W touch-to-wake | facts mapped (section W): deep sleep on blank, no gesture code, GPIO 158 is PDC-wakeable | after #44: W1 keep-awake RAM boot → W2 double-tap gesture (KEY_WAKEUP) → flash with the next bundle; W3 (s2idle) after C6 F1 |
 | C5 leftovers | desktop in daily use on #42 | owner: power-press shows GNOME's dialog; four-corner taps under the compositor; 24 h soak on the real charger; then fold the guards into the desktop rootfs profile and build one clean image |
 
 Idle gate: no suspend attempt in ~2 h of the #41 session nor on #42 so far
@@ -423,6 +484,7 @@ C4: audio PD → topology/UCM → amps → mics → chain → stock ceiling → 
 VP: import (done) → build gate → RAM-boot first light → decode → flash → encode → hardening.
 C5: guards (done) → T2 (done) → apt desktop → GDM on glass → taps/scale/power key → soak → clean image.
 S:  host debs + DSP tree → secure-node attach → (DT flight) → ssccli → iio-sensor-proxy → GNOME rotate → ship.
-A:  BT/WLAN identity (0.2.22) → BT audio + pairing → pen patches (next bundle) → thermal census → headphones (needs a USB-C headset).
+A:  BT/WLAN identity (0.2.25; stock BT address since) → BT audio + pairing → pen patches (next bundle) → thermal census → headphones (needs a USB-C headset).
+W:  W1 keep-awake RAM boot → W2 double-tap gesture (KEY_WAKEUP) → flash → W3 s2idle wake source after C6.
 C6: S0 reset drill → F1 s2idle baseline on #39 → GDSC + PM_DEBUG RAM boot → DT pair + pciehp → Wi-Fi-up → policy → pin bump → one-shots → upstreaming.
 D:  Waydroid.

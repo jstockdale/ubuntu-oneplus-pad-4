@@ -21,6 +21,8 @@
 >   the only blocker for the headphone rung.
 > - BT: the controller broadcasts the board file's placeholder
 >   AD:5A:00:00:00:25; persist has no bluetooth directory on this unit.
+>   [superseded 2026-11-02: the stock address was later found in the
+>   capture's log store and installed device-locally — bringup-plan.md A.1]
 >   libspa-0.2-bluetooth is not installed (A2DP/HFP need it).
 
 Date: 2026-11-01 (research night; flights when C4 opens). Companion to
