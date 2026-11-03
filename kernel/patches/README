@@ -49,6 +49,7 @@ Provenance
 | 0039 | this port: the pen reports through touchscreen_report_pos like the finger (coordinates were raw) | John Stockdale | to be offered upstream |
 | 0043–0045 | infiniti-mainline iris fixes 0069–0071 (MVP NoC low-power release on vpu4x, hierarchical-B only, no picture state on decoder input) | Victor Fuentes | drop when Perpetua carries them |
 | 0046–0055 | Fedora iceland port's iris fixes 0157–0160, 0246–0250, 0292 (iova restrict region, capture bit-depth validation, hfi_sys_ops guard, uc_region boot failure, AHB bridge reset, power-off ordering, core lock, open limit, instance refcount, SMPTE 170M signalling) | Vishnu Reddy, Dmitry Baryshkov, mzak | drop as Perpetua picks them up |
+| staged/0056–0062 | pen charger (Maxic MT5806) from the Fedora iceland port with its prerequisites (PMH0101 level-shifter regulators 0084/0085, pmic_glink hboost client 0090 adapted to our compatible, binding 0091, driver 0092, board DT 0093 re-diffed, s2idle fix 0179) | mzak; adaptations by this port | staged for its own flight (kernel/patches/staged/README) |
 
 Numbering note: the number 0029 was first used on 2026-11-02 for infiniti's
 ADSP reserved-memory change (0x4c00000 -> 0x5000000) and withdrawn the same

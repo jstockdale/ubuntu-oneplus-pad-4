@@ -214,12 +214,37 @@ decoded shell model cannot run yet.
    absinfo, pen and finger agree at four corners; then libinput/GNOME
    (hover cursor, pressure in a drawing app). No Bluetooth involved: the
    Fedora port reports "the pen works" through the touch IC alone.
-3b. Pen charging (later rung): Fedora 0091–0093 add a Maxic MT5806
-   wireless-transmitter driver (hBoost supply asked from the charger
-   firmware over PMIC GLINK, 5 s attach window, 120-min cap, error power
-   cycling) plus the DT node (I2C hub bus 1 at 0x2b, IRQ gpio169, four
-   PMIH0108 control lines). A new driver — adopt after the input rung,
-   with the battery byte from 3 as the gate.
+3b. Pen charging — staged 2026-11-02 as kernel/patches/staged/0056–0062
+   (own flight after 3): the Fedora port's Maxic MT5806 wireless
+   transmitter driver (hBoost converter voltage asked from the charger
+   firmware over PMIC GLINK, owner 32785 / opcode 0x10007, 7 V idle →
+   10 V with a pen; 5 s attach window; 120-min cap; error power cycling),
+   its binding and the board node (I2C hub bus 1 at 0x2b, IRQ gpio169,
+   four PMIH0108 control lines, five pinctrl states), plus the three
+   prerequisites the dependency audit found missing here: PMH0101 level
+   shifters ls3/ls4 as RPMh XOB regulators (0056/0057 — they gate the hub
+   bus) and a pmic_glink hboost auxiliary client keyed to our board
+   compatible (0058); 0062 = Fedora's later fix so the first s2idle after
+   load is not aborted by the IC's post-start IRQ. Config
+   CONFIG_CHARGER_MT5806_PEN=m (kernel/config/staged). RAM-boot gate, in
+   this order: (1) regulators — dmesg has no "could not find RPMh address
+   for resource LS3B_E0/LS4B_E0" and /sys/class/regulator still lists
+   every vreg_l*b plus vreg_ls3b/ls4b (a missing resource would fail the
+   whole PMH0101 probe = display rails: that is the abort criterion);
+   (2) /sys/bus/i2c/drivers/mt5806-pen-charger/<bus>-002b bound, dmesg
+   "MT5806 firmware 0x20022, supply 7000 mV, transmitter looking for a
+   pen"; debugfs mt5806-pen-charger/<dev>/status shows boost acked_mv
+   7000 (the firmware confirmed the request); (3) pen on the magnet edge:
+   "pen attached", present=1, state → charging, tx_voltage_mv ≈ 10000,
+   uevent PEN_PRESENT=1; off: present=0, idle; (4) tablet telemetry
+   unchanged (battmgr capacity/current/status still updating, charging
+   with the cable in while a pen charges, no new battmgr errors). Risks:
+   first AP-side use of the charger firmware's owner 32785 here; a
+   permanent small drain from the 7 V idle request (stock behaviour);
+   wakeup-source on the IRQ. The driver registers no power_supply — its
+   attributes live on the I2C device (state, present, pen_soc, rx_soc,
+   tx_voltage_mv, tx_current_ma, inhibit, scan_fast, chip_id,
+   fw_version); a power_supply for the pen battery is a later polish.
 4. Thermal baseline during the C5 soak (tb323fu's thermal-stress pattern:
    600 s all-core + glmark2; CPU zones held under 95 °C, no critical
    trip). The ADC/NTC zones (Perpetua cf2156997bf7, 573a270f7b90 +

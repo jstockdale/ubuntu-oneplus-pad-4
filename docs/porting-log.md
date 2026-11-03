@@ -2170,3 +2170,34 @@ transformed (position only) — record TILT signs per screen edge; which
 barrel button is BTN_STYLUS vs BTN_STYLUS2; pressure ceiling actually
 reached (stock also lists a 4096-max "other pencil"); the battery byte
 stays unreported until a power_supply exists (pen-charger rung).
+
+## 2026-11-02 — Pen charger (MT5806) ported and staged (0056–0062), own flight later
+
+From the pen-charger agent (/srv/ubuntu-iceland/build/pen-charger-work):
+Fedora 0091/0092/0093 need three things our tree lacks — found by
+grepping every symbol, label and compatible the patches reference across
+both Fedora queues and checking the pin + 0001–0036: (1) the pmic_glink
+"hboost" auxiliary device (Fedora 0090; adapted so the HBOOST client bit
+hangs off oplus,kaanapali-pmic-glink, our board's first compatible, which
+battmgr also keys on — Fedora used a new oneplus,iceland-pmic-glink
+string); (2) PMH0101 level shifters ls1–ls4 as RPMh XOB regulators (Fedora
+0084/0085; the board instantiates ls3/ls4, which gate the I2C hub bus the
+charger sits on — without them the rpmh driver silently ignores the nodes
+and nothing votes the shifters on); (3) the pmic-gpio include for
+PMIC_GPIO_STRENGTH_LOW (Fedora has it from a camera patch we do not
+carry). Already present here: i2c_hub_1 / i2c_master_hub with the gpio78/79
+pins, pmih0108_e1_gpios, the pmic_glink client API, XOB ops, geni
+i2c-master-hub drivers. Not brought in: battmgr OPLUS patches, camera
+shifters, pmic_glink early attach. 0062 = Fedora 0179 (first s2idle after
+load aborted by the IC's post-start IRQ) included for C6. Verified: the
+seven files apply after 0001–0055 and after 0001–0039 (git diff --cached
+against the committed tree = 0 lines); mt5806_pen_charger.o, pmic_glink.o,
+qcom-rpmh-regulator.o compile with 0 warnings (W=1 too); DTB 154286 B
+with wireless-charger@2b (IRQ tlmm 169 edge-falling, gpios 8/2/7/11,
+7000000/10000000 µV, five pinctrl phandles resolving, wakeup-source),
+i2c@984000 okay at 400 kHz, ls3/ls4 always-on, touchscreen node intact
+with 193/274. dt_binding_check skipped (no dt-schema on the host). Staged,
+not in the build glob, until stylus-input bundle #43 has flown — the
+level-shifter regulator prerequisite could fail the whole PMH0101
+rpmh-regulator probe if LS3B_E0/LS4B_E0 were missing from the command
+DB (display rails), which must not confound the stylus evaluation.
