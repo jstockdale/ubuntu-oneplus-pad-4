@@ -251,7 +251,17 @@ decoded shell model cannot run yet.
    CONFIG_QCOM_SPMI_ADC5_GEN3; Fedora 0056/0190 skin/XO/USB-C) come with
    the pin bump; only then the userspace model (iceland-thermal,
    GPL-2.0-or-later, with its decoded-model provenance question).
-5. Headphones once a USB-C analog headset exists: first gate is
+5. Audio watch items (2026-11-02): (a) loudness — owner is not sure the
+   chain reaches full volume; measure the chain vs the raw sink vs stock
+   at the next audio pass (the chain is tuned never louder than stock;
+   GNOME's slider caps at 100 % unless over-amplification is on);
+   (b) WirePlumber once lost the HiFi profile mid-session (runbook has the
+   recovery); capture WIREPLUMBER_DEBUG=3 logs if it recurs; (c) policy
+   question for the owner: unattended-upgrades is enabled on the dev
+   rootfs (it upgraded ffmpeg/imagemagick libraries tonight) — fine for
+   a desktop, but on a bring-up device it moves the baseline under
+   flights; the device package could disable APT::Periodic.
+6. Headphones once a USB-C analog headset exists: first gate is
    SW_HEADPHONE_INSERT=1 and an MBHC plug line on insertion; then a
    Headphones UCM device from the wcd939x sequences alsa-ucm-conf already
    ships; if detection never fires, obtain Fedora's q90w2 headset fixes.

@@ -371,3 +371,10 @@ RAM boots and future kernel updates (RAM-boot gate first, always).
   command returns. On 2026-11-02 a `# ----` comment lost its `#` that
   way and the kernel build died with `------: command not found` after a
   clean compile. Edit scripts between runs, or run a copy.
+- Audio gone in a GNOME session (no sinks, "No Input Devices", `pw-play`
+  into the chain says I/O error) while the card is still in /proc/asound:
+  WirePlumber lost the UCM HiFi profile (seen once on 2026-11-02, trigger
+  unknown). Recovery: `systemctl --user restart wireplumber`; check with
+  `wpctl status` that the raw sink and the microphone source are back and
+  `pw-metadata 0 default.audio.sink` still names effect_input.speakers.
+  Note: `pactl` is not installed; use `wpctl` and `pw-dump`.

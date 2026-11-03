@@ -2247,3 +2247,35 @@ rewrites out/bundle and out/kernel-iceland. Iris module staged on the
 tablet over Wi-Fi (usb0 unplugged while it charges). Next: owner plugs
 usb0, `fastboot boot` the #42 bundle, flight-vp1 + the VP2/VP3 battery
 (now expecting the encode round-trip and mp4mux to pass), then flash.
+
+## 2026-11-02 — Audio outage in the GNOME session (no sound, "No Input
+## Devices"): HiFi profile vanished from WirePlumber; restart recovered it
+
+On the #41 RAM boot, about an hour after the login tone had played, Chrome
+(YouTube) was silent and GNOME showed no input device. Findings over Wi-Fi:
+Chrome's stream existed and was linked to the protected "Speakers" chain
+(state active), but the Sinks and Sources lists were empty — the raw ALSA
+sink and the mic source were gone while the device object (id 55, "OnePlus
+Pad 4") persisted; `pw-play` into the chain failed with I/O error (its
+output had nothing to link to); the speaker PCM was closed. PipeWire's
+view of the card: active profile "off", and the enumeration listed ONLY
+off and pro-audio — the UCM HiFi profile was missing. Kernel side clean:
+no sound/DSP errors after the video tests, ADSP running, DSP route and the
+8192 volume intact, no jack events (the Headset Jack switch reads 0).
+UCM files unchanged since the 0.2.21 install (mtimes 16:07/16:29 PST),
+owned by ubuntu-iceland-device; alsa-ucm-conf 1.2.15.3 also ships a
+conf.d/kaanapali/Kaanapali-MTP.conf for the MTP board (harmless). The two
+unattended-upgrade runs at 02:13 UTC upgraded only ffmpeg/imagemagick
+libraries. pactl is not installed (pulseaudio-utils) — use wpctl/pw-dump.
+Fix: `systemctl --user restart wireplumber` → profiles off/HiFi/pro-audio
+again, active HiFi, raw sink + "Internal microphones" back, chain linked
+to the raw sink, tone played (PCM RUNNING), Chrome's node running; owner:
+"There it just started working", "Mic is back too". Trigger NOT
+identified (WirePlumber had logged nothing). Open watch item: if it
+recurs, run WirePlumber with WIREPLUMBER_DEBUG=3 and capture the ACP/UCM
+lines around the loss; candidates are an ACP re-probe where UCM failed to
+open, or a profile change requested through pipewire-pulse by the Sound
+panel. Recovery line added to the runbook. Owner note: "not sure we are
+at full volume" — compare chain loudness vs stock at the next audio pass
+(the chain is tuned never louder than stock's measured loudness; GNOME's
+slider caps at 100 % without over-amplification).
