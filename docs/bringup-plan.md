@@ -407,7 +407,7 @@ shared-kernel Android apps. Scoped when C5 lands.
 | P pin bump (charging 9 V / SuperVOOC, GDSC, thermistors) | dry run done: 55/59 apply, 4 re-diffs listed | a build day: re-diff 0028/0031/0058/0061, re-merge config with Perpetua's devices/iceland/kernel.config, full census RAM boot on the PD adapter (expect ≈13 W), SuperVOOC test tethered with the thermistor zones present, flash |
 | S sensors | kernel side complete; nothing of the userspace exists | S1 host day (arm64 mmdebstrap chroot; make-dsp-tree.sh from the factory persist registry; hexagonrpc 0.5.0-1 → 598b591 + Fedora 0001/0002; libssc 0.4.4-2; iio-sensor-proxy 3.9-1 with ssc) — start when the host is not building kernels (qemu-user builds crawl under a kernel build) |
 | C6 suspend | hazards mapped; F1 procedure written | owner: one hard-reset drill (S0); then F1 on the flashed kernel with Wi-Fi off and WAKE# disarmed; the GDSC retention fix arrives with P, so F1 may reset — that is the expected data point |
-| A polish | — | owner decisions: BT/WLAN address (derived from the SoC serial recommended) → 0.2.24 service; a USB-C analog headset for the headphone rung; loudness comparison vs stock; Chrome/Widevine playback test |
+| A polish | identity done (0.2.25: label MAC on Wi-Fi, own BT address) | BT pairing + libspa-0.2-bluetooth; a USB-C analog headset for the headphone rung; loudness comparison vs stock; Chrome/Widevine playback test |
 | C5 leftovers | desktop in daily use on #42 | owner: power-press shows GNOME's dialog; four-corner taps under the compositor; 24 h soak on the real charger; then fold the guards into the desktop rootfs profile and build one clean image |
 
 Idle gate: no suspend attempt in ~2 h of the #41 session nor on #42 so far

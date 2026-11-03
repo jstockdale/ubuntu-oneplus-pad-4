@@ -26,8 +26,8 @@ Last revised: 2026-11-02. Running kernel: Perpetua perpetua/v7.3 @
 | Touchscreen (NT36536 over SPI) | ✅ | 2026-11-01, C2: 10-point multitouch, auto-loads at t≈2 s on every boot (20/20), 30-minute soak clean (patches 0007–0010); survives panel blank/unblank ×3 (T2, 2026-11-02; tap confirmation pending) |
 | Stylus / pen (OnePlus Stylo Pro) | 🟡 | position, pressure, tilt and hover already reported by the touch controller's driver; libinput ignores the device for lack of BTN_STYLUS + axis resolution (GNOME session log 2026-11-02); patches 0037–0039 in preparation (bringup-plan.md A.3); pen charging is a separate later rung |
 | Buttons | ✅ | power (clean shutdown), volume up/down, resin |
-| Wi-Fi (WCN7860 / ath12k) | ✅ | 2026-11-01, C3: joins the configured network by itself; ssh over the air both ways; regulatory db installed (patches 0003–0005). MAC is the firmware default 00:03:7f:12:34:56 (same per-unit identity gap as Bluetooth) |
-| Bluetooth (WCN7860) | 🟡 | controller up, BRAHMA 2.0.1 firmware loads (0006); pairing untested; broadcasts the Perpetua board file's placeholder address AD:5A:00:00:00:25 — this unit's persist holds no bluetooth directory, so the address will be owner-supplied or derived from the SoC serial (bringup-plan.md A) |
+| Wi-Fi (WCN7860 / ath12k) | ✅ | 2026-11-01, C3: joins the configured network by itself; ssh over the air both ways; regulatory db installed (patches 0003–0005). Since 0.2.25 the interface carries the MAC printed on the device label (device-local .link file), no longer the firmware default |
+| Bluetooth (WCN7860) | 🟡 | controller up, BRAHMA 2.0.1 firmware loads (0006); since 0.2.25 the controller runs on the tablet's own locally-administered address (generated once from machine-id, programmed at bluetooth.target — the factory BT address is not recoverable from the backup); pairing with a peer still untested; A2DP needs libspa-0.2-bluetooth |
 | USB gadget (serial console + usb0 network) | ✅ | fixed-MAC ECM, 192.168.7.2, survives reboots with no manual steps; the fallback access path |
 | USB host / OTG | ❓ | |
 | USB-C DisplayPort out | ❓ | in the iceland DTS since 2026-09-21 |
