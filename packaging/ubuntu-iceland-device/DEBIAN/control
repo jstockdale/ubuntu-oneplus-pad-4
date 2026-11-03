@@ -1,12 +1,12 @@
 Package: ubuntu-iceland-device
-Version: 0.2.25
+Version: 0.2.26
 Section: admin
 Priority: optional
 Architecture: arm64
 Maintainer: Ubuntu iceland port contributors <noreply@example.invalid>
 Depends: systemd, kmod, e2fsprogs, util-linux, cloud-guest-utils,
  systemd-zram-generator, alsa-ucm-conf, alsa-utils, pipewire, pipewire-pulse,
- wireplumber, swh-plugins, bluez, iproute2
+ wireplumber, swh-plugins, libspa-0.2-modules, bluez, iproute2
 Description: Device support for the OnePlus Pad 4 (iceland)
  Board-specific integration for the OPD2514 running an Ubuntu userspace on
  the Perpetua mainline kernel:
@@ -41,6 +41,20 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     compressed-audio node into a second card object — the two objects
     fought over the ALSA device reservation and the loser was switched to
     profile "off", silencing the session (52-iceland-compress.conf);
+  * processed microphone (0.2.26): the UCM keeps the codec at stock's
+    register gains, where stock's echo canceller wants its input, and stock
+    adds its 14 dB recorder gain later in the DSP; that stage was missing
+    here, so speech recorded 14 dB low. PipeWire's echo-cancel module with
+    the WebRTC backend (gain control, noise suppression, high-pass, echo
+    cancellation against the default sink) feeds a +14 dB look-ahead
+    limiter; the result is the default input "Internal microphones (voice
+    processing)", the raw source stays selectable, one property turns both
+    stages off (60/61-iceland-mic-*.conf, 63-iceland-mic-raw.conf);
+  * audio chain load (0.2.26): the sound chain's modules are listed in
+    modules-load.d, because one boot came up with four of them not loaded
+    by udev's coldplug (no fsgen clock for the rx macro, no codec DAI, no
+    sound card); iceland-audio-check.service confirms the card after boot,
+    logs a miss under its tag and loads what is missing;
   * audio service discovery: the userspace protection-domain mapper and
     name service (protection-domain-mapper, qrtr-tools) are masked, because
     the kernel's own qcom_pd_mapper serves this SoC and the userspace one,

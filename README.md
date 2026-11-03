@@ -47,13 +47,13 @@ earn a ✅ here.
 | Display (dual-DSI NT36536, 3392×2400, 144 Hz) | ✅ | console and Wayland on glass; stock timings |
 | GPU (Adreno 840, Mesa 26 / freedreno) | ✅ | OpenGL ES 3.2, GL-composited Weston |
 | Touchscreen (10-point) | ✅ | auto-loads every boot, 30-minute soak clean; touch-to-wake not yet (planned) |
-| Stylus | 🟡 | registers; button and size properties missing |
+| Stylus | 🟡 | a proper tablet device for libinput on kernel #43; the Stylo Pro itself does not transmit yet (its Bluetooth-side sync is being researched) |
 | Backlight, buttons | ✅ | |
 | Wi-Fi (WCN7860 / ath12k) | ✅ | auto-joins; ssh over the air |
 | Bluetooth | 🟡 | controller up on the device's factory address; pairing untested |
 | USB gadget (serial console + network) | ✅ | the fallback access path |
 | Speakers (6× TFA9865) | ✅ | stock loudness behind a PipeWire protection chain |
-| Microphones | ✅ | kernel patch 0028 (see [Upstreaming](#upstreaming)) |
+| Microphones | ✅ | kernel patch 0028 (see [Upstreaming](#upstreaming)); the processed "voice processing" input with stock's recorder gain arrives in device package 0.2.26 |
 | Wired headphones | 🟡 | path starts then stops; untested with a headset |
 | Battery telemetry, charging | 🟡 | telemetry ✅; charging at 5 V/≈10 W on our kernel pin — 9 V PD and SuperVOOC (≈55 W) are in Perpetua since Oct 31 and come with the pin bump |
 | Thermal | 🟡 | zones registered; no policy daemon yet |

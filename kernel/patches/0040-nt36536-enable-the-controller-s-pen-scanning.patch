@@ -1,0 +1,146 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Mon, 2 Nov 2026 21:30:00 -0800
+Subject: [PATCH] Input: nt36536: turn the controller's pen scanning on after
+ every firmware download
+
+Ours (2026-11-02, A.3 stylus). Exit: submit to Perpetua with 0037/0039
+once the pen writes; the sub-command set may change with the pen research
+(/srv/ubuntu-iceland/build/pen-protocol-work).
+
+The touch firmware comes up with pen scanning off: the pen packet at
+point_data[66] stays 0xFF and the pen input device never reports, however
+well the pen is charged. OnePlus's driver for this SoC turns scanning on
+with the extended host command 0x7F — sub-command 0x10 and, for the pen
+protocol generation this tablet declares, a third byte naming the uplink
+timing (1 while the screen is on, 2 in suspend); 0x12/0x13/0x15/0x18/0x19
+select the other pen generations and 0x11 turns scanning off — and only
+sends it once userspace reports the pen as connected over Bluetooth. (The
+vendor driver is GPL-2.0 vendor code; the constants and the sequence are
+what we take, not the code.)
+
+Send the command after every firmware download (the resume path and the
+watchdog recovery path), gated on novatek,pen-support, with a module
+parameter pen_type (1..6, 0 = off) whose write re-sends the command to the
+running controller, so a flight can step through the generations without a
+reboot. Flight-tested on kernel #43: the controller acknowledges
+"pen scanning on (0x10)" (the host-command status byte returns to 0x00);
+the Stylo Pro itself stayed silent on all six values, which points past
+the controller to the pen's Bluetooth-side synchronisation.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index 85601b857c86..d6b7afeb58dc 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -50,6 +50,91 @@ uint32_t SPI_RD_FAST_ADDR = 0;	//read from dtsi
+ 
+ static uint8_t bTouchIsAwake = 0;
+ 
++/*
++ * Pen scanning is off when the firmware comes up.  The stock driver turns it
++ * on with the extended host command 0x7F once a pen is connected over
++ * Bluetooth: sub-command 0x10 (0x11 turns it off) and, for the pen protocol
++ * generation this tablet declares, a third byte naming the uplink timing,
++ * 1 while the screen is on and 2 in suspend.  Without the command the
++ * controller never answers the pen and the pen packet stays 0xFF.
++ *
++ * pen_type selects the sub-command: 1 (default) is 0x10 with the timing
++ * byte; 2..6 are the 0x12, 0x13, 0x15, 0x18 and 0x19 variants for the other
++ * pen generations, sent without it; 0 leaves pen scanning off.  Writing the
++ * parameter re-sends the command to the running controller.
++ */
++#define NVT_HOST_CMD_EXT	0x7F
++#define NVT_EXT_PEN_OFF		0x11
++#define NVT_PEN_UPLINK_RESUME	1
++
++static unsigned int pen_type = 1;
++
++/* host command: the bytes after EVENT_MAP_HOST_CMD; the firmware clears the first to 0x00 once taken */
++static int32_t nvt_host_cmd(const uint8_t *cmd, uint8_t len)
++{
++	uint8_t buf[8] = { 0 };
++	int32_t i;
++
++	if (len == 0 || len + 1 > sizeof(buf))
++		return -EINVAL;
++
++	nvt_set_page(ts->mmap->EVENT_BUF_ADDR);
++	for (i = 0; i < 20; i++) {
++		if (i == 0 || buf[1] != cmd[0]) {
++			buf[0] = EVENT_MAP_HOST_CMD;
++			memcpy(buf + 1, cmd, len);
++			CTP_SPI_WRITE(ts->client, buf, len + 1);
++		}
++		msleep(20);
++		buf[0] = EVENT_MAP_HOST_CMD;
++		buf[1] = 0xFF;
++		CTP_SPI_READ(ts->client, buf, 2);
++		if (buf[1] == 0x00)
++			return 0;
++	}
++	NVT_ERR("host cmd 0x%02X 0x%02X not taken, status 0x%02X\n", cmd[0], cmd[1], buf[1]);
++	return -EIO;
++}
++
++/* called with ts->lock held and the firmware running */
++static void nvt_pen_mode(void)
++{
++	static const uint8_t sub[] = { 0x10, 0x12, 0x13, 0x15, 0x18, 0x19 };
++	uint8_t cmd[3] = { NVT_HOST_CMD_EXT, NVT_EXT_PEN_OFF, NVT_PEN_UPLINK_RESUME };
++	uint8_t len = 2;
++
++	if (!ts->pen_support)
++		return;
++	if (pen_type >= 1 && pen_type <= ARRAY_SIZE(sub)) {
++		cmd[1] = sub[pen_type - 1];
++		if (pen_type == 1)
++			len = 3;
++	}
++	if (nvt_host_cmd(cmd, len) == 0)
++		NVT_LOG("pen scanning %s (0x%02X)\n", cmd[1] == NVT_EXT_PEN_OFF ? "off" : "on", cmd[1]);
++}
++
++static int nvt_pen_type_set(const char *val, const struct kernel_param *kp)
++{
++	int ret = param_set_uint(val, kp);
++
++	if (ret)
++		return ret;
++	if (ts && bTouchIsAwake) {
++		mutex_lock(&ts->lock);
++		nvt_pen_mode();
++		mutex_unlock(&ts->lock);
++	}
++	return 0;
++}
++
++static const struct kernel_param_ops nvt_pen_type_ops = {
++	.set = nvt_pen_type_set,
++	.get = param_get_uint,
++};
++module_param_cb(pen_type, &nvt_pen_type_ops, &pen_type, 0644);
++MODULE_PARM_DESC(pen_type, "pen protocol to scan for: 1 (default) .. 6, 0 = off");
++
+ /*******************************************************
+ Description:
+ 	Novatek touchscreen irq enable/disable function.
+@@ -939,6 +1024,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ 		release_touch_event();
+ 		release_pen_event();
+ 		nvt_update_firmware(ts->fw_name);
++		nvt_pen_mode();
+ 		goto XFER_ERROR;
+ 	}
+ #endif /* #if NVT_TOUCH_WDT_RECOVERY */
+@@ -1741,6 +1827,7 @@ static int32_t nvt_ts_resume(struct device *dev)
+ 		NVT_ERR("download firmware failed, ignore check fw state\n");
+ 	} else {
+ 		nvt_check_fw_reset_state(RESET_STATE_REK);
++		nvt_pen_mode();
+ 	}
+ 
+ 	nvt_irq_enable(true);
+-- 
+2.47.0

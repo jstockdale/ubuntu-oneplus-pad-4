@@ -1,0 +1,52 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4: after boot, confirm the sound card registered; if not, say
+# which modules of the audio chain are missing, load them, and report the
+# outcome. Never fails the boot. Every line goes to the journal under the
+# tag iceland-audio-check so a census can count the misses:
+#   journalctl -t iceland-audio-check
+# Background: on 2026-11-02 one boot came up with four chain modules not
+# loaded although udev had processed their devices; see
+# /usr/lib/modules-load.d/iceland-audio.conf, which now loads the set
+# deterministically. This unit is the witness and the second net.
+set -u
+
+CARD=OnePlusPad4
+LIST=/usr/lib/modules-load.d/iceland-audio.conf
+WAIT_PRESENT=${ICELAND_AUDIO_WAIT:-40}
+WAIT_REPAIR=${ICELAND_AUDIO_REPAIR_WAIT:-30}
+
+log() { logger -t iceland-audio-check -p "user.$1" -- "$2"; echo "$2"; }
+uptime_s() { cut -d' ' -f1 /proc/uptime; }
+card_present() { grep -q "\[$CARD" /proc/asound/cards 2>/dev/null; }
+wait_for_card() {
+	i=0
+	while [ "$i" -lt "$1" ]; do
+		card_present && return 0
+		sleep 1; i=$((i + 1))
+	done
+	card_present
+}
+
+if wait_for_card "$WAIT_PRESENT"; then
+	log info "sound card $CARD present at $(uptime_s) s"
+	exit 0
+fi
+
+missing=""
+for m in $(grep -vE '^\s*(#|$)' "$LIST" 2>/dev/null); do
+	grep -q "^$m " /proc/modules || missing="$missing $m"
+done
+deferred=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null | tr '\n' ';')
+log warning "sound card $CARD absent at $(uptime_s) s; chain modules not loaded:${missing:- none}; deferred: ${deferred:-none}"
+
+for m in $missing; do
+	modprobe "$m" 2>&1 | logger -t iceland-audio-check -p user.warning
+done
+
+if wait_for_card "$WAIT_REPAIR"; then
+	log warning "sound card $CARD recovered at $(uptime_s) s after loading:${missing:- nothing}"
+else
+	log err "sound card $CARD still absent at $(uptime_s) s; deferred: $(cat /sys/kernel/debug/devices_deferred 2>/dev/null | tr '\n' ';')"
+fi
+exit 0

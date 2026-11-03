@@ -2454,3 +2454,99 @@ at unprepare — to be confirmed on glass); nvt_ts_resume re-downloads the
 firmware, which is also how Novatek's vendor driver leaves gesture mode.
 Rung W written into the plan: W1 keep-awake flight, W2 gesture mode
 (0x13, KEY_WAKEUP), W3 s2idle wake source after C6.
+
+## 2026-11-02 — #43 RAM boot: stylus capabilities PASS, pen silent → the controller's pen mode
+
+#43 (52 patches) RAM-booted on the owner's `fastboot boot` (boot-43-
+e9368756; only nt36536_ts.ko differs from #42, staged beforehand with the
+#42 copy kept in /var/backups/iceland). Capability gate, all as designed:
+pen BTN_TOOL_PEN/BTN_TOUCH/BTN_STYLUS/BTN_STYLUS2, DIRECT, X 0..33919 and
+Y 0..23999 at 124 units/mm, pressure 0..16384, tilt ±60, distance; finger
+axes at 124 too; udev tags the pen ID_INPUT_TABLET; libinput lists it as a
+tablet of 274×194 mm; zero "missing tablet capabilities" lines. The ten
+arm-smmu context faults at 0.245 s (SID 0x800, the bootloader's display
+handoff) are the same ten on every #41/#42 boot — not a regression.
+
+Then the pen itself: the owner used the Stylo Pro for 75 s and the kernel
+saw ZERO pen events (finger device: 40 contacts in the same window). The
+pen was charged on stock two days ago and had paired there with the
+indicator light. Our driver only parses the pen packet (point_data[66]
+format id, 0xFF = none) and sends nothing. OnePlus's vendor driver for this
+SoC (OnePlusOSS android_kernel_modules_and_devicetree_oneplus_sm8850,
+branch oneplus/sm8850_b_16.0_pad_3_pro, sparse clone under
+/srv/ubuntu-iceland/ref/oplus-sm8850-modules — data, never built) shows
+why: the touch firmware boots with pen scanning OFF and the stock driver
+turns it on with the extended host command 0x7F — sub-command 0x10 plus,
+for the pen generation this tablet declares (DT `pen_support_opp`), an
+uplink-timing byte (1 screen on, 2 suspend); 0x12/0x13/0x15/0x18/0x19 for
+the other pen generations; 0x11 off — and only when userspace reports the
+pen as Bluetooth-connected (/proc/touchpanel/pencil_connect) and not on the
+magnet. Written into our driver as nvt_pen_mode() after every firmware
+download (resume path and the WDT recovery path) with a live module
+parameter pen_type (1..6, 0 off; writing it re-sends), module-only rebuild
+against the #43 tree (make O=... drivers/.../nt36536_ts.ko, 10 s),
+swapped in live (modprobe -r/modprobe; #43 copy kept as .43): the
+controller acknowledged "pen scanning on (0x10)" (dynamic debug on the
+module shows NVT_LOG). Still zero pen events: a 120 s run stepping through
+all six values with the owner using the pen the whole time (line-buffered
+evtest; the earlier captures were block-buffered, so sparse output could
+have been lost — not the case here, the finger stream flowed). So the
+controller scans and the pen does not answer. Next suspect: the stock
+userspace's Bluetooth-side synchronisation (the "pen uplink timing" the
+stock kernel hands to userspace) — a multi-agent research run is writing
+/srv/ubuntu-iceland/build/pen-protocol-work/report.md. Two side findings
+for rung W: our nvt_ts_suspend builds the deep-sleep command (0x11) but
+never writes it (no CTP_SPI_WRITE), so on blank the IC is left awake with
+its IRQ disabled; and the stock driver has a PENDETECT wake gesture.
+
+## 2026-11-02 — Audio outage #3 (RAM-booted #43): four chain modules not loaded; hardened (0.2.26)
+
+Different from #1 (pd-mapper race) and #2 (compress card object): this
+boot registered no sound card at all. devices_deferred held
+`6ac0000.codec rx_macro: unable to get fsgen clock` and `sound
+snd-sc8280xp: WCD Playback: codec dai not found`; the ADSP audio domain was
+fine (PDR indication at 2.68 s, APM/PRM bound; the "CMD timeout for
+[1001021]" line at 8.16 s also appears on the healthy #42 boot). Cause:
+snd_soc_lpass_va_macro, snd_soc_lpass_tx_macro, snd_soc_lpass_wsa_macro
+and soundwire_qcom were never loaded — udev had processed their devices
+(USEC_INITIALIZED 1.69 s, right after the 1.53–1.68 s coldplug), the
+modules exist, the aliases resolve by hand, the previous three boots loaded
+them by themselves, and no udev/kmod error was logged. Trigger unknown
+(a one-off coldplug miss; the depmod runs of the day happened before the
+boot and after it). Recovery live: modprobe of the three macros (va binds,
+rx's fsgen clock appears, rx/tx/wsa bind) then soundwire_qcom (both
+controllers bind, the four WCD939x slaves enumerate, the card registers,
+WirePlumber picks HiFi, Speakers/mic back) — 20 s, no reboot. Hardening in
+ubuntu-iceland-device 0.2.26: /usr/lib/modules-load.d/iceland-audio.conf
+lists the chain (qcom_pd_mapper, soundwire_qcom, the four macros, wcd939x
++ sdw, tfa9865, q6apm dai/lpass-dais, q6prm_clocks, sc8280xp) for
+systemd-modules-load — deterministic, probe order still the kernel's —
+and iceland-audio-check.service witnesses the card after boot (journal
+tag iceland-audio-check: "present at N s", or a warning naming the
+missing modules, a modprobe of them, and the outcome), so a recurrence
+is counted, not just survived. Built; not yet installed — the tablet
+dropped off Wi-Fi when the USB cable came out (no ARP entry for its MAC on
+the subnet), so the install waits for the next connection.
+
+## 2026-11-02 — Microphone level: the missing processed-microphone stage (0.2.26)
+
+Owner: "mic levels seem low". Correct, by 14 dB, and known in principle
+since the UCM was written: our HiFi.conf keeps the codec at stock's
+register values (ADC1/ADC2 14, TX_DEC0/1 84 = 0 dB) because that is where
+stock's echo canceller wants its input, and stock adds its ~14 dB recorder
+gain later in the DSP. The Fedora port carries that later stage as three
+PipeWire/WirePlumber drop-ins (60-iceland-mic-processing.conf: echo-cancel
+with the WebRTC backend — gain control, noise suppression, high-pass,
+echo reference = the default sink's monitor — into a hidden source;
+61-iceland-mic-gain.conf: +14 dB inside a −1 dBFS look-ahead limiter after
+the canceller, visible as "Internal microphones (voice processing)" at
+priority 2000 = the default input; 63-iceland-mic-raw.conf: the raw
+source renamed "(raw)", still selectable). We had never ported them: the
+raw UCM source was the only input, at stock's codec level minus stock's
+DSP gain. Ported into 0.2.26 as our own files (BSD-3-Clause, design and
+values credited to the Fedora port; Ubuntu's libspa-0.2-modules ships the
+WebRTC backend, swh-plugins the limiter — both already on the rootfs; the
+dependency is now explicit). Gate when the tablet is back: both sources
+listed, the processed one default, speech RMS ≈ −40 dBFS on it vs ≈ −54 on
+the raw one (the Fedora port's numbers), echo test with the speakers
+playing. Never above stock: the codec stays at ADC 14 / TX_DEC 84.

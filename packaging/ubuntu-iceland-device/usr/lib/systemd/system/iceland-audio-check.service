@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-3-Clause
+[Unit]
+Description=OnePlus Pad 4: sound card present after boot (load the audio chain if udev missed it)
+After=systemd-modules-load.service systemd-udev-trigger.service sound.target
+Wants=sound.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/iceland/iceland-audio-check
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

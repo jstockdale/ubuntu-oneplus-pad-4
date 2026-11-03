@@ -21,6 +21,17 @@ License: BSD-3-Clause
 Comment: adapted from the Fedora iceland port's UCM2 profile
  (mzakamin-hub/iceland-mainline audio/ucm/OnePlus-Pad4, no license declared).
 
+Files: usr/share/pipewire/pipewire.conf.d/60-iceland-mic-processing.conf
+       usr/share/pipewire/pipewire.conf.d/61-iceland-mic-gain.conf
+       usr/share/wireplumber/wireplumber.conf.d/63-iceland-mic-raw.conf
+Copyright: 2026 the Ubuntu OnePlus Pad 4 (iceland) port contributors
+License: BSD-3-Clause
+Comment: written for this package; the design (echo canceller first at
+ stock's codec level, the 14 dB recorder gain after it under a limiter, the
+ processed source as the default by priority) and the measured values follow
+ the Fedora iceland port's processed microphone (mzakamin-hub/iceland-mainline
+ packaging/iceland-device, no license declared), credited in each file.
+
 License: BSD-3-Clause
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions are met:
