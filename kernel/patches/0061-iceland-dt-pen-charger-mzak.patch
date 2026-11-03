@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: mzak <mzak.amin@gmail.com>
 Date: Fri, 2 Oct 2026 10:38:16 +0300
-Subject: [PATCH 61/62] arm64: dts: qcom: kaanapali-oneplus-iceland: add the
- pen charger
+Subject: [PATCH] arm64: dts: qcom: kaanapali-oneplus-iceland: add the pen
+ charger
 
 The pen is charged by a Maxic MT5806 wireless power transmitter on the
 magnet side of the tablet. It sits at 0x2b on the I2C hub bus 1
@@ -42,11 +42,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>
 Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
 ---
- .../dts/qcom/kaanapali-oneplus-iceland.dts    | 100 ++++++++++++++++++
- 1 file changed, 100 insertions(+)
+ .../dts/qcom/kaanapali-oneplus-iceland.dts    | 93 +++++++++++++++++++
+ 1 file changed, 93 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
-index 2f55b7f8c494..1736dcf1b72b 100644
+index 1c8c1a78fcee..0e335e745745 100644
 --- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
 +++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
 @@ -8,6 +8,7 @@
@@ -55,9 +55,9 @@ index 2f55b7f8c494..1736dcf1b72b 100644
  #include <dt-bindings/leds/common.h>
 +#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
  #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
- #include "kaanapali.dtsi"
- 
-@@ -621,6 +622,21 @@ vreg_l18b_1p2: ldo18 {
+ /*
+  * CPU throttle temperature for kaanapali-cpu-cooling.dtsi: 90 °C, the
+@@ -628,6 +629,21 @@ vreg_l18b_1p2: ldo18 {
  			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
  						   RPMH_REGULATOR_MODE_AUTO>;
  		};
@@ -79,7 +79,7 @@ index 2f55b7f8c494..1736dcf1b72b 100644
  	};
  
  	regulators-1 {
-@@ -1038,6 +1054,44 @@ backlight@11 {
+@@ -1105,6 +1121,40 @@ vooc-phy {
  	};
  };
  
@@ -117,14 +117,10 @@ index 2f55b7f8c494..1736dcf1b72b 100644
 +	};
 +};
 +
-+&i2c_master_hub {
-+	status = "okay";
-+};
-+
- &mdss {
+ &i2c_master_hub {
  	status = "okay";
  };
-@@ -1186,6 +1240,13 @@ key_vol_down_default: key-vol-down-default-state {
+@@ -1257,6 +1307,13 @@ key_vol_down_default: key-vol-down-default-state {
  		bias-pull-up;
  		power-source = <1>;
  	};
@@ -138,11 +134,10 @@ index 2f55b7f8c494..1736dcf1b72b 100644
  };
  
  &pmh0104_j_e1_gpios {
-@@ -1257,6 +1318,37 @@ &pmih0108_e1_eusb2_repeater {
- 	vdd3-supply = <&vreg_l5b_3p1>;
- };
- 
-+&pmih0108_e1_gpios {
+@@ -1334,6 +1391,34 @@ charger_therm_default: charger-therm-default-state {
+ 		function = "normal";
+ 		bias-high-impedance;
+ 	};
 +	/*
 +	 * The pen charger's control lines with stock's pin settings (wls_sleep_*,
 +	 * wls_scan_*, wls_sw_en_*, wls_off_state_*); the driver sets the levels.
@@ -171,14 +166,12 @@ index 2f55b7f8c494..1736dcf1b72b 100644
 +		input-disable;
 +		bias-disable;
 +	};
-+};
-+
- &pon_resin {
- 	linux,code = <KEY_VOLUMEUP>;
+ };
  
-@@ -1368,6 +1460,14 @@ wcd_tx: codec@0,3 {
- &tlmm {
- 	gpio-reserved-ranges = <36 4>;
+ &pmk8850_vadc {
+@@ -1511,6 +1596,14 @@ cp_second_irq_default: cp-second-irq-state {
+ 		bias-pull-up;
+ 	};
  
 +	/* stock wls_charge_int_active */
 +	pen_chg_int_default: pen-chg-int-default-state {
@@ -191,6 +184,3 @@ index 2f55b7f8c494..1736dcf1b72b 100644
  	wlan_en: wlan-en-state {
  		pins = "gpio16";
  		function = "gpio";
--- 
-2.53.0
-

@@ -17,7 +17,7 @@ set -euo pipefail
 
 base=${UBUNTU_WORKDIR:-/srv/ubuntu-iceland}
 branch=${PERPETUA_BRANCH:-perpetua/v7.3}
-commit=${PERPETUA_COMMIT:-7c98a10e6bb75d64a9f2e7b1e152ad1234a38659}
+commit=${PERPETUA_COMMIT:-b7d639cfb2825da1d922c48f65338becdf8d94d0}
 # A local kernel checkout (any clone of torvalds/linux or of Perpetua itself)
 # shares most objects; cloning from it avoids re-downloading ~3 GiB of history.
 reference=${LINUX_REFERENCE:-}

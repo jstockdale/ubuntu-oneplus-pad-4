@@ -1,5 +1,11 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: John Stockdale <jstockdale@gmail.com>
-Subject: [PATCH] ASoC: qcom: q6apm: validate READ/WRITE_DONE payloads by the fields used
+Date: Mon, 2 Nov 2026 22:33:02 -0800
+Subject: [PATCH] ASoC: qcom: q6apm: validate READ/WRITE_DONE payloads by the
+ fields used
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Perpetua commit 7c8cc30d7fc4 ("ASoC: qcom: hostless modem voice through
 q6apm") added payload-size checks to graph_callback() that reject a
@@ -24,9 +30,16 @@ but no data arrives" regression on iceland/aston/nx809j.
 
 Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
 Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Re-diffed for the pin bump (rung P, 2026-11-02): the READ_DONE half of this
+patch is upstream since Perpetua 9ba37ef1db70 ("accept short read-done
+responses"); only the WRITE_DONE consistency change remains here.
+
 ---
+ sound/soc/qcom/qdsp6/q6apm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
 diff --git a/sound/soc/qcom/qdsp6/q6apm.c b/sound/soc/qcom/qdsp6/q6apm.c
-index 5ea39bd30746..25d3a92589b5 100644
+index ae7bd56b45ec..8f9dead46f1d 100644
 --- a/sound/soc/qcom/qdsp6/q6apm.c
 +++ b/sound/soc/qcom/qdsp6/q6apm.c
 @@ -632,7 +632,7 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
@@ -37,19 +50,4 @@ index 5ea39bd30746..25d3a92589b5 100644
 +		    data->payload_size < (int)offsetofend(typeof(*done), status))
  			break;
  		client_event = APM_CLIENT_EVENT_DATA_WRITE_DONE;
- 		mutex_lock(&graph->lock);
-@@ -660,8 +660,13 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
- 
- 		break;
- 	case DATA_CMD_RSP_RD_SH_MEM_EP_DATA_BUFFER_V2:
-+		/*
-+		 * The ADSP's READ_DONE omits the trailing metadata words
-+		 * (56 bytes here vs the 60-byte struct); only require the
-+		 * fields this handler dereferences.
-+		 */
- 		if (!graph->ar_graph || !data->payload ||
--		    data->payload_size < (int)sizeof(*rd_done))
-+		    data->payload_size < (int)offsetofend(typeof(*rd_done), buf_addr_msw))
- 			break;
- 		client_event = APM_CLIENT_EVENT_DATA_READ_DONE;
  		mutex_lock(&graph->lock);
