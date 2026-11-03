@@ -22,3 +22,10 @@ CONFIG_QCOM_SPMI_ADC5_GEN3, CHARGER_SC8547, CHARGER_SC8547_SVOOC and the
 lockup detectors Denial added after two freezes during SuperVOOC), build,
 RAM boot, run the standard-charging regression (SDP/DCP/PD 9 V, OTG,
 connected boot, 500 mA fallback) before any `Fast` opt-in.
+
+Compile check (2026-11-02, scratch O dir with the head's iceland config +
+olddefconfig, no fragments): q6apm.o, pmic_glink.o and mt5806_pen_charger.o
+build clean; the device tree builds (158336 B) and carries the pen charger
+(maxic,mt5806 at i2c_hub_1 0x2b with its PMIC-GPIO and gpio169 states and
+the vreg_ls3b/ls4b level shifters), both SuperVOOC pumps (southchip,sc8547d
+at i2c_hub_0 and i2c12), the PMK8850 ADC channels and the iris codec enable.
