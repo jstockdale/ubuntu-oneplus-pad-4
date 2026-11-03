@@ -1,0 +1,4 @@
+# Pen charger (Maxic MT5806): appended to the kernel config when the staged
+# patches 0056-0062 are promoted into the series. Kconfig: tristate, depends on
+# I2C && GPIOLIB && QCOM_PMIC_GLINK (all =y in the config of record).
+CONFIG_CHARGER_MT5806_PEN=m

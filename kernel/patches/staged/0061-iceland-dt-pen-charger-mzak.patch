@@ -1,0 +1,196 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 10:38:16 +0300
+Subject: [PATCH 61/62] arm64: dts: qcom: kaanapali-oneplus-iceland: add the
+ pen charger
+
+The pen is charged by a Maxic MT5806 wireless power transmitter on the
+magnet side of the tablet. It sits at 0x2b on the I2C hub bus 1
+(gpio78 / gpio79) behind the PMH0101 level shifters 3 and 4, has its
+interrupt on gpio169 and four control lines on the PMIH0108 (power
+switch gpio8, wake gpio2, scan interval gpio7, transmitter off
+gpio11). Its supply is the PMIC's hBoost converter, which the charger
+firmware owns: 7 V while idle and 10 V for a pen, as in the vendor
+tree.
+
+Enable the bus at the vendor driver's 400 kHz, keep the two level
+shifters on as the vendor tree does, and add the pin states with the
+vendor tree's settings. The interrupt is a wake-up source, as in the
+vendor driver.
+
+[adapted for the Ubuntu iceland port: re-diffed by hand against
+Perpetua 7c98a10e6bb7's kaanapali-oneplus-iceland.dts with the local
+series 0001-0036 applied; the Fedora hunks do not apply to it. The
+content is mzak's: the same node, properties, values, pin states and
+comments. What moved or was added for this tree:
+- <dt-bindings/pinctrl/qcom,pmic-gpio.h> is included for
+  PMIC_GPIO_STRENGTH_LOW; the Fedora board file has it from its camera
+  patch 0073, which this tree does not carry.
+- ls3 / ls4 follow ldo18 of the PMH0101 regulators (regulators-0): this
+  tree does not carry the camera shifters ls1 / ls2 of Fedora's 0086.
+- &i2c_hub_1 and &i2c_master_hub sit between &i2c15 and &mdss.
+- The control-line pin states are a new &pmih0108_e1_gpios block (this
+  board file had none) placed before &pon_resin; the label is the one
+  of Perpetua's pmih0108-kaanapali.dtsi, the same as Fedora's.
+- pen_chg_int_default is the first state of the &tlmm block.
+Nothing else in this file claims gpio169, hub pins gpio78 / gpio79,
+PMIH0108 gpio2 / 7 / 8 / 11 or PMH0101 gpio15 - 18. The touchscreen
+(&spi19) and the regions the stylus input patches touch are untouched.]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ .../dts/qcom/kaanapali-oneplus-iceland.dts    | 100 ++++++++++++++++++
+ 1 file changed, 100 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index 2f55b7f8c494..1736dcf1b72b 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -8,6 +8,7 @@
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/linux-event-codes.h>
+ #include <dt-bindings/leds/common.h>
++#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+ #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+ #include "kaanapali.dtsi"
+ 
+@@ -621,6 +622,21 @@ vreg_l18b_1p2: ldo18 {
+ 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
+ 						   RPMH_REGULATOR_MODE_AUTO>;
+ 		};
++
++		/*
++		 * The level shifters between GPIO 15 / 16 and GPIO 17 / 18 carry
++		 * the I2C lines of the pen charger (i2c_hub_1). The vendor tree
++		 * keeps both on.
++		 */
++		vreg_ls3b: ls3 {
++			regulator-name = "vreg_ls3b";
++			regulator-always-on;
++		};
++
++		vreg_ls4b: ls4 {
++			regulator-name = "vreg_ls4b";
++			regulator-always-on;
++		};
+ 	};
+ 
+ 	regulators-1 {
+@@ -1038,6 +1054,44 @@ backlight@11 {
+ 	};
+ };
+ 
++&i2c_hub_1 {
++	/* the vendor I2C driver's default; the vendor tree sets no other rate for this bus */
++	clock-frequency = <400000>;
++
++	status = "okay";
++
++	/*
++	 * The pen charger on the magnet side: a wireless power transmitter fed
++	 * from the PMIC's hBoost converter, which the charger firmware owns.
++	 * 7 V while idle and 10 V for a pen are the vendor tree's values.
++	 */
++	pen_charger: wireless-charger@2b {
++		compatible = "maxic,mt5806";
++		reg = <0x2b>;
++
++		interrupts-extended = <&tlmm 169 IRQ_TYPE_EDGE_FALLING>;
++
++		enable-gpios = <&pmih0108_e1_gpios 8 GPIO_ACTIVE_HIGH>;
++		wake-gpios = <&pmih0108_e1_gpios 2 GPIO_ACTIVE_HIGH>;
++		scan-gpios = <&pmih0108_e1_gpios 7 GPIO_ACTIVE_HIGH>;
++		tx-off-gpios = <&pmih0108_e1_gpios 11 GPIO_ACTIVE_HIGH>;
++
++		maxic,boost-idle-microvolt = <7000000>;
++		maxic,boost-charge-microvolt = <10000000>;
++
++		pinctrl-0 = <&pen_chg_int_default>, <&pen_chg_ctl_default>,
++			    <&pen_chg_en_default>, <&pen_chg_txoff_default>,
++			    <&pen_chg_i2c_shifter>;
++		pinctrl-names = "default";
++
++		wakeup-source;
++	};
++};
++
++&i2c_master_hub {
++	status = "okay";
++};
++
+ &mdss {
+ 	status = "okay";
+ };
+@@ -1186,6 +1240,13 @@ key_vol_down_default: key-vol-down-default-state {
+ 		bias-pull-up;
+ 		power-source = <1>;
+ 	};
++
++	/* the pads of level shifters 3 and 4 (the pen charger's I2C lines), as in the vendor tree */
++	pen_chg_i2c_shifter: pen-chg-i2c-shifter-state {
++		pins = "gpio15", "gpio16", "gpio17", "gpio18";
++		function = "normal";
++		bias-high-impedance;
++	};
+ };
+ 
+ &pmh0104_j_e1_gpios {
+@@ -1257,6 +1318,37 @@ &pmih0108_e1_eusb2_repeater {
+ 	vdd3-supply = <&vreg_l5b_3p1>;
+ };
+ 
++&pmih0108_e1_gpios {
++	/*
++	 * The pen charger's control lines with stock's pin settings (wls_sleep_*,
++	 * wls_scan_*, wls_sw_en_*, wls_off_state_*); the driver sets the levels.
++	 */
++	pen_chg_ctl_default: pen-chg-ctl-default-state {
++		pins = "gpio2", "gpio7";
++		function = "normal";
++		input-disable;
++		bias-disable;
++		power-source = <1>;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_LOW>;
++	};
++
++	pen_chg_en_default: pen-chg-en-default-state {
++		pins = "gpio8";
++		function = "normal";
++		input-disable;
++		bias-disable;
++		power-source = <2>;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_LOW>;
++	};
++
++	pen_chg_txoff_default: pen-chg-txoff-default-state {
++		pins = "gpio11";
++		function = "normal";
++		input-disable;
++		bias-disable;
++	};
++};
++
+ &pon_resin {
+ 	linux,code = <KEY_VOLUMEUP>;
+ 
+@@ -1368,6 +1460,14 @@ wcd_tx: codec@0,3 {
+ &tlmm {
+ 	gpio-reserved-ranges = <36 4>;
+ 
++	/* stock wls_charge_int_active */
++	pen_chg_int_default: pen-chg-int-default-state {
++		pins = "gpio169";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-up;
++	};
++
+ 	wlan_en: wlan-en-state {
+ 		pins = "gpio16";
+ 		function = "gpio";
+-- 
+2.53.0
+

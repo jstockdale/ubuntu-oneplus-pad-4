@@ -1,0 +1,30 @@
+Staged patches: verified on the host, waiting for their own flight
+==================================================================
+
+Files here are NOT applied by scripts/build-mainline-kernel.sh (its glob is
+kernel/patches/*.patch). They are promoted into the series (moved up one
+directory, with their config fragment moved from kernel/config/staged/ to
+kernel/config/) when the flight before them has passed, so that each RAM
+boot carries one variable.
+
+0056-0062 — the OnePlus Pad 4 pen charger (Maxic MT5806 wireless power
+transmitter on the magnet edge, which charges the Stylo Pro), from the
+Fedora iceland port (author mzak), with the three prerequisites its
+dependency audit found our tree lacked:
+  0056/0057  PMH0101 level shifters ls1-ls4 as RPMh XOB regulators
+             (binding + driver; the board only instantiates ls3/ls4,
+             which gate the I2C hub bus the charger sits on)
+  0058       a pmic_glink "hboost" auxiliary device on this board's
+             compatible (oplus,kaanapali-pmic-glink) — the client that asks
+             the charger firmware for the hBoost converter voltage
+  0059-0061  binding, driver (drivers/power/supply/mt5806_pen_charger.c)
+             and the board DT node (I2C hub bus 1 @0x2b, IRQ gpio169, four
+             PMIH0108 control lines, 7 V idle / 10 V charging)
+  0062       the first s2idle after load must not be aborted by the IC's
+             post-start interrupt (Fedora 0179)
+Config: kernel/config/staged/config-pen-charger.fragment (=m).
+Verified: all seven apply as files after 0001-0055 (and after 0001-0039);
+mt5806_pen_charger.o, pmic_glink.o and qcom-rpmh-regulator.o compile with
+0 warnings (W=1 too); the DTB carries the node with all five pinctrl
+states resolving and the touchscreen node intact. Gate and risks:
+docs/bringup-plan.md A.3b.

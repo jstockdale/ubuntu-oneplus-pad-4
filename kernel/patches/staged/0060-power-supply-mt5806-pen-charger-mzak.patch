@@ -1,0 +1,1747 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 10:38:15 +0300
+Subject: [PATCH 60/62] power: supply: add the MT5806 pen charger of the
+ OnePlus Pad 4
+
+The pen of the OnePlus Pad 4 is charged by a Maxic MT5806 wireless
+power transmitter. The IC finds the pen, negotiates and transfers the
+power by itself; the limits of the transfer are part of its firmware.
+The host has three jobs, done here as the vendor driver does them:
+
+- The supply: the PMIC's hBoost converter belongs to the charger
+  firmware. Its voltage is asked for through PMIC GLINK (owner 32785,
+  opcode 0x10007): the idle value at start and after a pen is taken
+  off, the charge value when one is attached. Nothing is switched on
+  before the firmware has confirmed the idle value.
+- Supervision: a transfer goes on only for a pen that has sent a valid
+  address within 5 s of the attach. It is stopped when the pen reports
+  a full battery or asks for a stop, when the IC ends it with an error
+  (over-current, over- or under-voltage, foreign object, temperature)
+  and after 120 minutes. After an error the IC is power cycled once
+  the pen is gone.
+- Reporting: "present", "state", the pen's reported charge and the
+  live supply voltage and current as device attributes, change events
+  with PEN_PRESENT, an "inhibit" switch for user space and "rx_soc" for
+  the pen's battery level known from Bluetooth (a full pen that has
+  dropped to 80 % is charged again). A status file in debugfs has the
+  details and the last events.
+
+Differences from the vendor driver, all on the careful side: the
+firmware of the IC is never written (no update, no calibration), and
+the transmitter is only used with a firmware version seen on this
+tablet; supply voltages above the tablet's charge value are refused;
+the transmitter stays off during the start sequence, while the supply
+voltage is not confirmed, while the link to the charger firmware is
+down and, if the interrupt cannot wake the system, during suspend.
+
+Tested on the OnePlus Pad 4 without a pen (kernel q56, area-combo-49):
+the IC answers (id 0x5806, firmware 0x20022, calibration as the
+vendor's log), the charger firmware confirms the 7 V supply, the
+control lines match the vendor kernel's idle state, inhibit switches
+the transmitter off and on, and after an unbind the power line reads
+low and the transmitter-off line high.
+
+[adapted for the Ubuntu iceland port: carried unchanged from the Fedora
+iceland queue (iceland-linux patches/0002-iceland/0092); the Kconfig and
+Makefile hunks apply at an offset to Perpetua 7c98a10e6bb7. Everything
+the driver uses is in that tree: devm_pmic_glink_client_alloc(),
+pmic_glink_client_register() and pmic_glink_send() with the same
+signatures, the auxiliary device "pmic_glink.hboost" from the preceding
+pmic_glink patch, system_percpu_wq and DEVICE_ATTR_ADMIN_RO. Built as a
+module for this port (CONFIG_CHARGER_MT5806_PEN=m; it depends on I2C,
+GPIOLIB and QCOM_PMIC_GLINK, all =y in the config of record) and loaded
+by the i2c/of and auxiliary modaliases it exports. The driver's own
+sysfs attributes live on the I2C device, not under
+/sys/class/power_supply: it registers no power_supply.]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ drivers/power/supply/Kconfig              |   13 +
+ drivers/power/supply/Makefile             |    1 +
+ drivers/power/supply/mt5806_pen_charger.c | 1637 +++++++++++++++++++++
+ 3 files changed, 1651 insertions(+)
+ create mode 100644 drivers/power/supply/mt5806_pen_charger.c
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 123cd0de98e5..01828d4b2c1e 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -1200,6 +1200,19 @@ config FUEL_GAUGE_MM8013
+ 	  the state of charge, temperature, cycle count, actual and design
+ 	  capacity, etc.
+ 
++config CHARGER_MT5806_PEN
++	tristate "Maxic MT5806 pen charger (OnePlus Pad 4)"
++	depends on I2C
++	depends on GPIOLIB
++	depends on QCOM_PMIC_GLINK
++	help
++	  Say Y or M here for the wireless pen charger of the OnePlus Pad 4:
++	  a Maxic MT5806 power transmitter on the magnet side of the tablet,
++	  fed from the PMIC's hBoost converter through the charger firmware.
++	  The driver powers the IC, lets it charge a pen that has identified
++	  itself, stops on the pen's request, on errors and after two hours,
++	  and reports the pen to user space.
++
+ config MACSMC_POWER
+ 	tristate "Apple SMC Battery and Power Driver"
+ 	depends on MFD_MACSMC
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index b83e61358ab7..06db4d2727b5 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -136,3 +136,4 @@ obj-$(CONFIG_CHARGER_QCOM_SMB2)	+= qcom_smbx.o
+ obj-$(CONFIG_FUEL_GAUGE_MM8013)	+= mm8013.o
+ obj-$(CONFIG_MACSMC_POWER)	+= macsmc-power.o
+ obj-$(CONFIG_CHARGER_MAX77759)	+= max77759_charger.o
++obj-$(CONFIG_CHARGER_MT5806_PEN)	+= mt5806_pen_charger.o
+diff --git a/drivers/power/supply/mt5806_pen_charger.c b/drivers/power/supply/mt5806_pen_charger.c
+new file mode 100644
+index 000000000000..f450871bce4a
+--- /dev/null
++++ b/drivers/power/supply/mt5806_pen_charger.c
+@@ -0,0 +1,1637 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Maxic MT5806 wireless power transmitter: the pen charger of the OnePlus
++ * Pad 4 ("iceland").
++ *
++ * The transmitter sits on the magnet side of the tablet. It finds the pen by
++ * itself, negotiates and transfers the power; the limits of the transfer
++ * (current, voltage, foreign object, temperature) are part of the firmware in
++ * its own memory. That firmware is never written by this driver, and the
++ * transmitter is only used with a firmware version the vendor software has
++ * been seen running on this tablet.
++ *
++ * The host
++ *  - feeds the IC from the PMIC's hBoost converter. The converter belongs to
++ *    the charger firmware; its voltage is asked for through PMIC GLINK: the
++ *    idle value while nothing is attached, the charge value for a pen;
++ *  - lets a transfer go on only for a pen that has sent a valid address
++ *    within 5 s, and stops it when the pen reports a full battery or asks for
++ *    a stop, on an error report of the IC, and after 120 minutes;
++ *  - tells user space about the pen.
++ *
++ * Sequence, timing and every value follow OnePlus' driver for this tablet,
++ * oplus/kernel/charger/wireless_pen/oplus_mt5806.{c,h} and
++ * oplus_wireless_pen_glink.{c,h} in android_kernel_oneplus_sm8850-modules
++ * ("stock" below; c:N / h:N / glink:N are lines of those files), and the
++ * tablet's device tree (oplus-chg-iceland-common.dtsi in
++ * android_kernel_oneplus_sm8850-devicetrees). Where this driver differs it is
++ * on the stricter side; each such place says so.
++ */
++
++#include <linux/auxiliary_bus.h>
++#include <linux/bits.h>
++#include <linux/cleanup.h>
++#include <linux/completion.h>
++#include <linux/debugfs.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/interrupt.h>
++#include <linux/kobject.h>
++#include <linux/ktime.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/pm.h>
++#include <linux/pm_wakeup.h>
++#include <linux/property.h>
++#include <linux/seq_file.h>
++#include <linux/soc/qcom/pdr.h>
++#include <linux/soc/qcom/pmic_glink.h>
++#include <linux/sysfs.h>
++#include <linux/unaligned.h>
++#include <linux/workqueue.h>
++
++/* Registers: 16 bit addresses, little endian values (stock oplus_mt5806.h) */
++#define MT5806_REG_FW_MINOR		0x0002	/* h:160 */
++#define MT5806_REG_SYS_MODE		0x0004	/* h:210 */
++#define MT5806_REG_FW_MAJOR		0x0006	/* h:161 */
++#define MT5806_REG_CMD			0x0008	/* h:213 */
++#define  MT5806_CMD_CLEAR_INT		BIT(5)	/* h:346, byte 0 */
++#define MT5806_REG_CMD_B1		0x0009
++#define  MT5806_CMD_B1_CLEAR_EPT	BIT(6)	/* h:364: bit 14 of the command word */
++#define MT5806_REG_CMD_SYNC		0x000f	/* h:371 */
++#define  MT5806_CMD_SYNC		0x55	/* h:372 */
++#define MT5806_REG_IRQ_EN		0x0010	/* h:374 */
++#define MT5806_REG_IRQ_FLAG		0x0014	/* h:378 */
++#define MT5806_REG_IRQ_CLR		0x0018	/* h:395 */
++#define MT5806_REG_RX_PKT		0x0020	/* h:234, 399 */
++#define  MT5806_RX_PKT_LEN		9	/* h:235 */
++#define MT5806_REG_MAX_FOP		0x004c	/* h:415 */
++#define MT5806_REG_MIN_FOP		0x004e	/* h:420 */
++#define MT5806_REG_PING_FREQ		0x0050	/* h:424 */
++#define MT5806_REG_PING_OCP		0x0052	/* h:431 */
++#define MT5806_REG_OCP			0x0054	/* h:435 */
++#define MT5806_REG_OVP			0x0058	/* h:440 */
++#define MT5806_REG_FOD_THD		0x0060	/* h:445 */
++#define MT5806_REG_EPT_REASON		0x006a	/* h:452 */
++#define MT5806_REG_OP_FREQ		0x006e	/* h:458 */
++#define MT5806_REG_PEN_ON_PAD		0x0076	/* h:466 */
++#define MT5806_REG_VRECT		0x008a	/* h:472 */
++#define MT5806_REG_IIN			0x008e	/* h:208, 475: mA */
++#define MT5806_REG_VIN			0x0090	/* h:207, 478: mV */
++#define MT5806_REG_FOD0			0x0094	/* h:481 */
++#define MT5806_REG_FOD1			0x0096	/* h:482 */
++#define MT5806_REG_FOD2			0x0098	/* h:483 */
++#define MT5806_REG_PING_INTERVAL	0x00a6	/* h:486 */
++#define MT5806_REG_EPT			0x00b0	/* h:237 */
++#define MT5806_REG_TEMP			0x00d8	/* h:470 */
++#define MT5806_REG_Q_MTP		0x00e4	/* h:537 */
++#define MT5806_REG_CHIP_ID		0x166c	/* h:159, 327 */
++#define MT5806_CHIP_ID			0x5806	/* h:329 */
++
++/* Interrupt flags as stock's handler table uses them (c:1485-1589) */
++#define MT5806_IRQ_RX_REMOVED		BIT(6)
++#define MT5806_IRQ_INIT_DONE		BIT(9)
++#define MT5806_IRQ_PKT			BIT(11)
++#define MT5806_IRQ_EPT			BIT(15)
++#define MT5806_IRQ_PEN_ATTACH		BIT(25)
++#define MT5806_IRQ_POS_OK		BIT(26)
++#define MT5806_IRQ_POS_ERROR		BIT(28)
++
++/* End-of-power-transfer causes that count as an error (h:238-244, c:1068-1085) */
++#define MT5806_EPT1_ERRORS		GENMASK(6, 2)	/* OCP, OVP, LVP, FOD, OTP */
++#define MT5806_EPT2_ERRORS		GENMASK(2, 1)	/* ping OVP, ping OCP */
++
++/* Packets from the pen (h:252-258) */
++#define MT5806_PKT_MAC			0x48
++#define MT5806_PKT_MAC_CHECK		0xc1
++#define MT5806_PKT_MAC_ADDR1		0xb6
++#define MT5806_PKT_MAC_ADDR2		0xb7
++#define MT5806_PKT_POWER		0x28
++#define MT5806_PKT_POWER_CMD		0x17
++
++/* Timing and thresholds (stock) */
++#define MT5806_WAKE_MS			2500	/* h:658 TX_WAKEUP_WAIT_MS */
++#define MT5806_POWER_CYCLE_MS		1000	/* c:508-510 */
++#define MT5806_ID_TRIES			5	/* h:652, c:4213 */
++#define MT5806_VALIDATE_MS		5000	/* h:31 ATTACH_WAIT_TIME: 50 x 100 ms, c:1204 */
++#define MT5806_MAX_CHARGE_MIN		120	/* h:43 POWER_EXPIRED_TIME_DEFAULT */
++#define MT5806_MAX_CHARGE_MS		(MT5806_MAX_CHARGE_MIN * 60 * MSEC_PER_SEC)
++#define MT5806_RECHARGE_SOC		80	/* the tablet's device tree: rx,soc_threshold */
++#define MT5806_PEN_FULL			100	/* c:1013 */
++
++/*
++ * The supply. Stock asks for 7000 mV while idle and 10000 mV for a pen
++ * (qcom,hboost_default_volt_mv / qcom,hboost_attach_volt_mv of the tablet's
++ * device tree); its code would accept up to 14750 mV (h:650). This driver
++ * refuses anything above the tablet's charge value.
++ */
++#define MT5806_BOOST_MIN_MV		2000	/* h:651 */
++#define MT5806_BOOST_MAX_MV		10000
++#define MT5806_BOOST_STEP_MV		50	/* c:2435 */
++#define MT5806_BOOST_TRIES		5
++#define MT5806_BOOST_RETRY_MS		500	/* h:654 */
++
++/* a failed start (no confirmed supply, no answer of the IC) is tried again a few times */
++#define MT5806_INIT_RETRIES		3
++#define MT5806_INIT_RETRY_MS		10000
++
++/* PMIC GLINK: stock oplus_wireless_pen_glink.h:15-28 */
++#define MT5806_HBOOST_OWNER		32785
++#define MT5806_HBOOST_SET_VOLT		0x10007
++#define MT5806_HBOOST_ACK_MS		2500
++
++/*
++ * Firmware versions (major << 16 | minor) this tablet has run under the vendor
++ * software: 0x20022 is what the IC reported under LineageOS with the stock
++ * kernel modules, and the version of the stock firmware file
++ * /odm/firmware/wireless_pen/25978/mt5806_firmware.bin.
++ */
++static const u32 mt5806_known_fw[] = { 0x00020022 };
++
++struct mt5806_hboost_req {
++	struct pmic_glink_hdr hdr;
++	u8 reg_vout;
++	u8 pad[3];		/* stock sends its unpacked struct: 16 bytes */
++};
++
++struct mt5806_hboost_resp {
++	struct pmic_glink_hdr hdr;
++	__le32 ret_code;
++};
++
++struct mt5806_hboost {
++	struct device *dev;
++	struct pmic_glink_client *client;
++	struct completion ack;
++	struct work_struct state_work;
++	u32 ret_code;
++	u32 resp_len;
++	u32 answers;
++	u32 stray;
++	u32 stray_opcode;
++	u32 epoch;		/* counts the times the link came up */
++	bool up;
++};
++
++enum mt5806_stop {
++	MT5806_STOP_NONE,
++	MT5806_STOP_FULL,	/* the pen reported 100 % */
++	MT5806_STOP_REQUEST,	/* the pen asked for a stop below 100 % */
++	MT5806_STOP_TIMEOUT,	/* 120 minutes */
++	MT5806_STOP_ERROR,	/* the IC ended the transfer with an error */
++	MT5806_STOP_INVALID,	/* no valid pen address */
++};
++
++static const char * const mt5806_stop_names[] = {
++	"none", "full", "request", "timeout", "error", "invalid",
++};
++
++struct mt5806_snap {
++	const char *name;
++	u16 reg;
++	u8 len;
++};
++
++/* read once at every start, for the status file: nothing here is written */
++static const struct mt5806_snap mt5806_snaps[] = {
++	{ "sys_mode", MT5806_REG_SYS_MODE, 2 },
++	{ "irq_en", MT5806_REG_IRQ_EN, 4 },
++	{ "irq_flag", MT5806_REG_IRQ_FLAG, 4 },
++	{ "max_fop_khz", MT5806_REG_MAX_FOP, 2 },
++	{ "min_fop_khz", MT5806_REG_MIN_FOP, 2 },
++	{ "ping_freq_khz", MT5806_REG_PING_FREQ, 2 },
++	{ "ping_ocp_ma", MT5806_REG_PING_OCP, 2 },
++	{ "ocp_ma", MT5806_REG_OCP, 2 },
++	{ "ovp_mv", MT5806_REG_OVP, 2 },
++	{ "fod_thd", MT5806_REG_FOD_THD, 2 },
++	{ "ept_reason", MT5806_REG_EPT_REASON, 2 },
++	{ "op_freq", MT5806_REG_OP_FREQ, 2 },
++	{ "pen_on_pad", MT5806_REG_PEN_ON_PAD, 1 },
++	{ "vrect_mv", MT5806_REG_VRECT, 2 },
++	{ "iin_ma", MT5806_REG_IIN, 2 },
++	{ "vin_mv", MT5806_REG_VIN, 2 },
++	{ "fod0", MT5806_REG_FOD0, 2 },
++	{ "fod1", MT5806_REG_FOD1, 2 },
++	{ "fod2", MT5806_REG_FOD2, 2 },
++	{ "ping_interval_ms", MT5806_REG_PING_INTERVAL, 2 },
++	{ "ept", MT5806_REG_EPT, 4 },
++	{ "temp", MT5806_REG_TEMP, 2 },
++};
++
++#define MT5806_EVENTS	48
++
++struct mt5806_event {
++	u64 ms;
++	char text[72];
++};
++
++struct mt5806 {
++	struct device *dev;
++	struct i2c_client *client;
++	struct gpio_desc *enable_gpio;	/* power switch of the IC (stock wls_sw_en_gpio) */
++	struct gpio_desc *wake_gpio;	/* high keeps the IC awake (stock wls_sleep_gpio) */
++	struct gpio_desc *scan_gpio;	/* high: look for a pen every 200 ms, low: 2 s (c:122) */
++	struct gpio_desc *txoff_gpio;	/* high: transmitter off (stock wls_off_state_gpio) */
++	int irq;
++	struct dentry *debugfs;
++
++	struct mutex lock;		/* everything below, and the sequences on the IC */
++	struct delayed_work init_work;
++	struct work_struct boost_work;
++	struct delayed_work validate_work;
++	struct delayed_work max_time_work;
++
++	u32 boost_idle_mv;
++	u32 boost_charge_mv;
++	u32 boost_target_mv;
++	u32 boost_acked_mv;
++	int boost_err;
++	bool boost_fault;	/* the idle voltage could not be restored */
++	u32 epoch;
++	u32 tries_epoch;
++	unsigned int init_tries;
++
++	bool ready;
++	bool removing;
++	bool suspended;
++	bool suspend_off;
++	const char *fail;
++
++	bool tx_allowed;
++	bool inhibit;
++	bool scan_fast;
++	bool near;		/* the IC has something attached */
++	bool present;		/* ... and it is a pen with a valid address */
++	bool validating;
++	bool recharge;
++	enum mt5806_stop stop;
++	u8 ept[4];
++	ktime_t tx_start;
++
++	u8 pen_id;
++	int pen_soc;		/* from the pen's own stop packet, -1 = none yet */
++	int rx_soc;		/* written by user space (the pen's Bluetooth battery level) */
++	u64 ble_addr;
++	u16 mac_check;
++	u8 mac[10];
++	bool mac1, mac2;
++
++	u16 chip_id;
++	u32 fw_version;
++	bool q_valid;
++	u16 q_cnt, q_width;
++	u32 snap[ARRAY_SIZE(mt5806_snaps)];
++	u32 snap_ok;
++
++	u32 irq_count;
++	u32 last_flags;
++	u32 i2c_errors;
++	int last_i2c_err;
++
++	struct mt5806_event events[MT5806_EVENTS];
++	unsigned int n_events;
++};
++
++/*
++ * mt5806_link_lock guards the two pointers and a supply request in flight.
++ * Order: chip->lock, then mt5806_link_lock; never the other way round.
++ */
++static DEFINE_MUTEX(mt5806_link_lock);
++static struct mt5806_hboost *mt5806_hboost;
++static struct mt5806 *mt5806_charger;
++static struct dentry *mt5806_debugfs_root;
++
++/* ---- the supply: hBoost through PMIC GLINK ---- */
++
++static void mt5806_hboost_cb(const void *data, size_t len, void *priv)
++{
++	const struct mt5806_hboost_resp *resp = data;
++	struct mt5806_hboost *hb = priv;
++
++	/* called under a spinlock of the PMIC GLINK core */
++	if (le32_to_cpu(resp->hdr.opcode) != MT5806_HBOOST_SET_VOLT) {
++		hb->stray++;
++		hb->stray_opcode = le32_to_cpu(resp->hdr.opcode);
++		return;
++	}
++
++	hb->resp_len = len;
++	/* stock takes anything but a zero result code as a failure (glink:104) */
++	hb->ret_code = len >= sizeof(*resp) ? le32_to_cpu(resp->ret_code) : U32_MAX;
++	hb->answers++;
++	complete(&hb->ack);
++}
++
++static void mt5806_hboost_pdr(void *priv, int state)
++{
++	struct mt5806_hboost *hb = priv;
++	bool up = state == SERVREG_SERVICE_STATE_UP;
++
++	/* called under a spinlock of the PMIC GLINK core */
++	if (up && !hb->up)
++		hb->epoch++;
++	WRITE_ONCE(hb->up, up);
++	schedule_work(&hb->state_work);
++}
++
++static void mt5806_hboost_state_work(struct work_struct *work)
++{
++	guard(mutex)(&mt5806_link_lock);
++	if (mt5806_charger)
++		mod_delayed_work(system_percpu_wq, &mt5806_charger->init_work, 0);
++}
++
++/* 0 = no link to the charger firmware, otherwise the number of the current link */
++static u32 mt5806_hboost_epoch(void)
++{
++	guard(mutex)(&mt5806_link_lock);
++	if (!mt5806_hboost || !READ_ONCE(mt5806_hboost->up))
++		return 0;
++	return mt5806_hboost->epoch;
++}
++
++static int mt5806_hboost_set(unsigned int mv)
++{
++	struct mt5806_hboost_req req = {
++		.hdr.owner = cpu_to_le32(MT5806_HBOOST_OWNER),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(MT5806_HBOOST_SET_VOLT),
++	};
++	struct mt5806_hboost *hb;
++	int ret;
++
++	if (mv < MT5806_BOOST_MIN_MV || mv > MT5806_BOOST_MAX_MV)
++		return -EINVAL;
++	req.reg_vout = (mv - MT5806_BOOST_MIN_MV) / MT5806_BOOST_STEP_MV;	/* c:2435 */
++
++	guard(mutex)(&mt5806_link_lock);
++	hb = mt5806_hboost;
++	if (!hb || !READ_ONCE(hb->up))
++		return -ENODEV;
++
++	reinit_completion(&hb->ack);
++	ret = pmic_glink_send(hb->client, &req, sizeof(req));
++	if (ret)
++		return ret;
++	if (!wait_for_completion_timeout(&hb->ack, msecs_to_jiffies(MT5806_HBOOST_ACK_MS)))
++		return -ETIMEDOUT;
++
++	return hb->ret_code ? -EIO : 0;
++}
++
++static int mt5806_hboost_set_retry(unsigned int mv)
++{
++	int i, ret = -ENODEV;
++
++	for (i = 0; i < MT5806_BOOST_TRIES; i++) {
++		ret = mt5806_hboost_set(mv);
++		if (!ret || ret == -ENODEV || ret == -EINVAL)
++			break;
++		msleep(MT5806_BOOST_RETRY_MS);
++	}
++
++	return ret;
++}
++
++static int mt5806_hboost_probe(struct auxiliary_device *adev,
++			       const struct auxiliary_device_id *id)
++{
++	struct device *dev = &adev->dev;
++	struct mt5806_hboost *hb;
++
++	hb = devm_kzalloc(dev, sizeof(*hb), GFP_KERNEL);
++	if (!hb)
++		return -ENOMEM;
++
++	hb->dev = dev;
++	init_completion(&hb->ack);
++	INIT_WORK(&hb->state_work, mt5806_hboost_state_work);
++	auxiliary_set_drvdata(adev, hb);
++
++	hb->client = devm_pmic_glink_client_alloc(dev, MT5806_HBOOST_OWNER, mt5806_hboost_cb,
++						  mt5806_hboost_pdr, hb);
++	if (IS_ERR(hb->client))
++		return PTR_ERR(hb->client);
++
++	scoped_guard(mutex, &mt5806_link_lock)
++		mt5806_hboost = hb;
++
++	pmic_glink_client_register(hb->client);
++
++	return 0;
++}
++
++static void mt5806_hboost_remove(struct auxiliary_device *adev)
++{
++	struct mt5806_hboost *hb = auxiliary_get_drvdata(adev);
++
++	scoped_guard(mutex, &mt5806_link_lock) {
++		mt5806_hboost = NULL;
++		if (mt5806_charger)
++			mod_delayed_work(system_percpu_wq, &mt5806_charger->init_work, 0);
++	}
++	cancel_work_sync(&hb->state_work);
++}
++
++static const struct auxiliary_device_id mt5806_hboost_ids[] = {
++	{ .name = "pmic_glink.hboost", },
++	{}
++};
++MODULE_DEVICE_TABLE(auxiliary, mt5806_hboost_ids);
++
++static struct auxiliary_driver mt5806_hboost_driver = {
++	.name = "mt5806_hboost",
++	.probe = mt5806_hboost_probe,
++	.remove = mt5806_hboost_remove,
++	.id_table = mt5806_hboost_ids,
++};
++
++/* ---- the IC ---- */
++
++static __printf(2, 3) void mt5806_note(struct mt5806 *chip, const char *fmt, ...)
++{
++	struct mt5806_event *e = &chip->events[chip->n_events++ % MT5806_EVENTS];
++	va_list args;
++
++	e->ms = ktime_to_ms(ktime_get_boottime());
++	va_start(args, fmt);
++	vscnprintf(e->text, sizeof(e->text), fmt, args);
++	va_end(args);
++	dev_dbg(chip->dev, "%s\n", e->text);
++}
++
++static int mt5806_read(struct mt5806 *chip, u16 reg, u8 *buf, size_t len)
++{
++	u8 addr[2] = { reg >> 8, reg & 0xff };
++	struct i2c_msg msgs[] = {
++		{ .addr = chip->client->addr, .len = sizeof(addr), .buf = addr },
++		{ .addr = chip->client->addr, .flags = I2C_M_RD, .len = len, .buf = buf },
++	};
++	int ret;
++
++	ret = i2c_transfer(chip->client->adapter, msgs, ARRAY_SIZE(msgs));
++	if (ret == ARRAY_SIZE(msgs))
++		return 0;
++
++	chip->i2c_errors++;
++	chip->last_i2c_err = ret < 0 ? ret : -EIO;
++	return chip->last_i2c_err;
++}
++
++static int mt5806_write(struct mt5806 *chip, u16 reg, const u8 *buf, size_t len)
++{
++	u8 msg[2 + 4] = { reg >> 8, reg & 0xff };
++	int ret;
++
++	if (len > sizeof(msg) - 2)
++		return -EINVAL;
++	memcpy(msg + 2, buf, len);
++
++	ret = i2c_master_send(chip->client, msg, len + 2);
++	if (ret == len + 2)
++		return 0;
++
++	chip->i2c_errors++;
++	chip->last_i2c_err = ret < 0 ? ret : -EIO;
++	return chip->last_i2c_err;
++}
++
++static int mt5806_read16(struct mt5806 *chip, u16 reg, u16 *val)
++{
++	u8 b[2];
++	int ret;
++
++	ret = mt5806_read(chip, reg, b, sizeof(b));
++	if (!ret)
++		*val = get_unaligned_le16(b);
++	return ret;
++}
++
++/* set a bit of the command register and tell the IC to take it (c:1145-1146, 2529-2530) */
++static int mt5806_command(struct mt5806 *chip, u16 reg, u8 bit)
++{
++	u8 v;
++	int ret;
++
++	ret = mt5806_read(chip, reg, &v, 1);
++	if (ret)
++		return ret;
++	v |= bit;
++	ret = mt5806_write(chip, reg, &v, 1);
++	if (ret)
++		return ret;
++	v = MT5806_CMD_SYNC;
++	return mt5806_write(chip, MT5806_REG_CMD_SYNC, &v, 1);
++}
++
++static u16 mt5806_crc16(const u8 *data, size_t len)
++{
++	u32 crc = 0xffff;
++	size_t i;
++	int j;
++
++	/* c:470-489 */
++	for (i = 0; i < len; i++) {
++		crc ^= (u32)data[i] << 8;
++		for (j = 0; j < 8; j++) {
++			crc <<= 1;
++			if (crc & 0x10000)
++				crc ^= 0x11021;
++		}
++	}
++
++	return crc;
++}
++
++static bool mt5806_fw_known(u32 version)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(mt5806_known_fw); i++)
++		if (mt5806_known_fw[i] == version)
++			return true;
++	return false;
++}
++
++static void mt5806_uevent(struct mt5806 *chip)
++{
++	char present[24], id[24];
++	char *envp[] = { present, id, NULL };
++
++	/* the pen's Bluetooth address is not put into events or the log: see ble_address */
++	snprintf(present, sizeof(present), "PEN_PRESENT=%d", chip->present);
++	snprintf(id, sizeof(id), "PEN_ID=%u", chip->pen_id);
++	kobject_uevent_env(&chip->dev->kobj, KOBJ_CHANGE, envp);
++	sysfs_notify(&chip->dev->kobj, NULL, "present");
++}
++
++/*
++ * The one place that decides whether the transmitter may run. Stock allows it
++ * while nothing is attached (the IC then only looks for a pen), for 5 s after
++ * an attach, and for a pen with a valid address until one of the stop reasons.
++ */
++static void mt5806_tx_update(struct mt5806 *chip)
++{
++	bool allow = chip->ready && !chip->inhibit && !chip->boost_fault && !chip->suspend_off &&
++		     chip->stop == MT5806_STOP_NONE &&
++		     (!chip->near || chip->present || chip->validating);
++
++	gpiod_set_value_cansleep(chip->txoff_gpio, !allow);
++	if (allow != chip->tx_allowed)
++		mt5806_note(chip, "transmitter %s", allow ? "allowed" : "off");
++	chip->tx_allowed = allow;
++}
++
++static void mt5806_pen_forget(struct mt5806 *chip)
++{
++	chip->near = false;
++	chip->present = false;
++	chip->validating = false;
++	chip->recharge = false;
++	chip->stop = MT5806_STOP_NONE;
++	chip->mac1 = false;
++	chip->mac2 = false;
++	chip->mac_check = 0;
++	chip->ble_addr = 0;
++	chip->pen_id = 0;
++	chip->pen_soc = -1;
++	chip->rx_soc = -1;
++}
++
++/*
++ * IC without power, transmitter off: stock's state after a failed start and at
++ * shutdown (c:4348, 4550). The two mode lines are taken low as well so that
++ * nothing drives into the unpowered IC.
++ */
++static void mt5806_ic_off(struct mt5806 *chip)
++{
++	gpiod_set_value_cansleep(chip->txoff_gpio, 1);
++	gpiod_set_value_cansleep(chip->wake_gpio, 0);
++	gpiod_set_value_cansleep(chip->scan_gpio, 0);
++	gpiod_set_value_cansleep(chip->enable_gpio, 0);
++	chip->tx_allowed = false;
++}
++
++static void mt5806_stop_all(struct mt5806 *chip, const char *why)
++{
++	bool was_present = chip->present;
++
++	chip->ready = false;
++	chip->fail = why;
++	cancel_delayed_work(&chip->validate_work);
++	cancel_delayed_work(&chip->max_time_work);
++	mt5806_ic_off(chip);
++	mt5806_pen_forget(chip);
++	if (was_present)
++		mt5806_uevent(chip);
++}
++
++static void mt5806_validate_start(struct mt5806 *chip)
++{
++	chip->validating = true;
++	/* stock holds a wake lock for the 5 s (c:1202) */
++	pm_wakeup_event(chip->dev, MT5806_VALIDATE_MS + 1000);
++	mod_delayed_work(system_percpu_wq, &chip->validate_work,
++			 msecs_to_jiffies(MT5806_VALIDATE_MS));
++}
++
++static void mt5806_boost_request(struct mt5806 *chip, u32 mv)
++{
++	chip->boost_target_mv = mv;
++	schedule_work(&chip->boost_work);
++}
++
++/* stock mt_wls_reset_sys (c:1366-1384), with the transmitter held off */
++static void mt5806_ic_reset(struct mt5806 *chip)
++{
++	gpiod_set_value_cansleep(chip->txoff_gpio, 1);
++	chip->tx_allowed = false;
++	gpiod_set_value_cansleep(chip->enable_gpio, 0);
++	msleep(MT5806_POWER_CYCLE_MS);
++	gpiod_set_value_cansleep(chip->wake_gpio, 1);
++	gpiod_set_value_cansleep(chip->enable_gpio, 1);
++	msleep(MT5806_WAKE_MS);
++	gpiod_set_value_cansleep(chip->wake_gpio, 0);
++}
++
++static void mt5806_on_attach(struct mt5806 *chip)
++{
++	mt5806_note(chip, "attach%s", chip->inhibit ? " (inhibited)" : "");
++	chip->near = true;
++	chip->stop = MT5806_STOP_NONE;
++	chip->recharge = false;
++	chip->tx_start = ktime_get_boottime();
++	mt5806_boost_request(chip, chip->boost_charge_mv);		/* c:1347-1348 */
++	/* Validation needs the transmitter: it starts when an inhibit is released. */
++	if (!chip->present && !chip->inhibit)
++		mt5806_validate_start(chip);				/* c:1354 */
++	mod_delayed_work(system_percpu_wq, &chip->max_time_work,
++			 msecs_to_jiffies(MT5806_MAX_CHARGE_MS));	/* c:1355 */
++	mt5806_tx_update(chip);
++}
++
++/* returns true if the IC was power cycled: its pending flags are gone with it */
++static bool mt5806_on_remove(struct mt5806 *chip)
++{
++	bool error = chip->stop == MT5806_STOP_ERROR;
++
++	mt5806_note(chip, "removed%s", error ? ", power cycle after the error" : "");
++	gpiod_set_value_cansleep(chip->scan_gpio, chip->scan_fast);	/* c:1418-1421 */
++	cancel_delayed_work(&chip->validate_work);
++	cancel_delayed_work(&chip->max_time_work);			/* c:1426 */
++	mt5806_pen_forget(chip);
++	mt5806_boost_request(chip, chip->boost_idle_mv);		/* c:1423 */
++	mt5806_uevent(chip);						/* c:1424 */
++	if (error)
++		mt5806_ic_reset(chip);					/* c:1404-1405 */
++	mt5806_tx_update(chip);						/* c:1429 */
++
++	return error;
++}
++
++static void mt5806_on_mac(struct mt5806 *chip)
++{
++	const u8 *m = chip->mac;
++	u8 a[6];
++
++	chip->mac1 = false;
++	chip->mac2 = false;
++
++	/* c:799-829 */
++	a[5] = (m[9] & 0x0f) << 4 | (m[4] & 0xf0) >> 4;
++	a[4] = (m[8] & 0x0f) << 4 | (m[3] & 0xf0) >> 4;
++	a[3] = (m[7] & 0x0f) << 4 | (m[2] & 0xf0) >> 4;
++	a[2] = (m[4] & 0x0f) << 4 | (m[9] & 0xf0) >> 4;
++	a[1] = (m[3] & 0x0f) << 4 | (m[8] & 0xf0) >> 4;
++	a[0] = (m[2] & 0x0f) << 4 | (m[7] & 0xf0) >> 4;
++	chip->ble_addr = (u64)a[5] << 40 | (u64)a[4] << 32 | (u64)a[3] << 24 |
++			 (u64)a[2] << 16 | (u64)a[1] << 8 | a[0];
++
++	/* c:831-866 */
++	if (chip->ble_addr &&
++	    (m[9] ^ m[8] ^ m[7]) == (chip->mac_check >> 8) &&
++	    (m[4] ^ m[3] ^ m[2]) == (chip->mac_check & 0xff)) {
++		bool was_present = chip->present;
++
++		chip->present = true;
++		chip->validating = false;
++		cancel_delayed_work(&chip->validate_work);
++		if (!was_present) {
++			mt5806_note(chip, "valid pen, id %u, %lld ms after the attach",
++				    chip->pen_id,
++				    ktime_ms_delta(ktime_get_boottime(), chip->tx_start));
++			dev_info(chip->dev, "pen attached (id %u)\n", chip->pen_id);
++			if (!chip->recharge)
++				mt5806_uevent(chip);			/* c:991-995 */
++		}
++	} else {
++		mt5806_note(chip, "pen address not valid");
++		chip->ble_addr = 0;
++		chip->validating = false;
++		chip->stop = MT5806_STOP_INVALID;			/* c:997 */
++	}
++	mt5806_tx_update(chip);
++}
++
++static void mt5806_on_packet(struct mt5806 *chip)
++{
++	u8 d[MT5806_RX_PKT_LEN + 1] = {};
++
++	if (mt5806_read(chip, MT5806_REG_RX_PKT, d, MT5806_RX_PKT_LEN))
++		return;
++
++	if (d[0] == MT5806_PKT_MAC && d[1] == MT5806_PKT_MAC_CHECK) {	/* c:1045-1049 */
++		chip->mac1 = false;
++		chip->mac2 = false;
++		chip->mac_check = d[2] << 8 | d[3];
++		chip->pen_id = d[4];
++		mt5806_note(chip, "packet: address check, pen id %u", chip->pen_id);
++	} else if (d[0] == MT5806_PKT_MAC && d[1] == MT5806_PKT_MAC_ADDR1) {
++		memcpy(chip->mac, d, 5);
++		chip->mac1 = true;
++		mt5806_note(chip, "packet: address part 1");
++	} else if (d[0] == MT5806_PKT_MAC && d[1] == MT5806_PKT_MAC_ADDR2) {
++		memcpy(chip->mac + 5, d, 5);
++		chip->mac2 = true;
++		mt5806_note(chip, "packet: address part 2");
++	} else if (d[0] == MT5806_PKT_POWER && d[1] == MT5806_PKT_POWER_CMD) {	/* c:1006-1023 */
++		chip->pen_soc = d[2];
++		chip->stop = chip->pen_soc == MT5806_PEN_FULL ? MT5806_STOP_FULL :
++								MT5806_STOP_REQUEST;
++		mt5806_note(chip, "packet: stop, pen at %d %%", chip->pen_soc);
++		dev_info(chip->dev, "pen asks to stop at %d %%\n", chip->pen_soc);
++		mt5806_tx_update(chip);
++	} else {
++		mt5806_note(chip, "packet: %02x %02x", d[0], d[1]);
++	}
++
++	if (chip->mac1 && chip->mac2)
++		mt5806_on_mac(chip);
++}
++
++static void mt5806_on_ept(struct mt5806 *chip)
++{
++	if (mt5806_read(chip, MT5806_REG_EPT, chip->ept, sizeof(chip->ept)))
++		return;
++
++	mt5806_note(chip, "end of transfer: %4ph", chip->ept);
++	if ((chip->ept[1] & MT5806_EPT1_ERRORS) || (chip->ept[2] & MT5806_EPT2_ERRORS)) {
++		/* c:1132-1143; the IC is power cycled once the pen is taken off (c:1404) */
++		chip->stop = MT5806_STOP_ERROR;
++		gpiod_set_value_cansleep(chip->scan_gpio, 1);
++		mt5806_tx_update(chip);
++		dev_warn(chip->dev,
++			 "transfer ended by the IC:%s%s%s%s%s%s%s (%4ph); transmitter off until the pen is taken off\n",
++			 chip->ept[1] & BIT(6) ? " over-temperature" : "",
++			 chip->ept[1] & BIT(5) ? " foreign object" : "",
++			 chip->ept[1] & BIT(4) ? " low voltage" : "",
++			 chip->ept[1] & BIT(3) ? " over-voltage" : "",
++			 chip->ept[1] & BIT(2) ? " over-current" : "",
++			 chip->ept[2] & BIT(1) ? " ping over-voltage" : "",
++			 chip->ept[2] & BIT(2) ? " ping over-current" : "",
++			 chip->ept);
++	}
++
++	mt5806_command(chip, MT5806_REG_CMD_B1, MT5806_CMD_B1_CLEAR_EPT);	/* c:1145-1146 */
++}
++
++static void mt5806_position_event(struct mt5806 *chip, bool mislocated)
++{
++	char *on[] = { "PEN_MISLOCATED=1", NULL };
++	char *off[] = { "PEN_MISLOCATED=0", NULL };
++
++	mt5806_note(chip, "pen position %s", mislocated ? "wrong" : "fine again");
++	kobject_uevent_env(&chip->dev->kobj, KOBJ_CHANGE, mislocated ? on : off);
++}
++
++/* called with chip->lock held and the IC awake (it raised its interrupt line, or is held awake) */
++static void mt5806_handle_events(struct mt5806 *chip)
++{
++	u8 b[4];
++	u32 flags;
++	int pass;
++
++	for (pass = 0; pass < 4; pass++) {
++		if (mt5806_read(chip, MT5806_REG_IRQ_FLAG, b, sizeof(b)))
++			return;
++		flags = get_unaligned_le32(b);
++		if (!flags)
++			return;
++
++		chip->irq_count++;
++		chip->last_flags = flags;
++		mt5806_note(chip, "interrupt flags 0x%08x", flags);
++
++		/* in the order of stock's table (c:2523-2527) */
++		if ((flags & MT5806_IRQ_RX_REMOVED) && mt5806_on_remove(chip))
++			return;
++		if (flags & MT5806_IRQ_INIT_DONE) {
++			chip->mac1 = false;
++			chip->mac2 = false;
++		}
++		if (flags & MT5806_IRQ_PKT)
++			mt5806_on_packet(chip);
++		if (flags & MT5806_IRQ_EPT)
++			mt5806_on_ept(chip);
++		if (flags & MT5806_IRQ_PEN_ATTACH)
++			mt5806_on_attach(chip);
++		if (flags & MT5806_IRQ_POS_OK)
++			mt5806_position_event(chip, false);
++		if (flags & MT5806_IRQ_POS_ERROR)
++			mt5806_position_event(chip, true);
++
++		/* c:2528-2530 */
++		if (mt5806_write(chip, MT5806_REG_IRQ_CLR, b, sizeof(b)))
++			return;
++		if (mt5806_command(chip, MT5806_REG_CMD, MT5806_CMD_CLEAR_INT))
++			return;
++	}
++}
++
++static irqreturn_t mt5806_irq(int irq, void *data)
++{
++	struct mt5806 *chip = data;
++
++	pm_stay_awake(chip->dev);
++	mutex_lock(&chip->lock);
++	if (chip->ready)
++		mt5806_handle_events(chip);
++	mutex_unlock(&chip->lock);
++	pm_relax(chip->dev);
++
++	return IRQ_HANDLED;
++}
++
++static void mt5806_validate_work(struct work_struct *work)
++{
++	struct mt5806 *chip = container_of(work, struct mt5806, validate_work.work);
++
++	guard(mutex)(&chip->lock);
++	if (!chip->ready || !chip->near || !chip->validating)
++		return;
++
++	/* c:1213-1216 */
++	chip->validating = false;
++	if (!chip->present && !chip->inhibit) {
++		chip->stop = MT5806_STOP_INVALID;
++		mt5806_note(chip, "no valid pen address within %d ms", MT5806_VALIDATE_MS);
++		dev_info(chip->dev,
++			 "attached object sent no valid pen address: transmitter off until it is taken off\n");
++	}
++	mt5806_tx_update(chip);
++}
++
++/* c:1163-1184; called with chip->lock held */
++static void mt5806_max_time_check(struct mt5806 *chip)
++{
++	if (!chip->ready || !chip->near || !chip->tx_allowed)
++		return;
++	if (ktime_ms_delta(ktime_get_boottime(), chip->tx_start) < MT5806_MAX_CHARGE_MS)
++		return;
++
++	chip->stop = MT5806_STOP_TIMEOUT;
++	mt5806_note(chip, "%d minutes: stop", MT5806_MAX_CHARGE_MIN);
++	dev_info(chip->dev, "pen charged for %d minutes: transmitter off\n", MT5806_MAX_CHARGE_MIN);
++	mt5806_tx_update(chip);
++}
++
++static void mt5806_max_time_work(struct work_struct *work)
++{
++	struct mt5806 *chip = container_of(work, struct mt5806, max_time_work.work);
++
++	guard(mutex)(&chip->lock);
++	mt5806_max_time_check(chip);
++}
++
++static void mt5806_boost_work(struct work_struct *work)
++{
++	struct mt5806 *chip = container_of(work, struct mt5806, boost_work);
++	u32 target;
++	int ret;
++
++	scoped_guard(mutex, &chip->lock) {
++		if (!chip->ready)
++			return;
++		target = chip->boost_target_mv;
++	}
++
++	ret = mt5806_hboost_set_retry(target);
++
++	guard(mutex)(&chip->lock);
++	if (!chip->ready)
++		return;
++	if (target != chip->boost_target_mv) {
++		schedule_work(&chip->boost_work);
++		return;
++	}
++
++	chip->boost_err = ret;
++	if (!ret) {
++		chip->boost_acked_mv = target;
++		chip->boost_fault = false;
++		mt5806_note(chip, "supply %u mV", target);
++	} else if (target == chip->boost_idle_mv) {
++		/*
++		 * Stock goes on looking for a pen with whatever voltage is left. Here the
++		 * transmitter stays off until the idle voltage is confirmed again.
++		 */
++		chip->boost_fault = true;
++		mt5806_note(chip, "supply %u mV failed: %d", target, ret);
++		dev_warn(chip->dev, "idle supply voltage not confirmed (%d): transmitter off\n",
++			 ret);
++	} else {
++		/* the pen is charged from the idle voltage: lower than stock's value */
++		mt5806_note(chip, "supply %u mV failed: %d", target, ret);
++		dev_warn(chip->dev, "charge supply voltage not confirmed (%d): staying at %u mV\n",
++			 ret, chip->boost_acked_mv);
++	}
++	mt5806_tx_update(chip);
++}
++
++static void mt5806_snapshot(struct mt5806 *chip)
++{
++	unsigned int i;
++	u8 b[4];
++
++	chip->snap_ok = 0;
++	for (i = 0; i < ARRAY_SIZE(mt5806_snaps); i++) {
++		memset(b, 0, sizeof(b));
++		if (mt5806_read(chip, mt5806_snaps[i].reg, b, mt5806_snaps[i].len))
++			continue;
++		chip->snap[i] = get_unaligned_le32(b);
++		chip->snap_ok |= BIT(i);
++	}
++}
++
++/* stock gives up after one failed start; here it is tried again, a few times per firmware link */
++static void mt5806_init_retry(struct mt5806 *chip)
++{
++	if (chip->init_tries++ < MT5806_INIT_RETRIES)
++		mod_delayed_work(system_percpu_wq, &chip->init_work,
++				 msecs_to_jiffies(MT5806_INIT_RETRY_MS));
++}
++
++/* Bring the IC up as stock does (init_work_func, c:4355-4413), without its firmware update. */
++static void mt5806_init_work(struct work_struct *work)
++{
++	struct mt5806 *chip = container_of(work, struct mt5806, init_work.work);
++	u16 minor = 0, major = 0;
++	u8 q[10];
++	u32 epoch;
++	int i, ret;
++
++	guard(mutex)(&chip->lock);
++	if (chip->removing)
++		return;
++
++	epoch = mt5806_hboost_epoch();
++	if (chip->ready && epoch == chip->epoch)
++		return;
++
++	mt5806_stop_all(chip, "starting");
++	chip->boost_acked_mv = 0;
++	chip->boost_fault = false;
++	if (!epoch) {
++		chip->fail = "no link to the charger firmware";
++		mt5806_note(chip, "%s", chip->fail);
++		return;
++	}
++	if (epoch != chip->tries_epoch) {
++		chip->tries_epoch = epoch;
++		chip->init_tries = 0;
++	}
++
++	/* the supply first (c:4372): nothing is switched on without it */
++	chip->boost_target_mv = chip->boost_idle_mv;
++	ret = mt5806_hboost_set_retry(chip->boost_idle_mv);
++	chip->boost_err = ret;
++	if (ret) {
++		chip->fail = "supply request failed";
++		mt5806_note(chip, "supply %u mV failed: %d", chip->boost_idle_mv, ret);
++		dev_err(chip->dev, "hBoost %u mV not confirmed by the charger firmware: %d\n",
++			chip->boost_idle_mv, ret);
++		mt5806_init_retry(chip);
++		return;
++	}
++	chip->boost_acked_mv = chip->boost_idle_mv;
++	mt5806_note(chip, "supply %u mV", chip->boost_idle_mv);
++
++	/*
++	 * Stock's power cycle and wait (c:501-513, 3898-3901, 4301): at least 1 s without
++	 * power, then on with the wake line high, 2.5 s. The transmitter stays off until
++	 * the end of the start (stock allows it earlier).
++	 */
++	msleep(MT5806_POWER_CYCLE_MS);
++	gpiod_set_value_cansleep(chip->wake_gpio, 1);
++	gpiod_set_value_cansleep(chip->scan_gpio, 1);
++	gpiod_set_value_cansleep(chip->enable_gpio, 1);
++	msleep(MT5806_WAKE_MS);
++
++	/* c:4203-4221 */
++	chip->chip_id = 0;
++	for (i = 0; i < MT5806_ID_TRIES; i++) {
++		ret = mt5806_read16(chip, MT5806_REG_CHIP_ID, &chip->chip_id);
++		if (!ret && chip->chip_id == MT5806_CHIP_ID)
++			break;
++		msleep(100);
++	}
++	if (ret || chip->chip_id != MT5806_CHIP_ID) {
++		dev_err(chip->dev, "no MT5806 on the bus: %d, id 0x%04x\n", ret, chip->chip_id);
++		mt5806_stop_all(chip, ret ? "IC does not answer" : "wrong chip id");
++		mt5806_note(chip, "chip id: %d, 0x%04x", ret, chip->chip_id);
++		mt5806_init_retry(chip);
++		return;
++	}
++
++	/* c:602-642 */
++	ret = mt5806_read16(chip, MT5806_REG_FW_MINOR, &minor);
++	if (!ret)
++		ret = mt5806_read16(chip, MT5806_REG_FW_MAJOR, &major);
++	chip->fw_version = ret ? 0 : (u32)major << 16 | minor;
++
++	/* the coil calibration in the IC (c:1615-1647): reported only */
++	chip->q_valid = false;
++	if (!mt5806_read(chip, MT5806_REG_Q_MTP, q, sizeof(q))) {
++		chip->q_cnt = get_unaligned_le16(q);
++		chip->q_width = get_unaligned_le16(q + 2);
++		chip->q_valid = mt5806_crc16(q, 8) == get_unaligned_le16(q + 8);
++	}
++	mt5806_snapshot(chip);
++
++	if (!mt5806_fw_known(chip->fw_version)) {
++		/*
++		 * The limits are in the firmware: a version never seen under the vendor
++		 * software is not used.
++		 */
++		dev_err(chip->dev, "firmware 0x%x of the IC is not known: transmitter stays off\n",
++			chip->fw_version);
++		mt5806_stop_all(chip, "unknown firmware in the IC");
++		mt5806_note(chip, "firmware 0x%x not known", chip->fw_version);
++		return;
++	}
++
++	chip->epoch = epoch;
++	chip->ready = true;
++	chip->fail = NULL;
++	chip->init_tries = 0;
++	gpiod_set_value_cansleep(chip->scan_gpio, chip->scan_fast && !chip->suspended);	/* c:4387 */
++	mt5806_handle_events(chip);
++	gpiod_set_value_cansleep(chip->wake_gpio, 0);		/* c:4395 */
++	mt5806_tx_update(chip);					/* c:4396 */
++
++	dev_info(chip->dev, "MT5806 firmware 0x%x, supply %u mV, transmitter %s\n",
++		 chip->fw_version, chip->boost_acked_mv,
++		 chip->tx_allowed ? "looking for a pen" : "held off");
++}
++
++/* ---- user space ---- */
++
++static const char *mt5806_state(struct mt5806 *chip)
++{
++	if (!chip->ready)
++		return "off";
++	if (chip->boost_fault)
++		return "supply-fault";
++	if (chip->inhibit)
++		return "inhibited";
++	if (!chip->near)
++		return "idle";
++	switch (chip->stop) {
++	case MT5806_STOP_FULL:
++		return "full";
++	case MT5806_STOP_REQUEST:
++		return "stopped";
++	case MT5806_STOP_TIMEOUT:
++		return "timeout";
++	case MT5806_STOP_ERROR:
++		return "error";
++	case MT5806_STOP_INVALID:
++		return "rejected";
++	default:
++		break;
++	}
++	if (chip->present)
++		return "charging";
++	return chip->validating ? "checking" : "waiting";
++}
++
++static ssize_t state_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	guard(mutex)(&chip->lock);
++	return sysfs_emit(buf, "%s\n", mt5806_state(chip));
++}
++static DEVICE_ATTR_RO(state);
++
++static ssize_t present_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%d\n", READ_ONCE(chip->present));
++}
++static DEVICE_ATTR_RO(present);
++
++static ssize_t chip_id_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "0x%04x\n", READ_ONCE(chip->chip_id));
++}
++static DEVICE_ATTR_RO(chip_id);
++
++static ssize_t fw_version_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "0x%x\n", READ_ONCE(chip->fw_version));
++}
++static DEVICE_ATTR_RO(fw_version);
++
++static ssize_t pen_soc_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%d\n", READ_ONCE(chip->pen_soc));
++}
++static DEVICE_ATTR_RO(pen_soc);
++
++/*
++ * Live values make sense only while a transfer runs: the IC sleeps between its
++ * looks for a pen (stock reads them for a present pen only, c:3247, 3264).
++ */
++static ssize_t mt5806_live_show(struct device *dev, char *buf, u16 reg)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++	u16 val = 0;
++
++	guard(mutex)(&chip->lock);
++	if (chip->ready && chip->present && !chip->suspended)
++		mt5806_read16(chip, reg, &val);
++	return sysfs_emit(buf, "%u\n", val);
++}
++
++static ssize_t tx_voltage_mv_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	return mt5806_live_show(dev, buf, MT5806_REG_VIN);
++}
++static DEVICE_ATTR_RO(tx_voltage_mv);
++
++static ssize_t tx_current_ma_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	return mt5806_live_show(dev, buf, MT5806_REG_IIN);
++}
++static DEVICE_ATTR_RO(tx_current_ma);
++
++static ssize_t rx_soc_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%d\n", READ_ONCE(chip->rx_soc));
++}
++
++/*
++ * The pen's battery level as user space knows it (Bluetooth). As in stock
++ * (c:3285-3316, 3049-3087) a pen that was full and has dropped to the threshold
++ * is charged again; unlike stock only for a pen with a valid address and a
++ * value of 0..100.
++ */
++static ssize_t rx_soc_store(struct device *dev, struct device_attribute *attr,
++			    const char *buf, size_t count)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++	unsigned int val;
++	int ret;
++
++	ret = kstrtouint(buf, 0, &val);
++	if (ret)
++		return ret;
++	if (val > 100)
++		return -EINVAL;
++
++	guard(mutex)(&chip->lock);
++	if (!chip->ready || !chip->present)
++		return -ENODEV;
++
++	chip->rx_soc = val;
++	if (val <= MT5806_RECHARGE_SOC && chip->near && !chip->tx_allowed &&
++	    chip->stop == MT5806_STOP_FULL && !chip->inhibit) {
++		mt5806_note(chip, "pen at %u %%: charge again", val);
++		chip->stop = MT5806_STOP_NONE;
++		chip->recharge = true;
++		chip->tx_start = ktime_get_boottime();
++		mod_delayed_work(system_percpu_wq, &chip->max_time_work,
++				 msecs_to_jiffies(MT5806_MAX_CHARGE_MS));
++		mt5806_tx_update(chip);
++	}
++
++	return count;
++}
++static DEVICE_ATTR_RW(rx_soc);
++
++static ssize_t inhibit_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%d\n", READ_ONCE(chip->inhibit));
++}
++
++/*
++ * 1 switches the transmitter off (stock: tx_charge_disable for the camera,
++ * c:3572-3661), 0 gives it back to the rules above.
++ */
++static ssize_t inhibit_store(struct device *dev, struct device_attribute *attr,
++			     const char *buf, size_t count)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++	bool val;
++	int ret;
++
++	ret = kstrtobool(buf, &val);
++	if (ret)
++		return ret;
++
++	guard(mutex)(&chip->lock);
++	if (val == chip->inhibit)
++		return count;
++
++	chip->inhibit = val;
++	mt5806_note(chip, "inhibit %d", val);
++	if (val) {
++		chip->validating = false;
++		cancel_delayed_work(&chip->validate_work);
++	} else if (chip->ready && chip->near && !chip->present && chip->stop == MT5806_STOP_NONE) {
++		mt5806_validate_start(chip);
++	}
++	mt5806_tx_update(chip);
++
++	return count;
++}
++static DEVICE_ATTR_RW(inhibit);
++
++static ssize_t scan_fast_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%d\n", READ_ONCE(chip->scan_fast));
++}
++
++/*
++ * 1: look for a pen every 200 ms (stock with the screen on), 0: every 2 s (stock
++ * with the screen off); c:122, 3966-3983.
++ */
++static ssize_t scan_fast_store(struct device *dev, struct device_attribute *attr,
++			       const char *buf, size_t count)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++	bool val;
++	int ret;
++
++	ret = kstrtobool(buf, &val);
++	if (ret)
++		return ret;
++
++	guard(mutex)(&chip->lock);
++	chip->scan_fast = val;
++	if (chip->ready && !chip->suspended)
++		gpiod_set_value_cansleep(chip->scan_gpio, val);
++
++	return count;
++}
++static DEVICE_ATTR_RW(scan_fast);
++
++/* the pen's Bluetooth address, for pairing; readable by root only and never logged */
++static ssize_t ble_address_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++	u64 a;
++
++	guard(mutex)(&chip->lock);
++	if (!chip->present)
++		return -ENODATA;
++	a = chip->ble_addr;
++	return sysfs_emit(buf, "%02X:%02X:%02X:%02X:%02X:%02X\n", (u8)(a >> 40), (u8)(a >> 32),
++			  (u8)(a >> 24), (u8)(a >> 16), (u8)(a >> 8), (u8)a);
++}
++static DEVICE_ATTR_ADMIN_RO(ble_address);
++
++static struct attribute *mt5806_attrs[] = {
++	&dev_attr_state.attr,
++	&dev_attr_present.attr,
++	&dev_attr_chip_id.attr,
++	&dev_attr_fw_version.attr,
++	&dev_attr_pen_soc.attr,
++	&dev_attr_rx_soc.attr,
++	&dev_attr_tx_voltage_mv.attr,
++	&dev_attr_tx_current_ma.attr,
++	&dev_attr_inhibit.attr,
++	&dev_attr_scan_fast.attr,
++	&dev_attr_ble_address.attr,
++	NULL
++};
++ATTRIBUTE_GROUPS(mt5806);
++
++static int mt5806_status_show(struct seq_file *s, void *unused)
++{
++	struct mt5806 *chip = s->private;
++	unsigned int i, first;
++	u16 val;
++
++	scoped_guard(mutex, &mt5806_link_lock) {
++		struct mt5806_hboost *hb = mt5806_hboost;
++
++		seq_printf(s, "boost_link: bound %d up %d epoch %u answers %u last_len %u last_result %u stray %u stray_opcode 0x%x\n",
++			   !!hb, hb ? hb->up : 0, hb ? hb->epoch : 0, hb ? hb->answers : 0,
++			   hb ? hb->resp_len : 0, hb ? hb->ret_code : 0, hb ? hb->stray : 0,
++			   hb ? hb->stray_opcode : 0);
++	}
++
++	guard(mutex)(&chip->lock);
++	seq_printf(s, "state: %s\n", mt5806_state(chip));
++	seq_printf(s, "ready: %d\n", chip->ready);
++	seq_printf(s, "fail: %s\n", chip->fail ?: "-");
++	seq_printf(s, "start_tries: %u of %d\n", chip->init_tries, MT5806_INIT_RETRIES + 1);
++	seq_printf(s, "chip_id: 0x%04x\n", chip->chip_id);
++	seq_printf(s, "fw_version: 0x%x %s\n", chip->fw_version,
++		   mt5806_fw_known(chip->fw_version) ? "known" : "unknown");
++	seq_printf(s, "boost: target_mv %u acked_mv %u err %d fault %d epoch %u\n",
++		   chip->boost_target_mv, chip->boost_acked_mv, chip->boost_err, chip->boost_fault,
++		   chip->epoch);
++	seq_printf(s, "limits: boost_idle_mv %u boost_charge_mv %u boost_max_mv %d validate_ms %d max_charge_min %d recharge_soc %d\n",
++		   chip->boost_idle_mv, chip->boost_charge_mv, MT5806_BOOST_MAX_MV,
++		   MT5806_VALIDATE_MS, MT5806_MAX_CHARGE_MIN, MT5806_RECHARGE_SOC);
++	seq_printf(s, "gpio: enable %d wake %d scan %d tx_off %d\n",
++		   gpiod_get_value_cansleep(chip->enable_gpio),
++		   gpiod_get_value_cansleep(chip->wake_gpio),
++		   gpiod_get_value_cansleep(chip->scan_gpio),
++		   gpiod_get_value_cansleep(chip->txoff_gpio));
++	seq_printf(s, "tx: allowed %d inhibit %d scan_fast %d suspended %d wakeup %d\n",
++		   chip->tx_allowed, chip->inhibit, chip->scan_fast, chip->suspended,
++		   device_may_wakeup(chip->dev));
++	seq_printf(s, "irq: count %u last_flags 0x%08x i2c_errors %u last_i2c_error %d\n",
++		   chip->irq_count, chip->last_flags, chip->i2c_errors, chip->last_i2c_err);
++	seq_printf(s, "pen: near %d present %d validating %d stop %s recharge %d id %u soc %d rx_soc %d ept %4ph\n",
++		   chip->near, chip->present, chip->validating, mt5806_stop_names[chip->stop],
++		   chip->recharge, chip->pen_id, chip->pen_soc, chip->rx_soc, chip->ept);
++	if (chip->near)
++		seq_printf(s, "pen_time_s: %lld\n",
++			   ktime_ms_delta(ktime_get_boottime(), chip->tx_start) / MSEC_PER_SEC);
++	seq_printf(s, "q: valid %d cnt %u width %u\n", chip->q_valid, chip->q_cnt, chip->q_width);
++
++	seq_puts(s, "init_regs:");
++	for (i = 0; i < ARRAY_SIZE(mt5806_snaps); i++) {
++		if (chip->snap_ok & BIT(i))
++			seq_printf(s, " %s=%u", mt5806_snaps[i].name, chip->snap[i]);
++		else
++			seq_printf(s, " %s=?", mt5806_snaps[i].name);
++	}
++	seq_putc(s, '\n');
++
++	/* the IC is awake while a transfer runs: values as stock reads them (c:515-569) */
++	if (chip->ready && chip->present && !chip->suspended) {
++		seq_puts(s, "live:");
++		if (!mt5806_read16(chip, MT5806_REG_VIN, &val))
++			seq_printf(s, " vin_mv=%u", val);
++		if (!mt5806_read16(chip, MT5806_REG_IIN, &val))
++			seq_printf(s, " iin_ma=%u", val);
++		if (!mt5806_read16(chip, MT5806_REG_VRECT, &val))
++			seq_printf(s, " vrect_mv=%u", val);
++		if (!mt5806_read16(chip, MT5806_REG_OP_FREQ, &val))
++			seq_printf(s, " op_freq=%u", val);
++		if (!mt5806_read16(chip, MT5806_REG_TEMP, &val))
++			seq_printf(s, " temp=%u", val);
++		seq_putc(s, '\n');
++	}
++
++	seq_puts(s, "events:\n");
++	first = chip->n_events > MT5806_EVENTS ? chip->n_events - MT5806_EVENTS : 0;
++	for (i = first; i < chip->n_events; i++) {
++		struct mt5806_event *e = &chip->events[i % MT5806_EVENTS];
++
++		seq_printf(s, "  [%6llu.%03llu] %s\n", e->ms / MSEC_PER_SEC, e->ms % MSEC_PER_SEC,
++			   e->text);
++	}
++
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(mt5806_status);
++
++/* ---- driver ---- */
++
++/* transmitter off, IC without power, the supply back at its idle value */
++static void mt5806_quiesce(struct mt5806 *chip)
++{
++	bool at_charge;
++
++	scoped_guard(mutex, &mt5806_link_lock)
++		mt5806_charger = NULL;
++	scoped_guard(mutex, &chip->lock)
++		chip->removing = true;
++
++	disable_irq(chip->irq);
++	cancel_delayed_work_sync(&chip->init_work);
++	cancel_work_sync(&chip->boost_work);
++	cancel_delayed_work_sync(&chip->validate_work);
++	cancel_delayed_work_sync(&chip->max_time_work);
++
++	scoped_guard(mutex, &chip->lock) {
++		at_charge = chip->boost_acked_mv > chip->boost_idle_mv;
++		mt5806_stop_all(chip, "driver removed");
++	}
++	if (at_charge)
++		mt5806_hboost_set(chip->boost_idle_mv);
++}
++
++static int mt5806_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct mt5806 *chip;
++	int ret;
++
++	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
++	if (!chip)
++		return -ENOMEM;
++
++	chip->dev = dev;
++	chip->client = client;
++	chip->irq = client->irq;
++	chip->scan_fast = true;
++	chip->pen_soc = -1;
++	chip->rx_soc = -1;
++	chip->fail = "starting";
++	mutex_init(&chip->lock);
++	i2c_set_clientdata(client, chip);
++
++	ret = device_property_read_u32(dev, "maxic,boost-idle-microvolt", &chip->boost_idle_mv);
++	if (!ret)
++		ret = device_property_read_u32(dev, "maxic,boost-charge-microvolt",
++					       &chip->boost_charge_mv);
++	if (ret)
++		return dev_err_probe(dev, ret, "supply voltages missing\n");
++	chip->boost_idle_mv /= 1000;
++	chip->boost_charge_mv /= 1000;
++	if (chip->boost_idle_mv < MT5806_BOOST_MIN_MV ||
++	    chip->boost_idle_mv > chip->boost_charge_mv ||
++	    chip->boost_charge_mv > MT5806_BOOST_MAX_MV)
++		return dev_err_probe(dev, -EINVAL, "supply voltages %u / %u mV out of range\n",
++				     chip->boost_idle_mv, chip->boost_charge_mv);
++
++	/* transmitter off and IC without power until the start sequence has passed */
++	chip->txoff_gpio = devm_gpiod_get(dev, "tx-off", GPIOD_OUT_HIGH);
++	if (IS_ERR(chip->txoff_gpio))
++		return dev_err_probe(dev, PTR_ERR(chip->txoff_gpio), "tx-off GPIO\n");
++	chip->enable_gpio = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);
++	if (IS_ERR(chip->enable_gpio))
++		return dev_err_probe(dev, PTR_ERR(chip->enable_gpio), "enable GPIO\n");
++	chip->wake_gpio = devm_gpiod_get(dev, "wake", GPIOD_OUT_LOW);
++	if (IS_ERR(chip->wake_gpio))
++		return dev_err_probe(dev, PTR_ERR(chip->wake_gpio), "wake GPIO\n");
++	chip->scan_gpio = devm_gpiod_get(dev, "scan", GPIOD_OUT_LOW);
++	if (IS_ERR(chip->scan_gpio))
++		return dev_err_probe(dev, PTR_ERR(chip->scan_gpio), "scan GPIO\n");
++
++	INIT_DELAYED_WORK(&chip->init_work, mt5806_init_work);
++	INIT_WORK(&chip->boost_work, mt5806_boost_work);
++	INIT_DELAYED_WORK(&chip->validate_work, mt5806_validate_work);
++	INIT_DELAYED_WORK(&chip->max_time_work, mt5806_max_time_work);
++
++	if (chip->irq <= 0)
++		return dev_err_probe(dev, -EINVAL, "no interrupt\n");
++	/*
++	 * Stock: falling edge and a wake-up source (c:4328-4336). The trigger comes from
++	 * the device tree; with "wakeup-source" there the I2C core arms the wake-up.
++	 */
++	ret = devm_request_threaded_irq(dev, chip->irq, NULL, mt5806_irq, IRQF_ONESHOT,
++					"mt5806", chip);
++	if (ret)
++		return dev_err_probe(dev, ret, "interrupt\n");
++
++	chip->debugfs = debugfs_create_dir(dev_name(dev), mt5806_debugfs_root);
++	debugfs_create_file("status", 0400, chip->debugfs, chip, &mt5806_status_fops);
++
++	scoped_guard(mutex, &mt5806_link_lock)
++		mt5806_charger = chip;
++	mod_delayed_work(system_percpu_wq, &chip->init_work, 0);
++
++	return 0;
++}
++
++static void mt5806_remove(struct i2c_client *client)
++{
++	struct mt5806 *chip = i2c_get_clientdata(client);
++
++	mt5806_quiesce(chip);
++	debugfs_remove_recursive(chip->debugfs);
++}
++
++static void mt5806_shutdown(struct i2c_client *client)
++{
++	mt5806_quiesce(i2c_get_clientdata(client));
++}
++
++static int mt5806_suspend(struct device *dev)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	disable_irq(chip->irq);
++
++	guard(mutex)(&chip->lock);
++	chip->suspended = true;
++	if (!device_may_wakeup(dev)) {
++		/*
++		 * Stock always wakes for an event of the IC. Without the wake-up nobody
++		 * would watch a transfer: transmitter off while suspended.
++		 */
++		chip->suspend_off = true;
++		mt5806_tx_update(chip);
++	}
++	if (chip->ready)
++		gpiod_set_value_cansleep(chip->scan_gpio, 0);	/* stock with the screen off */
++
++	return 0;
++}
++
++static int mt5806_resume(struct device *dev)
++{
++	struct mt5806 *chip = dev_get_drvdata(dev);
++
++	scoped_guard(mutex, &chip->lock) {
++		chip->suspended = false;
++		if (chip->ready)
++			gpiod_set_value_cansleep(chip->scan_gpio, chip->scan_fast);
++		mt5806_max_time_check(chip);			/* c:3749 */
++		if (chip->suspend_off) {
++			chip->suspend_off = false;
++			if (chip->ready && chip->near && !chip->present && !chip->inhibit &&
++			    chip->stop == MT5806_STOP_NONE)
++				mt5806_validate_start(chip);
++			mt5806_tx_update(chip);
++		}
++	}
++	enable_irq(chip->irq);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(mt5806_pm_ops, mt5806_suspend, mt5806_resume);
++
++static const struct of_device_id mt5806_of_match[] = {
++	{ .compatible = "maxic,mt5806" },
++	{}
++};
++MODULE_DEVICE_TABLE(of, mt5806_of_match);
++
++static const struct i2c_device_id mt5806_i2c_id[] = {
++	{ "mt5806" },
++	{}
++};
++MODULE_DEVICE_TABLE(i2c, mt5806_i2c_id);
++
++static struct i2c_driver mt5806_driver = {
++	.driver = {
++		.name = "mt5806-pen-charger",
++		.of_match_table = mt5806_of_match,
++		.dev_groups = mt5806_groups,
++		.pm = pm_sleep_ptr(&mt5806_pm_ops),
++	},
++	.probe = mt5806_probe,
++	.remove = mt5806_remove,
++	.shutdown = mt5806_shutdown,
++	.id_table = mt5806_i2c_id,
++};
++
++static int __init mt5806_init(void)
++{
++	int ret;
++
++	mt5806_debugfs_root = debugfs_create_dir("mt5806-pen-charger", NULL);
++
++	ret = auxiliary_driver_register(&mt5806_hboost_driver);
++	if (ret)
++		goto err_debugfs;
++
++	ret = i2c_add_driver(&mt5806_driver);
++	if (ret)
++		goto err_aux;
++
++	return 0;
++
++err_aux:
++	auxiliary_driver_unregister(&mt5806_hboost_driver);
++err_debugfs:
++	debugfs_remove_recursive(mt5806_debugfs_root);
++	return ret;
++}
++module_init(mt5806_init);
++
++static void __exit mt5806_exit(void)
++{
++	i2c_del_driver(&mt5806_driver);
++	auxiliary_driver_unregister(&mt5806_hboost_driver);
++	debugfs_remove_recursive(mt5806_debugfs_root);
++}
++module_exit(mt5806_exit);
++
++MODULE_DESCRIPTION("Maxic MT5806 pen charger of the OnePlus Pad 4");
++MODULE_LICENSE("GPL");
+-- 
+2.53.0
+

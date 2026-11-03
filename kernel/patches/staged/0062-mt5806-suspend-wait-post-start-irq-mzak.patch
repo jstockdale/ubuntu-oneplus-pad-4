@@ -1,0 +1,143 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Sat, 3 Oct 2026 08:53:16 +0300
+Subject: [PATCH 62/62] power: supply: mt5806: wait for the IC's post-start
+ interrupt in suspend
+
+The first s2idle after the pen charger driver had loaded was aborted
+(area-combo-99, kernel q80, cycle bfpcie-base-1): the suspend began while
+the driver's start sequence was running (hBoost request, 1 s power cycle,
+2.5 s wake), the device suspend blocked on the driver's mutex until the
+sequence ended ("suspend of devices complete after 2250.028 msecs"), and
+104 ms after the sequence the IC raised its interrupt line - 1 ms after
+dpm_suspend_noirq() had armed the wake-up interrupts. The line is a
+wake-up source ("wakeup-source" in the device tree, as stock's
+enable_irq_wake()), so the kernel treated the edge as a wake-up event:
+"PM: Triggering wakeup from IRQ 316", 4.5 s wall time for an 8 s alarm,
+no CX collapse. The two following cycles were clean. IRQ 316 is the pen
+charger's line (TLMM GPIO 169; its number depends on the udev load order:
+314 / 297 / 296 / 306 in runs 96 / 92 / 89 / 87).
+
+An edge that arrives before suspend_device_irqs() is handled, or latched
+and replayed at the resume; the same edge after it aborts the suspend.
+So the suspend callback now waits for a running start sequence
+(flush_work() - a retry that is merely scheduled stays scheduled) and
+then until the IC's interrupt must have come (1 s after the sequence, or
+after the power cycle that follows a transfer error, which ends with the
+same wake line edge), before it disables the interrupt and the PM core
+goes on to arm the wake-up interrupts.
+
+Stock holds a wakeup source through its init_work_func instead
+(oplus_mt5806.c:4370, :4405). That aborts a suspend early only through
+the wakeup_count protocol Android uses; a plain write to /sys/power/state
+(systemd, the kit tests) does not look at wakeup sources
+(pm_wakeup_pending(): events_check_enabled), so the wait in the suspend
+callback is the equivalent here. The cost is at most 1 s added to a
+suspend that falls into the start sequence; a suspend at any other time
+is unchanged.
+
+Tested on the OnePlus Pad 4 (area-combo-104, kernel q83): the driver
+bound and an s2idle requested at once - woken by the RTC alarm after
+21.3 s (alarm 20 s), CX collapsed for 76 % of the sleep (cxsd +14), the
+device suspend waited 3.46 s for the start sequence, no wake-up from the
+pen charger's line ("first: FIXED"); the second sleep clean (cxsd +5,
+83 %). Before the change (area-combo-99, cycle base-1) the same first
+sleep was aborted after 4.5 s with cxsd +0.
+
+[adapted for the Ubuntu iceland port: carried unchanged from the Fedora
+iceland queue (iceland-linux patches/0002-iceland/0179), a later fix of
+the same driver, placed right after it. Carried because Ubuntu suspends
+the way the Fedora kit does, by a plain write to /sys/power/state
+(systemd-sleep), which the first s2idle after the driver has loaded
+would otherwise abort. Everything it touches is in the driver as
+carried; nothing else in the tree is involved.]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ drivers/power/supply/mt5806_pen_charger.c | 32 +++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/drivers/power/supply/mt5806_pen_charger.c b/drivers/power/supply/mt5806_pen_charger.c
+index f450871bce4a..78523bc9a7f1 100644
+--- a/drivers/power/supply/mt5806_pen_charger.c
++++ b/drivers/power/supply/mt5806_pen_charger.c
+@@ -135,6 +135,7 @@
+ /* a failed start (no confirmed supply, no answer of the IC) is tried again a few times */
+ #define MT5806_INIT_RETRIES		3
+ #define MT5806_INIT_RETRY_MS		10000
++#define MT5806_IRQ_GRACE_MS		1000	/* the IC's interrupt ~100 ms after a power-up (area-combo-99) */
+ 
+ /* PMIC GLINK: stock oplus_wireless_pen_glink.h:15-28 */
+ #define MT5806_HBOOST_OWNER		32785
+@@ -256,6 +257,7 @@ struct mt5806 {
+ 	bool removing;
+ 	bool suspended;
+ 	bool suspend_off;
++	unsigned long irq_due;			/* jiffies until which the IC's post-power-up interrupt is expected */
+ 	const char *fail;
+ 
+ 	bool tx_allowed;
+@@ -642,6 +644,18 @@ static void mt5806_boost_request(struct mt5806 *chip, u32 mv)
+ 	schedule_work(&chip->boost_work);
+ }
+ 
++/*
++ * After a power-up of the IC (the start sequence, the power cycle after an
++ * error) its interrupt line falls once more about 100 ms after the sequence
++ * has ended (area-combo-99, cycle base-1). mt5806_suspend() waits that out:
++ * an edge taken before the interrupts are armed for wake-up is handled or
++ * latched for the resume, the same edge after that aborts the suspend.
++ */
++static void mt5806_expect_irq(struct mt5806 *chip)
++{
++	WRITE_ONCE(chip->irq_due, jiffies + msecs_to_jiffies(MT5806_IRQ_GRACE_MS));
++}
++
+ /* stock mt_wls_reset_sys (c:1366-1384), with the transmitter held off */
+ static void mt5806_ic_reset(struct mt5806 *chip)
+ {
+@@ -653,6 +667,7 @@ static void mt5806_ic_reset(struct mt5806 *chip)
+ 	gpiod_set_value_cansleep(chip->enable_gpio, 1);
+ 	msleep(MT5806_WAKE_MS);
+ 	gpiod_set_value_cansleep(chip->wake_gpio, 0);
++	mt5806_expect_irq(chip);
+ }
+ 
+ static void mt5806_on_attach(struct mt5806 *chip)
+@@ -1079,6 +1094,7 @@ static void mt5806_init_work(struct work_struct *work)
+ 	mt5806_handle_events(chip);
+ 	gpiod_set_value_cansleep(chip->wake_gpio, 0);		/* c:4395 */
+ 	mt5806_tx_update(chip);					/* c:4396 */
++	mt5806_expect_irq(chip);
+ 
+ 	dev_info(chip->dev, "MT5806 firmware 0x%x, supply %u mV, transmitter %s\n",
+ 		 chip->fw_version, chip->boost_acked_mv,
+@@ -1533,6 +1549,22 @@ static void mt5806_shutdown(struct i2c_client *client)
+ static int mt5806_suspend(struct device *dev)
+ {
+ 	struct mt5806 *chip = dev_get_drvdata(dev);
++	unsigned long due;
++
++	/*
++	 * A start sequence that is still running ends with the transmitter
++	 * enabled and an interrupt of the IC about 100 ms later; the power cycle
++	 * after an error does the same. Wait for both before the interrupts are
++	 * armed for wake-up (dpm_suspend_noirq): an edge taken now is handled or
++	 * latched for the resume, the same edge in the noirq phase aborts the
++	 * suspend (area-combo-99: "PM: Triggering wakeup from IRQ 316" in the
++	 * first s2idle after the driver had loaded). flush_work() waits for a
++	 * running start only; a retry that is merely scheduled stays scheduled.
++	 */
++	flush_work(&chip->init_work.work);
++	due = READ_ONCE(chip->irq_due);
++	if (time_before(jiffies, due))
++		msleep(jiffies_to_msecs(due - jiffies));
+ 
+ 	disable_irq(chip->irq);
+ 
+-- 
+2.53.0
+

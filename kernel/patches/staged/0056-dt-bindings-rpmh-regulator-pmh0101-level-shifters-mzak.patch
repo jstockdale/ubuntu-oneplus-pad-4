@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 09:07:58 +0300
+Subject: [PATCH 56/62] dt-bindings: regulator: qcom,rpmh-regulator: add the
+ PMH0101 level shifters
+
+The PMH0101 has four bidirectional level shifters between pairs of its
+GPIO pads (11/12, 13/14, 15/16, 17/18). Their enable is an RPMh XOB
+resource (LS1 .. LS4 with the PMIC id), like the LVS switches of older
+PMICs. Allow the nodes ls1 - ls4.
+
+[adapted for the Ubuntu iceland port: carried unchanged from the Fedora
+iceland queue (iceland-linux patches/0002-iceland/0084); applies byte-exact
+to Perpetua 7c98a10e6bb7. Prerequisite of the pen charger: its I2C lines
+run through the PMH0101 level shifters 3 and 4, which the board file votes
+on as ls3 / ls4 under the PMH0101 RPMh regulators node.]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ .../devicetree/bindings/regulator/qcom,rpmh-regulator.yaml  | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/regulator/qcom,rpmh-regulator.yaml b/Documentation/devicetree/bindings/regulator/qcom,rpmh-regulator.yaml
+index eed2ce7fa861..7bca7f176ef1 100644
+--- a/Documentation/devicetree/bindings/regulator/qcom,rpmh-regulator.yaml
++++ b/Documentation/devicetree/bindings/regulator/qcom,rpmh-regulator.yaml
+@@ -53,7 +53,7 @@ description: |
+       For PM8550, smps1 - smps6, ldo1 - ldo17, bob1 - bob2
+       For PM8998, smps1 - smps13, ldo1 - ldo28, lvs1 - lvs2
+       For PMAU0102, smps1 - smps8, ldo1 - ldo3
+-      For PMH0101, ldo1 - ldo18, bob1 - bob2
++      For PMH0101, ldo1 - ldo18, bob1 - bob2, ls1 - ls4
+       For PMH0104, smps1 - smps4
+       For PMH0110, smps1 - smps10, ldo1 - ldo4
+       For PMI8998, bob
+@@ -139,11 +139,11 @@ properties:
+       regulator-allow-set-load: [ regulator-allowed-modes ]
+ 
+ patternProperties:
+-  "^(smps|ldo|lvs|bob)[0-9]+$":
++  "^(smps|ldo|lvs|bob|ls)[0-9]+$":
+     type: object
+     $ref: regulator.yaml#
+     unevaluatedProperties: false
+-    description: smps/ldo regulator nodes(s).
++    description: smps/ldo/switch/level-shifter regulator nodes(s).
+     dependencies:
+       regulator-allow-set-load: [ regulator-allowed-modes ]
+ 
+-- 
+2.53.0
+

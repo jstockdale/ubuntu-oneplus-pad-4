@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 09:07:58 +0300
+Subject: [PATCH 57/62] regulator: qcom-rpmh: add the PMH0101 level shifters
+
+The four bidirectional level shifters of the PMH0101 are enabled through
+the RPMh XOB resources LS<n><pmic id> (for example LS1B_E0). Add a
+resource name format for them and the four regulators ls1 - ls4, which
+only have an enable vote.
+
+[adapted for the Ubuntu iceland port: carried unchanged from the Fedora
+iceland queue (iceland-linux patches/0002-iceland/0085); the hunks apply
+at an offset to Perpetua 7c98a10e6bb7's qcom-rpmh-regulator.c, the
+XOB type and rpmh_regulator_xob_ops it builds on are there. Prerequisite
+of the pen charger: ls3 / ls4 keep its I2C lines connected. Without a
+vote from the application processor the shifters are on only while the
+sensor hub streams (the Fedora camera patch 0086 found that for ls1 /
+ls2); the camera shifters themselves are not carried here.]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ drivers/regulator/qcom-rpmh-regulator.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/regulator/qcom-rpmh-regulator.c b/drivers/regulator/qcom-rpmh-regulator.c
+index 486a037205a0..fbc59c46242d 100644
+--- a/drivers/regulator/qcom-rpmh-regulator.c
++++ b/drivers/regulator/qcom-rpmh-regulator.c
+@@ -39,6 +39,7 @@ enum rpmh_regulator_type {
+  * @LDO:			Linear Dropout regulator.
+  * @BOB:			Buck/Boost type regulator.
+  * @VS:			Simple voltage ON/OFF switch.
++ * @LS:			Bidirectional level shifter with an enable vote.
+  * @NUM_REGULATOR_TYPES:	Number of regulator types.
+  */
+ enum regulator_hw_type {
+@@ -46,6 +47,7 @@ enum regulator_hw_type {
+ 	LDO,
+ 	BOB,
+ 	VS,
++	LS,
+ 	NUM_REGULATOR_TYPES,
+ };
+ 
+@@ -59,6 +61,7 @@ static const struct resource_name_formats vreg_rsc_name_lookup[NUM_REGULATOR_TYP
+ 	[LDO]	= {"L%d%s", "ldo%s%d"},
+ 	[BOB]	= {"B%d%s", "bob%s%d"},
+ 	[VS]	= {"VS%d%s", "vs%s%d"},
++	[LS]	= {"LS%d%s", "ls%s%d"},
+ };
+ 
+ #define RPMH_REGULATOR_REG_VRM_VOLTAGE		0x0
+@@ -902,6 +905,12 @@ static const struct rpmh_vreg_hw_data pmic4_lvs = {
+ 	/* LVS hardware does not support voltage or mode configuration. */
+ };
+ 
++static const struct rpmh_vreg_hw_data pmic5_ls = {
++	.regulator_type = XOB,
++	.ops = &rpmh_regulator_xob_ops,
++	/* A level shifter between two GPIO pads: only an enable vote. */
++};
++
+ static const struct rpmh_vreg_hw_data pmic5_pldo = {
+ 	.regulator_type = VRM,
+ 	.ops = &rpmh_regulator_vrm_drms_ops,
+@@ -1663,6 +1672,10 @@ static const struct rpmh_vreg_init_data pmh0101_vreg_data[] = {
+ 	RPMH_VREG("ldo18",  LDO, 18, &pmic5_nldo530,      "vdd-l18"),
+ 	RPMH_VREG("bob1",   BOB, 1,  &pmic5_bob,          "vdd-bob1"),
+ 	RPMH_VREG("bob2",   BOB, 2,  &pmic5_bob,          "vdd-bob2"),
++	RPMH_VREG("ls1",    LS,  1,  &pmic5_ls,           NULL),
++	RPMH_VREG("ls2",    LS,  2,  &pmic5_ls,           NULL),
++	RPMH_VREG("ls3",    LS,  3,  &pmic5_ls,           NULL),
++	RPMH_VREG("ls4",    LS,  4,  &pmic5_ls,           NULL),
+ 	{}
+ };
+ 
+-- 
+2.53.0
+
