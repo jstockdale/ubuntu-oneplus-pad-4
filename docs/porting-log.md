@@ -3106,3 +3106,32 @@ nodes, pen daemon, pen connected, libwacom listing; no failed units; 63
 error lines; deferred only 111b8000.tn. Rung P item (e) is done; the
 rootfs module tree is unchanged apart from the swapped ath12k (0064–0068)
 and the hand-loaded firmware-log module (0069/0070).
+
+
+## 2026-11-03 — PPS A-series written (A1–A3), self-reviewed after the review agents ran out of credits; A1+A2 staged for flight F1
+
+The implementation workflow wrote the three qcom_battmgr commits of the
+plan against the pin (A1 14 lines: the 0x56/0x7f/0x91 notifications named;
+A2 188 lines: the 0x10004 source-capability read from the charging work,
+the 7 PDOs decoded with <linux/usb/pd.h>, the PPS APDO chosen by highest
+voltage then current, one journal line per 0x79; A3 549 lines: the
+tcpm-shaped programmable supply — ONLINE 2 with the input vote, VOLTAGE_MIN,
+one 29/30 pair per request, the 10.0 V rejection, the −1 exit refused after
+a failed 5 V exit, the hold surviving a firmware restart, bench debugfs for
+PPS_Status and the charging work), each compiling as a module, checkpatch
+clean, applying in order. Its three reviewers and the revision died on usage
+credits, so the review was done by hand: A1 and A2 are as specified (the
+reply is matched by opcode in the request path, the property only for
+property opcodes, so the new case is reached; the read runs after the ramp;
+length and fill size checked; both failure modes only log). A3 follows the
+plan's ABI table; the setter's gate is the variant's own writeable check,
+so the new writes are live; one hardening added — the 10.0 V rail inside
+the request helper itself, so no caller can bypass the sysfs setter's
+check. Decisions where the plan left room are in the research directory's
+A-series-notes.md (D1–D28). Vehicle: modules from /run via battmgr-swap.sh
+(sc8547_svooc off, battmgr off, insmod, svooc back; refused while a PD
+contract is in force). Flight F1 flies A1+A2 only (read-only); A3 waits
+for F1's PASS. The firmware-log witness and the device-local bench script
+are in place (the first bench run taught that a pipeline's children
+survive the kill and keep the trace pipe; the script now tracks readers by
+PID).
