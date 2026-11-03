@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 03 Nov 2026 13:10:38 -0800
+Subject: [PATCH] power: supply: qcom_battmgr: name the Kaanapali PD hard-reset
+ and PPS-check notifications
+
+The Kaanapali Oplus charger firmware raises three notifications for a
+PD source that the driver does not know: 0x56 when the source carries
+the Oplus SVID (an Oplus PD brick), 0x7f on a PD hard reset and 0x91
+when its PPS check of the source completed. Each is logged as an
+"unknown notification" at error level today (qcom_battmgr.c:1503-1505
+at the pin). The stock kernel's glink backend names them BC_PD_SVOOC,
+PD_CONNECT_HARD_RESET and PD_PPS_CHECK_COMPLETED (oplus_hal_adsp.h:88,
+:117, :119); it marks the source as an Oplus brick on the first
+(oplus_hal_adsp.c:3431-3443), signals its reverse-charging IC on the
+hard reset and marks its PD check done on the third
+(oplus_hal_adsp.c:3591-3601). The stock boot logs captured on the
+OnePlus Pad 4 hold 99 battery-changed events (0x80) and none of these:
+a USB host was attached in every captured boot, so none of the three
+has been seen on this unit yet, with either kernel.
+
+Name them. A hard reset drops the contract and the source comes back
+at 5 V, and the PPS check changes what the firmware says about the
+source, so both make the USB supply re-read its properties, as the
+Type-C and power-role events already do. The SVID event is logged at
+info level: whether the owner's PD PPS supply raises it decides
+nothing in this driver, but a direct charger's policy for Oplus bricks
+does depend on it. Standard charging is unchanged: no property or vote
+is written.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/qcom_battmgr.c |   14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 1211faefbb58..294706c682c2 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -116,11 +116,14 @@ enum qcom_battmgr_variant {
+ #define NOTIF_OPLUS_OTG_DISABLE				0x51
+ #define NOTIF_OPLUS_CID_DETECT				0x53
+ #define NOTIF_OPLUS_TYPEC_STATE_CHANGE			0x55
++#define NOTIF_OPLUS_PD_SVOOC				0x56
+ #define NOTIF_OPLUS_PLUGIN_IRQ				0x57
+ #define NOTIF_OPLUS_APSD_DONE				0x58
+ #define NOTIF_OPLUS_UFCS_DISABLE_MOS			0x73
+ #define NOTIF_OPLUS_PD_SOURCECAP_DONE			0x79
+ #define NOTIF_OPLUS_POWER_ROLE_STATUS			0x7d
++#define NOTIF_OPLUS_PD_HARD_RESET			0x7f
++#define NOTIF_OPLUS_PD_PPS_CHECK_COMPLETED		0x91
+ 
+ #define BATTMGR_OPLUS_PROPERTY_SET			0x300
+ #define BATTMGR_OPLUS_PROPERTY_GET			0x301
+@@ -1477,8 +1480,19 @@ static void qcom_battmgr_notification(struct qcom_battmgr *battmgr,
+ 			return;
+ 		case NOTIF_OPLUS_TYPEC_STATE_CHANGE:
+ 		case NOTIF_OPLUS_POWER_ROLE_STATUS:
++		/*
++		 * A PD hard reset drops the contract and the source comes
++		 * back at 5 V; the PPS check tells that the firmware is done
++		 * classifying a PD source. Both change what the supply reports.
++		 */
++		case NOTIF_OPLUS_PD_HARD_RESET:
++		case NOTIF_OPLUS_PD_PPS_CHECK_COMPLETED:
+ 			power_supply_changed(battmgr->usb_psy);
+ 			return;
++		case NOTIF_OPLUS_PD_SVOOC:
++			/* The source carries the Oplus SVID: an Oplus PD brick. */
++			dev_info(battmgr->dev, "PD source with the Oplus SVID\n");
++			return;
+ 		case NOTIF_OPLUS_CID_DETECT:
+ 		case NOTIF_OPLUS_UFCS_DISABLE_MOS:
+ 			return;
+-- 
+2.53.0

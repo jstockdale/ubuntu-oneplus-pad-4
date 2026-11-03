@@ -1,0 +1,805 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 03 Nov 2026 13:13:58 -0800
+Subject: [PATCH] power: supply: qcom_battmgr: let the host program a Kaanapali
+ PPS source
+
+On the OnePlus Pad 4 the firmware's buck charges from the owner's PD
+supply at the fixed 9 V contract: 8.80 V x 1.49 A = 13.1 W in, 9.6 W
+into the cell at 84 % (porting log, 2026-11-03). The stock kernel
+takes up to 55 W from a PPS source through the board's two SC8547D
+charge pumps, which this tree already drives for SuperVOOC; the
+firmware only makes the contract, from two properties: 29 (voltage in
+mV) and 30 (current in mA), written as one pair whenever either
+changes (oplus_hal_adsp.c:13514-13544, oplus_chg_pps.c:795-811),
+entered at 5500 mV and 1000 mA with the buck input suspended
+(oplus_chg_pps.c:2045-2048) and left with the fixed 5 V PDO, property
+71 = 5000 (oplus_chg_pps.c:1194-1212).
+
+Give the Kaanapali USB supply tcpm's programmable-supply ABI, on a
+descriptor of its own so the other variants' sysfs is untouched:
+
+- VOLTAGE_MIN, VOLTAGE_MAX and CURRENT_MAX report the APDO's range
+  whenever a PD_PPS source's capabilities are decoded, else the fixed
+  contract's values as before. VOLTAGE_MIN lies below the last entry
+  of the sm8350 property map and would read USB_ONLINE through it, so
+  these are answered before the lookup.
+- ONLINE reads 2 while the host steers the contract. Writing 2 is
+  refused with -EBUSY unless the host holds the input suspended, since
+  the buck must be off before the bus moves, and with -EOPNOTSUPP
+  unless the APDO reaches 5.5 V at its minimum, 9.2 V at its maximum
+  and 1.5 A, what a direct charger needs for a full battery (2 x
+  4.48 V plus margin); otherwise it requests 5500 mV and 1000 mA.
+  Writing 1 requests the fixed 5 V PDO; a refusal is remembered and
+  returned.
+- VOLTAGE_NOW and CURRENT_NOW are writable while the contract is
+  steered: rounded down to the 20 mV and 50 mA steps of a PPS request,
+  clamped to the APDO, one pair of writes per call with the other
+  value kept. No request goes above 10.0 V on this variant, whatever
+  the APDO offers: the pumps' VBUS OVP is 10.5 V
+  (kaanapali-oneplus-iceland.dts:1030, :1072) and nothing above 8.94 V
+  has ever been on the PMIC input.
+- A direct charger's hold on the input: entering sets it and only a
+  successful -1 vote releases it. The -1 leaves the contract first and
+  is refused with -EBUSY when that exit failed, as is a positive limit
+  while the contract is steered. The 9 V request and the input ramp
+  yield to the hold as they yield to a suspend vote. The service coming
+  back drops the contract state but keeps the suspend vote under a
+  hold, voting it again, and leaves the ramp to the release. A plug-out
+  and a PD hard reset end the contract state. A firmware result code
+  is returned as -EREMOTEIO.
+
+Two bench-only debugfs files under the device's directory: pps_status
+reads property 28, the PD PPS_Status word, and charging_work runs the
+charging work, which writes the charger enable on every plug event and
+whose effect on a suspended input is unverified.
+
+Standard charging is unchanged until something writes: the hold and
+the contract state are set only by a write of 2 to online, which is
+refused while the buck input is enabled.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/qcom_battmgr.c |  581 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 549 insertions(+), 32 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 3feb0623aa25..6a68cb845c03 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -5,6 +5,7 @@
+  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  */
+ #include <linux/auxiliary_bus.h>
++#include <linux/debugfs.h>
+ #include <linux/delay.h>
+ #include <linux/devm-helpers.h>
+ #include <linux/module.h>
+@@ -13,6 +14,7 @@
+ #include <linux/of_device.h>
+ #include <linux/power_supply.h>
+ #include <linux/property.h>
++#include <linux/seq_file.h>
+ #include <linux/soc/qcom/pdr.h>
+ #include <linux/soc/qcom/pmic_glink.h>
+ #include <linux/spinlock.h>
+@@ -133,10 +135,32 @@ enum qcom_battmgr_variant {
+ #define OPLUS_USB_VBUS_COLLAPSE_STATUS			9
+ #define OPLUS_USB_OTG_AP_ENABLE				12
+ #define OPLUS_USB_OTG_VBUS_REGULATOR_ENABLE		19
++/* The PD PPS_Status word: output voltage in 20 mV, current in 50 mA. */
++#define OPLUS_USB_GET_PPS_STATUS			28
++#define OPLUS_USB_SET_PPS_VOLT				29	/* mV */
++#define OPLUS_USB_SET_PPS_CURR				30	/* mA */
+ #define OPLUS_USB_OTG_BOOST_CURRENT			59
+ #define OPLUS_CHG_EN					70
+ #define OPLUS_SET_PDO					71
+ 
++/* The online states of a PD supply, as tcpm reports them. */
++#define OPLUS_USB_FIXED_ONLINE				1
++#define OPLUS_USB_PPS_ONLINE				2
++
++/*
++ * A programmable contract starts where the stock kernel starts one, and
++ * a direct charger needs 2:1 of a full battery plus margin from it. The
++ * charge pumps' VBUS OVP on this board is 10.5 V: no request goes above
++ * 10.0 V, whatever the source offers.
++ */
++#define OPLUS_PPS_ENTRY_UV				5500000
++#define OPLUS_PPS_ENTRY_UA				1000000
++#define OPLUS_PPS_USABLE_MAX_UV				9200000
++#define OPLUS_PPS_USABLE_UA				1500000
++#define OPLUS_PPS_MAX_UV				10000000
++#define OPLUS_PPS_VOLT_STEP_UV				(RDO_PROG_VOLT_MV_STEP * 1000)
++#define OPLUS_PPS_CURR_STEP_UA				(RDO_PROG_CURR_MA_STEP * 1000)
++
+ /*
+  * The Oplus firmware hands out the PD source capabilities as a buffer:
+  * two words it calls imax and vmax, then up to seven raw PDOs.
+@@ -377,6 +401,16 @@ struct qcom_battmgr_oplus {
+ 	unsigned int pps_min_uv;
+ 	unsigned int pps_max_uv;
+ 	unsigned int pps_max_ua;
++
++	/* A host-steered PPS contract is in force. */
++	bool pps_active;
++	/* A direct charger owns the input until it votes -1. */
++	bool pps_hold;
++	/* The source refused the return to 5 V: the input stays suspended. */
++	bool pps_exit_failed;
++	/* The last pair requested. */
++	unsigned int pps_req_uv;
++	unsigned int pps_req_ua;
+ };
+ 
+ /*
+@@ -1169,6 +1203,97 @@ static int qcom_battmgr_oplus_get(struct qcom_battmgr *battmgr, int property, u3
+ 	return ret;
+ }
+ 
++/*
++ * Called with @battmgr->lock held. Whether the attached source is the PPS
++ * source whose capabilities the charging work decoded: the firmware
++ * classifies it as such, and it offered an APDO.
++ */
++static int qcom_battmgr_oplus_pps_source(struct qcom_battmgr *battmgr)
++{
++	u32 type;
++	int ret;
++
++	if (!battmgr->oplus.pdos_valid || !battmgr->oplus.pps_max_uv)
++		return 0;
++
++	ret = qcom_battmgr_oplus_get(battmgr, OPLUS_USB_TYPE, &type);
++	if (ret)
++		return ret;
++	battmgr->usb.usb_type = qcom_battmgr_oplus_usb_type(type);
++
++	return battmgr->usb.usb_type == POWER_SUPPLY_USB_TYPE_PD_PPS;
++}
++
++/*
++ * Called with @battmgr->lock held. A request is one pair of writes, the
++ * voltage then the current, as the stock kernel sends it whenever either
++ * changes; which of the two makes the firmware send the PD Request is not
++ * known, so a caller changes one of them per call.
++ */
++static int qcom_battmgr_oplus_pps_request(struct qcom_battmgr *battmgr,
++					  unsigned int uv, unsigned int ua)
++{
++	int ret;
++
++	/* The rail holds for every caller, not only the sysfs setter. */
++	if (uv > OPLUS_PPS_MAX_UV)
++		return -EINVAL;
++
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
++					    OPLUS_USB_SET_PPS_VOLT, uv / 1000);
++	if (!ret) {
++		battmgr->oplus.pps_req_uv = uv;
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
++						    OPLUS_USB_SET_PPS_CURR, ua / 1000);
++	}
++	if (ret) {
++		dev_err(battmgr->dev, "failed to request %u mV %u mA: %d\n",
++			uv / 1000, ua / 1000, ret);
++		return ret;
++	}
++	battmgr->oplus.pps_req_ua = ua;
++
++	return 0;
++}
++
++/*
++ * Called with @battmgr->lock held. Leave the programmable contract for the
++ * fixed 5 V PDO, the stock kernel's exit. A refusal leaves the source at
++ * the last programmed voltage, so it is remembered until the contract is
++ * gone: the buck input must not be re-enabled under it.
++ */
++static int qcom_battmgr_oplus_pps_exit(struct qcom_battmgr *battmgr)
++{
++	int ret;
++
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
++					    OPLUS_SET_PDO, 5000);
++	if (ret) {
++		battmgr->oplus.pps_exit_failed = true;
++		dev_err(battmgr->dev, "failed to leave the PPS contract for 5 V: %d\n", ret);
++		return ret;
++	}
++	battmgr->oplus.pps_active = false;
++	battmgr->oplus.pps_exit_failed = false;
++	dev_info(battmgr->dev, "left the PPS contract for the fixed 5 V PDO\n");
++
++	return 0;
++}
++
++/* The contract went away with the source, a PD hard reset or the firmware. */
++static void qcom_battmgr_oplus_pps_lost(struct qcom_battmgr *battmgr)
++{
++	battmgr->oplus.pps_active = false;
++	battmgr->oplus.pps_exit_failed = false;
++}
++
++/* Whether the host, or a direct charger through it, owns the buck input. */
++static bool qcom_battmgr_oplus_input_held(struct qcom_battmgr *battmgr)
++{
++	return battmgr->oplus.input_suspended || battmgr->oplus.pps_active ||
++	       battmgr->oplus.pps_hold;
++}
++
+ static const u8 sm8350_usb_prop_map[] = {
+ 	[POWER_SUPPLY_PROP_ONLINE] = USB_ONLINE,
+ 	[POWER_SUPPLY_PROP_VOLTAGE_NOW] = USB_VOLT_NOW,
+@@ -1210,6 +1335,67 @@ static int qcom_battmgr_usb_sm8350_update(struct qcom_battmgr *battmgr,
+ 	return ret;
+ }
+ 
++/*
++ * The Kaanapali supply reports a PPS source the way tcpm's does: the
++ * APDO's range as the minimum and maximum, and online 2 while the host
++ * programs it. A fixed contract has its voltage as both bounds.
++ */
++static int qcom_battmgr_usb_kaanapali_get(struct qcom_battmgr *battmgr,
++					  enum power_supply_property psp,
++					  union power_supply_propval *val)
++{
++	struct qcom_battmgr_oplus *oplus = &battmgr->oplus;
++	int ret;
++
++	mutex_lock(&battmgr->lock);
++	switch (psp) {
++	case POWER_SUPPLY_PROP_ONLINE:
++		ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET,
++						    USB_ONLINE, 0);
++		if (ret)
++			break;
++		if (!battmgr->usb.online)
++			val->intval = 0;
++		else if (oplus->pps_active)
++			val->intval = OPLUS_USB_PPS_ONLINE;
++		else
++			val->intval = OPLUS_USB_FIXED_ONLINE;
++		break;
++	case POWER_SUPPLY_PROP_VOLTAGE_MIN:
++	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
++	case POWER_SUPPLY_PROP_CURRENT_MAX:
++		ret = qcom_battmgr_oplus_pps_source(battmgr);
++		if (ret < 0)
++			break;
++		if (ret) {
++			if (psp == POWER_SUPPLY_PROP_VOLTAGE_MIN)
++				val->intval = oplus->pps_min_uv;
++			else if (psp == POWER_SUPPLY_PROP_VOLTAGE_MAX)
++				val->intval = oplus->pps_max_uv;
++			else
++				val->intval = oplus->pps_max_ua;
++			ret = 0;
++			break;
++		}
++		if (psp == POWER_SUPPLY_PROP_CURRENT_MAX) {
++			ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET,
++							    USB_CURR_MAX, 0);
++			val->intval = battmgr->usb.current_max;
++		} else {
++			ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET,
++							    USB_VOLT_MAX, 0);
++			val->intval = battmgr->usb.voltage_max;
++		}
++		break;
++	default:
++		ret = -EINVAL;
++		break;
++	}
++	mutex_unlock(&battmgr->lock);
++
++	return ret;
++}
++
+ static int qcom_battmgr_usb_get_property(struct power_supply *psy,
+ 					 enum power_supply_property psp,
+ 					 union power_supply_propval *val)
+@@ -1220,6 +1406,19 @@ static int qcom_battmgr_usb_get_property(struct power_supply *psy,
+ 	if (!battmgr->service_up)
+ 		return -EAGAIN;
+ 
++	if (battmgr->variant == OPLUS_BATTMGR_KAANAPALI) {
++		switch (psp) {
++		case POWER_SUPPLY_PROP_ONLINE:
++		case POWER_SUPPLY_PROP_VOLTAGE_MIN:
++		case POWER_SUPPLY_PROP_VOLTAGE_MAX:
++		case POWER_SUPPLY_PROP_CURRENT_MAX:
++			/* Answered here: VOLTAGE_MIN has no entry in the map below. */
++			return qcom_battmgr_usb_kaanapali_get(battmgr, psp, val);
++		default:
++			break;
++		}
++	}
++
+ 	if (battmgr->variant == QCOM_BATTMGR_SC8280XP ||
+ 	    battmgr->variant == QCOM_BATTMGR_X1E80100)
+ 		ret = qcom_battmgr_bat_sc8280xp_update(battmgr, psp);
+@@ -1262,12 +1461,189 @@ static int qcom_battmgr_usb_is_writeable(struct power_supply *psy,
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
+ 
++	if (battmgr->variant == OPLUS_BATTMGR_KAANAPALI)
++		return psp == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT ||
++		       psp == POWER_SUPPLY_PROP_ONLINE ||
++		       psp == POWER_SUPPLY_PROP_VOLTAGE_NOW ||
++		       psp == POWER_SUPPLY_PROP_CURRENT_NOW;
++
+ 	return (battmgr->variant == QCOM_BATTMGR_SM8550 ||
+-		battmgr->variant == OPLUS_BATTMGR_SM8550 ||
+-		battmgr->variant == OPLUS_BATTMGR_KAANAPALI) &&
++		battmgr->variant == OPLUS_BATTMGR_SM8550) &&
+ 	       psp == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT;
+ }
+ 
++/*
++ * The Kaanapali supply lets the host program a PPS source as tcpm's does.
++ * Online 2 enters the programmable contract at 5.5 V and 1 A, the stock
++ * kernel's entry; VOLTAGE_NOW and CURRENT_NOW then move it, one pair of
++ * writes per call; online 1 returns to the fixed 5 V PDO. Entering needs
++ * the host's input vote, since the buck must be off before the bus moves,
++ * and a source whose APDO a direct charger cannot use is refused before
++ * any transition.
++ */
++static int qcom_battmgr_oplus_pps_set_online(struct qcom_battmgr *battmgr, int online)
++{
++	struct qcom_battmgr_oplus *oplus = &battmgr->oplus;
++	bool changed = false;
++	int ret;
++
++	mutex_lock(&battmgr->lock);
++	switch (online) {
++	case OPLUS_USB_PPS_ONLINE:
++		if (oplus->pps_active) {
++			ret = 0;
++			break;
++		}
++		if (!oplus->input_suspended) {
++			ret = -EBUSY;
++			break;
++		}
++		ret = qcom_battmgr_oplus_pps_source(battmgr);
++		if (ret < 0)
++			break;
++		if (!ret || oplus->pps_min_uv > OPLUS_PPS_ENTRY_UV ||
++		    oplus->pps_max_uv < OPLUS_PPS_USABLE_MAX_UV ||
++		    oplus->pps_max_ua < OPLUS_PPS_USABLE_UA) {
++			ret = -EOPNOTSUPP;
++			break;
++		}
++		ret = qcom_battmgr_oplus_pps_request(battmgr, OPLUS_PPS_ENTRY_UV,
++						     OPLUS_PPS_ENTRY_UA);
++		if (ret)
++			break;
++		oplus->pps_active = true;
++		oplus->pps_hold = true;
++		changed = true;
++		dev_info(battmgr->dev, "PPS contract requested at %u mV %u mA of %u-%u mV %u mA\n",
++			 OPLUS_PPS_ENTRY_UV / 1000, OPLUS_PPS_ENTRY_UA / 1000,
++			 oplus->pps_min_uv / 1000, oplus->pps_max_uv / 1000,
++			 oplus->pps_max_ua / 1000);
++		break;
++	case OPLUS_USB_FIXED_ONLINE:
++		if (!oplus->pps_active) {
++			ret = 0;
++			break;
++		}
++		ret = qcom_battmgr_oplus_pps_exit(battmgr);
++		changed = !ret;
++		break;
++	default:
++		ret = -EINVAL;
++		break;
++	}
++	mutex_unlock(&battmgr->lock);
++
++	if (changed)
++		power_supply_changed(battmgr->usb_psy);
++
++	return ret;
++}
++
++static int qcom_battmgr_oplus_pps_set_voltage(struct qcom_battmgr *battmgr, int uv)
++{
++	struct qcom_battmgr_oplus *oplus = &battmgr->oplus;
++	unsigned int req_uv;
++	int ret;
++
++	if (uv < 0)
++		return -EINVAL;
++	req_uv = rounddown((unsigned int)uv, OPLUS_PPS_VOLT_STEP_UV);
++	if (req_uv > OPLUS_PPS_MAX_UV)
++		return -EINVAL;
++
++	mutex_lock(&battmgr->lock);
++	if (!oplus->pps_active) {
++		ret = -EOPNOTSUPP;
++		goto out_unlock;
++	}
++	req_uv = clamp(req_uv, oplus->pps_min_uv, oplus->pps_max_uv);
++	/* An APDO starting above the rail is not programmed either. */
++	if (req_uv > OPLUS_PPS_MAX_UV) {
++		ret = -EINVAL;
++		goto out_unlock;
++	}
++	ret = qcom_battmgr_oplus_pps_request(battmgr, req_uv, oplus->pps_req_ua);
++out_unlock:
++	mutex_unlock(&battmgr->lock);
++
++	return ret;
++}
++
++static int qcom_battmgr_oplus_pps_set_current(struct qcom_battmgr *battmgr, int ua)
++{
++	struct qcom_battmgr_oplus *oplus = &battmgr->oplus;
++	unsigned int req_ua;
++	int ret;
++
++	if (ua < 0)
++		return -EINVAL;
++	req_ua = rounddown((unsigned int)ua, OPLUS_PPS_CURR_STEP_UA);
++	if (!req_ua)
++		return -EINVAL;
++
++	mutex_lock(&battmgr->lock);
++	if (!oplus->pps_active) {
++		ret = -EOPNOTSUPP;
++		goto out_unlock;
++	}
++	req_ua = min(req_ua, oplus->pps_max_ua);
++	ret = qcom_battmgr_oplus_pps_request(battmgr, oplus->pps_req_uv, req_ua);
++out_unlock:
++	mutex_unlock(&battmgr->lock);
++
++	return ret;
++}
++
++/*
++ * Releasing the input (-1) re-enables the buck, so a host-steered
++ * contract is left first and a refused exit keeps the vote; a positive
++ * limit is refused under such a contract for the same reason. A
++ * successful release ends the direct charger's hold on the input.
++ */
++static int qcom_battmgr_oplus_set_input_limit(struct qcom_battmgr *battmgr, int intval)
++{
++	struct qcom_battmgr_oplus *oplus = &battmgr->oplus;
++	u32 limit = intval < 0 ? UINT_MAX : intval;
++	bool exited = false;
++	int ret;
++
++	mutex_lock(&battmgr->lock);
++	if (intval < 0) {
++		if (oplus->pps_exit_failed) {
++			ret = -EBUSY;
++			goto out_unlock;
++		}
++		if (oplus->pps_active) {
++			ret = qcom_battmgr_oplus_pps_exit(battmgr);
++			if (ret) {
++				ret = -EBUSY;
++				goto out_unlock;
++			}
++			exited = true;
++		}
++	} else if (limit && oplus->pps_active) {
++		ret = -EBUSY;
++		goto out_unlock;
++	}
++
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
++					    OPLUS_USB_INPUT_CURRENT_LIMIT, limit);
++	if (ret)
++		goto out_unlock;
++	oplus->input_suspended = !limit;
++	if (intval < 0)
++		oplus->pps_hold = false;
++out_unlock:
++	mutex_unlock(&battmgr->lock);
++
++	if (exited)
++		power_supply_changed(battmgr->usb_psy);
++	if (!ret && intval < 0)
++		schedule_work(&battmgr->oplus_charging_work);
++
++	return ret;
++}
++
+ /*
+  * The charger firmware applies a host input limit only to SDP, CDP and PD
+  * sources; it starts an SDP at 100 mA until the gadget is configured.
+@@ -1295,17 +1671,16 @@ static int qcom_battmgr_usb_set_property(struct power_supply *psy,
+ 		return -EINVAL;
+ 
+ 	if (battmgr->variant == OPLUS_BATTMGR_KAANAPALI) {
+-		mutex_lock(&battmgr->lock);
+-		ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
+-						    OPLUS_USB_INPUT_CURRENT_LIMIT, limit);
+-		if (!ret)
+-			battmgr->oplus.input_suspended = !limit;
+-		mutex_unlock(&battmgr->lock);
+-
+-		if (!ret && pval->intval < 0)
+-			schedule_work(&battmgr->oplus_charging_work);
+-
+-		return ret;
++		switch (psp) {
++		case POWER_SUPPLY_PROP_ONLINE:
++			return qcom_battmgr_oplus_pps_set_online(battmgr, pval->intval);
++		case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++			return qcom_battmgr_oplus_pps_set_voltage(battmgr, pval->intval);
++		case POWER_SUPPLY_PROP_CURRENT_NOW:
++			return qcom_battmgr_oplus_pps_set_current(battmgr, pval->intval);
++		default:
++			return qcom_battmgr_oplus_set_input_limit(battmgr, pval->intval);
++		}
+ 	}
+ 
+ 	if (pval->intval > 0) {
+@@ -1383,6 +1758,38 @@ static const struct power_supply_desc sm8350_usb_psy_desc = {
+ 		     BIT(POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID),
+ };
+ 
++/* The sm8350 supply plus the programmable range, for Kaanapali alone. */
++static const enum power_supply_property kaanapali_usb_props[] = {
++	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_VOLTAGE_MIN,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_VOLTAGE_MAX,
++	POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_CURRENT_MAX,
++	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
++	POWER_SUPPLY_PROP_USB_TYPE,
++};
++
++static const struct power_supply_desc kaanapali_usb_psy_desc = {
++	.name = "qcom-battmgr-usb",
++	.type = POWER_SUPPLY_TYPE_USB,
++	.properties = kaanapali_usb_props,
++	.num_properties = ARRAY_SIZE(kaanapali_usb_props),
++	.get_property = qcom_battmgr_usb_get_property,
++	.set_property = qcom_battmgr_usb_set_property,
++	.property_is_writeable = qcom_battmgr_usb_is_writeable,
++	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
++		     BIT(POWER_SUPPLY_USB_TYPE_SDP)     |
++		     BIT(POWER_SUPPLY_USB_TYPE_DCP)     |
++		     BIT(POWER_SUPPLY_USB_TYPE_CDP)     |
++		     BIT(POWER_SUPPLY_USB_TYPE_ACA)     |
++		     BIT(POWER_SUPPLY_USB_TYPE_C)       |
++		     BIT(POWER_SUPPLY_USB_TYPE_PD)      |
++		     BIT(POWER_SUPPLY_USB_TYPE_PD_DRP)  |
++		     BIT(POWER_SUPPLY_USB_TYPE_PD_PPS)  |
++		     BIT(POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID),
++};
++
+ static const u8 sm8350_wls_prop_map[] = {
+ 	[POWER_SUPPLY_PROP_ONLINE] = WLS_ONLINE,
+ 	[POWER_SUPPLY_PROP_VOLTAGE_NOW] = WLS_VOLT_NOW,
+@@ -1516,14 +1923,16 @@ static void qcom_battmgr_notification(struct qcom_battmgr *battmgr,
+ 			schedule_work(&battmgr->oplus_charging_work);
+ 			power_supply_changed(battmgr->usb_psy);
+ 			return;
++		case NOTIF_OPLUS_PD_HARD_RESET:
++			/* A hard reset drops the contract; the source comes back at 5 V. */
++			qcom_battmgr_oplus_pps_lost(battmgr);
++			fallthrough;
+ 		case NOTIF_OPLUS_TYPEC_STATE_CHANGE:
+ 		case NOTIF_OPLUS_POWER_ROLE_STATUS:
+ 		/*
+-		 * A PD hard reset drops the contract and the source comes
+-		 * back at 5 V; the PPS check tells that the firmware is done
+-		 * classifying a PD source. Both change what the supply reports.
++		 * The PPS check tells that the firmware is done classifying a
++		 * PD source. It changes what the supply reports, as the rest do.
+ 		 */
+-		case NOTIF_OPLUS_PD_HARD_RESET:
+ 		case NOTIF_OPLUS_PD_PPS_CHECK_COMPLETED:
+ 			power_supply_changed(battmgr->usb_psy);
+ 			return;
+@@ -2146,6 +2555,42 @@ static int qcom_battmgr_charge_limit_init(struct qcom_battmgr *battmgr)
+ 	return 0;
+ }
+ 
++/*
++ * Called with @battmgr->lock held once the service is up. A restarted
++ * firmware negotiated its PD contract anew and holds its defaults: the
++ * host's suspend vote is gone with the contract it protected.
++ */
++static void qcom_battmgr_oplus_service_up(struct qcom_battmgr *battmgr)
++{
++	int ret;
++
++	qcom_battmgr_oplus_pps_lost(battmgr);
++	battmgr->oplus.pdos_valid = false;
++
++	if (battmgr->oplus.pps_hold) {
++		/*
++		 * A direct charger still owns the input and may have its
++		 * pumps on the bus: vote the suspend again, and leave the
++		 * ramp to its release.
++		 */
++		if (battmgr->oplus.input_suspended) {
++			ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
++							    OPLUS_USB_INPUT_CURRENT_LIMIT, 0);
++			if (ret)
++				dev_err(battmgr->dev, "failed to suspend the input again\n");
++		}
++		return;
++	}
++
++	battmgr->oplus.input_suspended = false;
++
++	/*
++	 * A charger plugged in before the service came up sent its PlugIn
++	 * notification to nobody, so enable charging now.
++	 */
++	schedule_work(&battmgr->oplus_charging_work);
++}
++
+ static void qcom_battmgr_enable_worker(struct work_struct *work)
+ {
+ 	struct qcom_battmgr *battmgr = container_of(work, struct qcom_battmgr, enable_work);
+@@ -2166,16 +2611,7 @@ static void qcom_battmgr_enable_worker(struct work_struct *work)
+ 		if (ret)
+ 			dev_err(battmgr->dev, "failed to enable OTG control from AP\n");
+ 
+-		/* A restarted firmware dropped the host's suspend vote. */
+-		battmgr->oplus.input_suspended = false;
+-		/* And it negotiated its PD contract anew. */
+-		battmgr->oplus.pdos_valid = false;
+-
+-		/*
+-		 * A charger plugged in before the service came up sent its
+-		 * PlugIn notification to nobody, so enable charging now.
+-		 */
+-		schedule_work(&battmgr->oplus_charging_work);
++		qcom_battmgr_oplus_service_up(battmgr);
+ 	}
+ 
+ 	if (battmgr->charge_limit.num_levels) {
+@@ -2254,7 +2690,7 @@ static bool qcom_battmgr_oplus_pd_9v(struct qcom_battmgr *battmgr)
+ 
+ 	mutex_lock(&battmgr->lock);
+ 	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_VOLT_NOW, 0);
+-	if (ret || battmgr->oplus.input_suspended)
++	if (ret || qcom_battmgr_oplus_input_held(battmgr))
+ 		goto out;
+ 	/* A repeated plug event finds the contract already raised. */
+ 	raised = battmgr->usb.voltage_now >= OPLUS_PD_9V_MIN_UV;
+@@ -2334,7 +2770,7 @@ static int qcom_battmgr_oplus_ramp_input(struct qcom_battmgr *battmgr)
+ 	for (i = 0; i < ARRAY_SIZE(qcom_battmgr_oplus_input_steps_ma) &&
+ 		    steps[i] <= limit_ma; i++) {
+ 		mutex_lock(&battmgr->lock);
+-		if (battmgr->oplus.input_suspended)
++		if (qcom_battmgr_oplus_input_held(battmgr))
+ 			goto out;
+ 		ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
+ 						    OPLUS_USB_INPUT_CURRENT_LIMIT, steps[i] * 1000);
+@@ -2361,7 +2797,7 @@ static int qcom_battmgr_oplus_ramp_input(struct qcom_battmgr *battmgr)
+ 		return 0;
+ 
+ 	mutex_lock(&battmgr->lock);
+-	if (!battmgr->oplus.input_suspended)
++	if (!qcom_battmgr_oplus_input_held(battmgr))
+ 		ret = qcom_battmgr_request_property(battmgr, BATTMGR_OPLUS_PROPERTY_SET,
+ 						    OPLUS_USB_INPUT_CURRENT_LIMIT, steps[i - 1] * 1000);
+ out:
+@@ -2495,8 +2931,11 @@ static void qcom_battmgr_oplus_update_source_caps(struct qcom_battmgr *battmgr)
+ 	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_ONLINE, 0);
+ 	if (ret)
+ 		goto out_unlock;
+-	if (!battmgr->usb.online)
++	if (!battmgr->usb.online) {
+ 		battmgr->oplus.pdos_valid = false;
++		/* The contract left with the source; the hold is the charger's. */
++		qcom_battmgr_oplus_pps_lost(battmgr);
++	}
+ 	if (!battmgr->oplus.pdos_valid)
+ 		qcom_battmgr_oplus_read_source_caps(battmgr);
+ out_unlock:
+@@ -2552,6 +2991,73 @@ static void qcom_battmgr_pdr_notify(void *priv, int state)
+ 	spin_unlock_irqrestore(&battmgr->rx_lock, flags);
+ }
+ 
++/*
++ * Bench diagnostics for the programmable contract: the firmware's
++ * PPS_Status word, and a trigger for the charging work, which writes the
++ * charger enable on every plug event and whose effect on a suspended
++ * input is unverified.
++ */
++static int qcom_battmgr_oplus_pps_status_show(struct seq_file *s, void *data)
++{
++	struct qcom_battmgr *battmgr = s->private;
++	u32 status;
++	int ret;
++
++	if (!battmgr->service_up)
++		return -EAGAIN;
++
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_oplus_get(battmgr, OPLUS_USB_GET_PPS_STATUS, &status);
++	mutex_unlock(&battmgr->lock);
++	if (ret)
++		return ret;
++
++	seq_printf(s, "%#010x %u mV %u mA\n", status,
++		   (status & 0xffff) * 20, ((status >> 16) & 0xff) * 50);
++
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(qcom_battmgr_oplus_pps_status);
++
++static ssize_t qcom_battmgr_oplus_charging_work_write(struct file *file,
++						      const char __user *buf,
++						      size_t count, loff_t *ppos)
++{
++	struct qcom_battmgr *battmgr = file->private_data;
++
++	schedule_work(&battmgr->oplus_charging_work);
++
++	return count;
++}
++
++static const struct file_operations qcom_battmgr_oplus_charging_work_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.write = qcom_battmgr_oplus_charging_work_write,
++	.llseek = noop_llseek,
++};
++
++static void qcom_battmgr_oplus_debugfs_remove(void *data)
++{
++	debugfs_remove_recursive(data);
++}
++
++static int qcom_battmgr_oplus_debugfs_init(struct qcom_battmgr *battmgr)
++{
++	struct dentry *dir;
++
++	dir = debugfs_create_dir(dev_name(battmgr->dev), NULL);
++	if (IS_ERR(dir))
++		return 0;
++
++	debugfs_create_file("pps_status", 0444, dir, battmgr,
++			    &qcom_battmgr_oplus_pps_status_fops);
++	debugfs_create_file("charging_work", 0200, dir, battmgr,
++			    &qcom_battmgr_oplus_charging_work_fops);
++
++	return devm_add_action_or_reset(battmgr->dev, qcom_battmgr_oplus_debugfs_remove, dir);
++}
++
+ static const struct of_device_id qcom_battmgr_of_variants[] = {
+ 	{ .compatible = "oneplus,sm8550-pmic-glink", .data = (void *)OPLUS_BATTMGR_SM8550 },
+ 	{ .compatible = "qcom,glymur-pmic-glink", .data = (void *)QCOM_BATTMGR_X1E80100 },
+@@ -2646,7 +3152,12 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
+ 			return dev_err_probe(dev, PTR_ERR(battmgr->bat_psy),
+ 					     "failed to register battery power supply\n");
+ 
+-		battmgr->usb_psy = devm_power_supply_register(dev, &sm8350_usb_psy_desc, &psy_cfg_supply);
++		if (battmgr->variant == OPLUS_BATTMGR_KAANAPALI)
++			psy_desc = &kaanapali_usb_psy_desc;
++		else
++			psy_desc = &sm8350_usb_psy_desc;
++
++		battmgr->usb_psy = devm_power_supply_register(dev, psy_desc, &psy_cfg_supply);
+ 		if (IS_ERR(battmgr->usb_psy))
+ 			return dev_err_probe(dev, PTR_ERR(battmgr->usb_psy),
+ 					     "failed to register USB power supply\n");
+@@ -2684,6 +3195,12 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
+ 	if (ret)
+ 		return ret;
+ 
++	if (battmgr->variant == OPLUS_BATTMGR_KAANAPALI) {
++		ret = qcom_battmgr_oplus_debugfs_init(battmgr);
++		if (ret)
++			return ret;
++	}
++
+ 	pmic_glink_client_register(battmgr->client);
+ 
+ 	return 0;
+-- 
+2.53.0

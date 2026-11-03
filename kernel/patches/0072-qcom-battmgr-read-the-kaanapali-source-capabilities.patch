@@ -1,0 +1,339 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 03 Nov 2026 13:10:38 -0800
+Subject: [PATCH] power: supply: qcom_battmgr: read the Kaanapali source
+ capabilities
+
+The Kaanapali Oplus firmware negotiates the PD contract itself and
+tells the host what the source offered only through a buffer read:
+opcode 0x10004, a 4-byte request holding the buffer size (512),
+answered with 128 words and the number of bytes it filled, 528 bytes
+in all (oplus_hal_adsp.h:135-144, oplus_hal_adsp.c:836-875). Words 0
+and 1 are what the stock kernel calls imax and vmax and never uses;
+words 2 to 8 are up to seven raw USB PD source PDOs
+(oplus_hal_adsp.c:13566-13589), in the layout <linux/usb/pd.h>
+decodes. The driver has no handler for the opcode, and nothing else
+on this board publishes the capabilities: on the OnePlus Pad 4 under
+the 9 V contract of build #45 the Type-C partner's identity is empty
+and the UCSI source supply reads 0, which it does only without PDOs
+(ucsi/psy.c:111-127).
+
+Read the buffer from the charging work, which already reads the
+charger type on every plug event. The firmware's PD_SOURCECAP_DONE
+(0x79) arrives in the transport's callback under pmic_glink's client
+spinlock (pmic_glink.c:160-166), where a request cannot wait for its
+reply, so the callback only marks the capabilities stale and counts
+the report: a read that a report overtakes is repeated. The reply is
+matched by its opcode alone; its length and its filled size (nonzero,
+at most 512 bytes) are checked. The decoded list is logged once per
+report with each PDO's raw word. Among the PPS APDOs that cover a 2:1
+charge pump's window (5.5 V to 9.2 V) the one with the highest current,
+then the highest voltage, is kept; a direct charger through the board's
+pumps never asks for more than 10 V, so the source's current limit is
+what bounds the power (the owner's supply offers 5-11 V at 5 A next to
+4.5-20 V at 2.25 A). Without a usable one the highest voltage is kept
+for the log. An unplugged port
+answers with no PDOs: the only read recorded on this unit, at a stock
+boot without an adapter, returned imax 0 and vmax 0 without a timeout
+(the oplusreserve5 kmsg capture, line 822).
+
+No property of the supply changes yet. Whether the firmware answers
+this driver's client with the 528-byte reply, and what the owner's
+supply offers (its APDO's minimum, maximum and current), is what the
+first flight of the PD PPS plan reads from the journal line this adds.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/qcom_battmgr.c |  205 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 204 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 294706c682c2..3feb0623aa25 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -20,6 +20,7 @@
+ #include <linux/math64.h>
+ #include <linux/thermal.h>
+ #include <linux/units.h>
++#include <linux/usb/pd.h>
+ 
+ #define BATTMGR_CHEMISTRY_LEN	4
+ #define BATTMGR_STRING_LEN	128
+@@ -136,6 +137,14 @@ enum qcom_battmgr_variant {
+ #define OPLUS_CHG_EN					70
+ #define OPLUS_SET_PDO					71
+ 
++/*
++ * The Oplus firmware hands out the PD source capabilities as a buffer:
++ * two words it calls imax and vmax, then up to seven raw PDOs.
++ */
++#define BATTMGR_OPLUS_READ_BUFFER			0x10004
++#define OPLUS_READ_BUFFER_WORDS				128
++#define OPLUS_PPS_PDO_MAX				7
++
+ struct qcom_battmgr_enable_request {
+ 	struct pmic_glink_hdr hdr;
+ 	__le32 battery_id;
+@@ -177,6 +186,11 @@ struct qcom_battmgr_charge_ctrl_request {
+ 	__le32 delta_soc;
+ };
+ 
++struct qcom_battmgr_oplus_read_buffer_request {
++	struct pmic_glink_hdr hdr;
++	__le32 data_size;
++};
++
+ struct qcom_battmgr_message {
+ 	struct pmic_glink_hdr hdr;
+ 	union {
+@@ -262,6 +276,11 @@ struct qcom_battmgr_message {
+ 			__le32 charging_source;
+ 			__le32 temperature;
+ 		} status;
++		struct {
++			__le32 data_buffer[OPLUS_READ_BUFFER_WORDS];
++			/* bytes of @data_buffer the firmware filled */
++			__le32 data_size;
++		} read_buffer;
+ 		__le32 time;
+ 		__le32 notification;
+ 	};
+@@ -343,6 +362,21 @@ struct qcom_battmgr_oplus {
+ 	bool otg_state;
+ 	bool input_suspended;
+ 	u32 value;
++
++	/*
++	 * The PD source capabilities, as the charging work last read them;
++	 * stale once the firmware reports new ones. The PPS APDO chosen
++	 * among them is the one a direct charger can program; 0 without one.
++	 */
++	bool pdos_valid;
++	/* Counts the firmware's reports of new ones; a read spanning one is stale. */
++	unsigned int pdos_gen;
++	u32 source_imax;
++	u32 source_vmax;
++	u32 pdo[OPLUS_PPS_PDO_MAX];
++	unsigned int pps_min_uv;
++	unsigned int pps_max_uv;
++	unsigned int pps_max_ua;
+ };
+ 
+ /*
+@@ -1472,9 +1506,13 @@ static void qcom_battmgr_notification(struct qcom_battmgr *battmgr,
+ 			schedule_work(&battmgr->oplus_otg_work);
+ 			power_supply_changed(battmgr->usb_psy);
+ 			return;
++		case NOTIF_OPLUS_PD_SOURCECAP_DONE:
++			/* The charging work reads them; nothing waits here. */
++			battmgr->oplus.pdos_valid = false;
++			WRITE_ONCE(battmgr->oplus.pdos_gen, battmgr->oplus.pdos_gen + 1);
++			fallthrough;
+ 		case NOTIF_OPLUS_PLUGIN_IRQ:
+ 		case NOTIF_OPLUS_APSD_DONE:
+-		case NOTIF_OPLUS_PD_SOURCECAP_DONE:
+ 			schedule_work(&battmgr->oplus_charging_work);
+ 			power_supply_changed(battmgr->usb_psy);
+ 			return;
+@@ -1669,6 +1707,7 @@ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
+ 	unsigned int opcode = le32_to_cpu(resp->hdr.opcode);
+ 	size_t payload_len = len - sizeof(struct pmic_glink_hdr);
+ 	unsigned int val;
++	unsigned int i;
+ 
+ 	if (payload_len < sizeof(__le32)) {
+ 		dev_warn(battmgr->dev, "invalid payload length for %#x: %zd\n",
+@@ -1697,6 +1736,32 @@ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
+ 				battmgr->oplus.value = le32_to_cpu(resp->intval.value);
+ 
+ 			goto out_complete;
++		case BATTMGR_OPLUS_READ_BUFFER:
++			if (payload_len != sizeof(resp->read_buffer)) {
++				dev_warn(battmgr->dev,
++					 "invalid payload length for the source capabilities: %zd\n",
++					 payload_len);
++				battmgr->error = -ENODATA;
++				goto out_complete;
++			}
++
++			val = le32_to_cpu(resp->read_buffer.data_size);
++			if (!val || val > sizeof(resp->read_buffer.data_buffer)) {
++				dev_warn(battmgr->dev,
++					 "invalid source capabilities size: %u\n", val);
++				battmgr->error = -ENODATA;
++				goto out_complete;
++			}
++			val /= sizeof(__le32);
++
++			battmgr->oplus.source_imax = val > 0 ?
++				le32_to_cpu(resp->read_buffer.data_buffer[0]) : 0;
++			battmgr->oplus.source_vmax = val > 1 ?
++				le32_to_cpu(resp->read_buffer.data_buffer[1]) : 0;
++			for (i = 0; i < OPLUS_PPS_PDO_MAX; i++)
++				battmgr->oplus.pdo[i] = i + 2 < val ?
++					le32_to_cpu(resp->read_buffer.data_buffer[i + 2]) : 0;
++			goto out_complete;
+ 		}
+ 	}
+ 
+@@ -2103,6 +2168,8 @@ static void qcom_battmgr_enable_worker(struct work_struct *work)
+ 
+ 		/* A restarted firmware dropped the host's suspend vote. */
+ 		battmgr->oplus.input_suspended = false;
++		/* And it negotiated its PD contract anew. */
++		battmgr->oplus.pdos_valid = false;
+ 
+ 		/*
+ 		 * A charger plugged in before the service came up sent its
+@@ -2302,6 +2369,140 @@ static int qcom_battmgr_oplus_ramp_input(struct qcom_battmgr *battmgr)
+ 	return ret;
+ }
+ 
++/*
++ * Called with @battmgr->lock held. Read the PD source capabilities the
++ * firmware negotiated and pick the PPS APDO a direct charger can program:
++ * the one with the highest maximum voltage, then the highest current.
++ * Without a PD source the firmware answers with none.
++ */
++static int qcom_battmgr_oplus_read_source_caps(struct qcom_battmgr *battmgr)
++{
++	struct qcom_battmgr_oplus_read_buffer_request request = {
++		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
++		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
++		.hdr.opcode = cpu_to_le32(BATTMGR_OPLUS_READ_BUFFER),
++		.data_size = cpu_to_le32(OPLUS_READ_BUFFER_WORDS * sizeof(__le32)),
++	};
++	struct qcom_battmgr_oplus *oplus = &battmgr->oplus;
++	unsigned int min_uv, max_uv, max_ua;
++	char list[OPLUS_PPS_PDO_MAX * 48];
++	bool usable, best_usable = false;
++	unsigned int gen, i;
++	size_t pos = 0;
++	u32 pdo;
++	int ret;
++
++	gen = READ_ONCE(oplus->pdos_gen);
++	ret = qcom_battmgr_request(battmgr, &request, sizeof(request));
++	if (ret) {
++		dev_warn(battmgr->dev, "failed to read the PD source capabilities: %d\n", ret);
++		return ret;
++	}
++
++	oplus->pps_min_uv = 0;
++	oplus->pps_max_uv = 0;
++	oplus->pps_max_ua = 0;
++	for (i = 0; i < OPLUS_PPS_PDO_MAX; i++) {
++		pdo = oplus->pdo[i];
++		if (!pdo)
++			continue;
++		if (pos)
++			pos += scnprintf(list + pos, sizeof(list) - pos, ", ");
++		switch (pdo_type(pdo)) {
++		case PDO_TYPE_FIXED:
++			pos += scnprintf(list + pos, sizeof(list) - pos,
++					 "fixed %u mV %u mA [%#010x]",
++					 pdo_fixed_voltage(pdo), pdo_fixed_current(pdo), pdo);
++			break;
++		case PDO_TYPE_BATT:
++			pos += scnprintf(list + pos, sizeof(list) - pos,
++					 "battery %u-%u mV %u mW [%#010x]",
++					 pdo_min_voltage(pdo), pdo_max_voltage(pdo),
++					 pdo_max_power(pdo), pdo);
++			break;
++		case PDO_TYPE_VAR:
++			pos += scnprintf(list + pos, sizeof(list) - pos,
++					 "variable %u-%u mV %u mA [%#010x]",
++					 pdo_min_voltage(pdo), pdo_max_voltage(pdo),
++					 pdo_max_current(pdo), pdo);
++			break;
++		case PDO_TYPE_APDO:
++			if (pdo_apdo_type(pdo) != APDO_TYPE_PPS) {
++				pos += scnprintf(list + pos, sizeof(list) - pos,
++						 "APDO [%#010x]", pdo);
++				break;
++			}
++			min_uv = pdo_pps_apdo_min_voltage(pdo) * 1000;
++			max_uv = pdo_pps_apdo_max_voltage(pdo) * 1000;
++			max_ua = pdo_pps_apdo_max_current(pdo) * 1000;
++			pos += scnprintf(list + pos, sizeof(list) - pos,
++					 "PPS %u-%u mV %u mA [%#010x]",
++					 min_uv / 1000, max_uv / 1000, max_ua / 1000, pdo);
++			/*
++			 * A direct charger through 2:1 pumps never asks for more
++			 * than 10 V, so among the APDOs that cover its window
++			 * (5.5 V to 9.2 V) the current decides: the owner's supply
++			 * offers 5-11 V at 5 A next to 4.5-20 V at 2.25 A, and the
++			 * highest voltage would have picked the weaker one.
++			 */
++			usable = min_uv <= 5500000 && max_uv >= 9200000;
++			if ((usable && !best_usable) ||
++			    (usable == best_usable &&
++			     (usable ? (max_ua > oplus->pps_max_ua ||
++					(max_ua == oplus->pps_max_ua &&
++					 max_uv > oplus->pps_max_uv)) :
++				       (max_uv > oplus->pps_max_uv ||
++					(max_uv == oplus->pps_max_uv &&
++					 max_ua > oplus->pps_max_ua))))) {
++				oplus->pps_min_uv = min_uv;
++				oplus->pps_max_uv = max_uv;
++				oplus->pps_max_ua = max_ua;
++				best_usable = usable;
++			}
++			break;
++		}
++	}
++	/* New ones reported meanwhile reschedule this work, which reads again. */
++	oplus->pdos_valid = gen == READ_ONCE(oplus->pdos_gen);
++
++	if (!pos)
++		dev_info(battmgr->dev, "PD source capabilities: none (imax %u, vmax %u)\n",
++			 oplus->source_imax, oplus->source_vmax);
++	else if (oplus->pps_max_uv)
++		dev_info(battmgr->dev,
++			 "PD source capabilities: %s (imax %u, vmax %u); programmable %u-%u mV %u mA\n",
++			 list, oplus->source_imax, oplus->source_vmax,
++			 oplus->pps_min_uv / 1000, oplus->pps_max_uv / 1000,
++			 oplus->pps_max_ua / 1000);
++	else
++		dev_info(battmgr->dev,
++			 "PD source capabilities: %s (imax %u, vmax %u); no PPS APDO\n",
++			 list, oplus->source_imax, oplus->source_vmax);
++
++	return 0;
++}
++
++/*
++ * The firmware tells of new source capabilities from the transport's
++ * callback, which cannot wait for a reply; it marks them stale and this
++ * work reads them. An unplugged port holds none.
++ */
++static void qcom_battmgr_oplus_update_source_caps(struct qcom_battmgr *battmgr)
++{
++	int ret;
++
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_request_property(battmgr, BATTMGR_USB_PROPERTY_GET, USB_ONLINE, 0);
++	if (ret)
++		goto out_unlock;
++	if (!battmgr->usb.online)
++		battmgr->oplus.pdos_valid = false;
++	if (!battmgr->oplus.pdos_valid)
++		qcom_battmgr_oplus_read_source_caps(battmgr);
++out_unlock:
++	mutex_unlock(&battmgr->lock);
++}
++
+ static void qcom_battmgr_oplus_charging_worker(struct work_struct *work)
+ {
+ 	struct qcom_battmgr *battmgr = container_of(work, struct qcom_battmgr, oplus_charging_work);
+@@ -2324,6 +2525,8 @@ static void qcom_battmgr_oplus_charging_worker(struct work_struct *work)
+ 	ret = qcom_battmgr_oplus_ramp_input(battmgr);
+ 	if (ret)
+ 		dev_err(battmgr->dev, "failed to set the input limit: %d\n", ret);
++
++	qcom_battmgr_oplus_update_source_caps(battmgr);
+ }
+ 
+ static void qcom_battmgr_pdr_notify(void *priv, int state)
+-- 
+2.53.0

@@ -60,6 +60,8 @@ Provenance
 
 | 0069–0070 | Fedora iceland port's pmic_pdcharger_ulog patches (their 0132 SoCCP channel, 0232 remove-path use-after-free) | mzak | adopted 2026-11-03 as the firmware charger-log witness for the PD PPS rung (config-charging.fragment builds the module); offer upstream with the PPS series |
 
+| 0071–0073 | this port: the PD PPS A-series for qcom_battmgr on Kaanapali — 0071 names the firmware's PD notifications (0x56 SVID, 0x7f hard reset, 0x91 PPS check); 0072 reads the PD source capabilities (read-buffer opcode 0x10004 from the charging work, the 7 PDOs decoded with <linux/usb/pd.h>, the PPS APDO chosen by current within the pump's window); 0073 gives the usb supply tcpm's programmable-supply ABI (ONLINE 2 with the host's input vote, VOLTAGE_MIN, one 29/30 pair per request, a 10.0 V rail on every request path, the −1 release refused after a failed 5 V exit, the hold surviving a firmware restart, bench debugfs). Facts from the vendor glink backend read, nothing copied | John Stockdale | written 2026-11-03 against the plan's revision 2 (research under build/pps-work); flown as module swaps on #46: F1 PASS (the Anker offers PPS 5–11 V at 5 A), F2–F4 PASS (vote-gated entry, 6.0 V request honoured, 120 s hold kept by the firmware, 5 V exit and the 9 V ramp back without a replug); to be offered to Perpetua after the C-series proves the design (Q20 review first) |
+
 Numbering note: the number 0029 was first used on 2026-11-02 for infiniti's
 ADSP reserved-memory change (0x4c00000 -> 0x5000000) and withdrawn the same
 day — the OnePlus board file already deletes and redefines that node with
