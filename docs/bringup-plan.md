@@ -196,11 +196,30 @@ decoded shell model cannot run yet.
 2. BT audio: apt install libspa-0.2-bluetooth; pair a keyboard or headset
    (none recorded as owned). PASS: pairing persists across a reboot; an
    A2DP sink appears in `wpctl status`.
-3. Pen (next kernel bundle after VP): adapted Fedora 0036 (BTN_STYLUS/2,
-   axis resolution from touchscreen-x-mm/y-mm; hunk 5 must be rewritten
-   for our probe) + 0037 (mm values in the controller frame) + a one-hunk
-   fix so the pen goes through touchscreen_report_pos like touch (its
-   coordinates are raw today). Evdev gate first; libinput under C5.
+3. Stylus (OnePlus Stylo Pro) — input, next kernel bundle after VP:
+   today the NT36536 driver already reports the pen's position, pressure,
+   tilt and hover (ABS_PRESSURE/TILT_X/TILT_Y/DISTANCE, BTN_TOOL_PEN) and
+   the firmware decodes the two barrel buttons and a battery byte that the
+   driver parses and drops; libinput ignores the device ("missing tablet
+   capabilities: btn-stylus resolution", seen in the first GNOME session
+   on 2026-11-02). Patches: 0037 = adapted Fedora 0036 (declare and report
+   BTN_STYLUS/BTN_STYLUS2, axis resolution from touchscreen-x-mm/y-mm via
+   the controller's abs_x_max/abs_y_max; its hunk 5 rewritten for our
+   touchscreen_parse_properties-based probe), 0038 = the DT mm properties
+   in OUR controller frame (touchscreen-size-x 24000 / size-y 33920 with
+   inverted-x + swapped-x-y, so the mm values pair with the controller
+   axes, not Fedora's hardcoded landscape frame), 0039 = our fix routing
+   the pen through touchscreen_report_pos like touch (its coordinates are
+   raw today). RAM boot; evdev gate: BTN_STYLUS in KEY bits, resolution in
+   absinfo, pen and finger agree at four corners; then libinput/GNOME
+   (hover cursor, pressure in a drawing app). No Bluetooth involved: the
+   Fedora port reports "the pen works" through the touch IC alone.
+3b. Pen charging (later rung): Fedora 0091–0093 add a Maxic MT5806
+   wireless-transmitter driver (hBoost supply asked from the charger
+   firmware over PMIC GLINK, 5 s attach window, 120-min cap, error power
+   cycling) plus the DT node (I2C hub bus 1 at 0x2b, IRQ gpio169, four
+   PMIH0108 control lines). A new driver — adopt after the input rung,
+   with the battery byte from 3 as the gate.
 4. Thermal baseline during the C5 soak (tb323fu's thermal-stress pattern:
    600 s all-core + glmark2; CPU zones held under 95 °C, no critical
    trip). The ADC/NTC zones (Perpetua cf2156997bf7, 573a270f7b90 +

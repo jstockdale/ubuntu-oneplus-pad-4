@@ -24,7 +24,7 @@ package `ubuntu-iceland-device` 0.2.21.
 | Backlight (KTZ8869) | ✅ | driver bound, brightness readable/writable (sysfs max_brightness 4095, runs at 2047); follows panel blank/unblank (T2, 2026-11-02); a full sweep is still owed |
 | GPU (Adreno 840, freedreno) | ✅ | 2026-11-01: Mesa 26, OpenGL ES 3.2; kmscube and Weston's GL renderer; vendor GMU/SQE/AQE firmware hash-manifested |
 | Touchscreen (NT36536 over SPI) | ✅ | 2026-11-01, C2: 10-point multitouch, auto-loads at t≈2 s on every boot (20/20), 30-minute soak clean (patches 0007–0010); survives panel blank/unblank ×3 (T2, 2026-11-02; tap confirmation pending) |
-| Stylus / pen | 🟡 | the pen registers alongside touch; `BTN_STYLUS` and the physical-size properties are missing (sibling-port patch queued) |
+| Stylus / pen (OnePlus Stylo Pro) | 🟡 | position, pressure, tilt and hover already reported by the touch controller's driver; libinput ignores the device for lack of BTN_STYLUS + axis resolution (GNOME session log 2026-11-02); patches 0037–0039 in preparation (bringup-plan.md A.3); pen charging is a separate later rung |
 | Buttons | ✅ | power (clean shutdown), volume up/down, resin |
 | Wi-Fi (WCN7860 / ath12k) | ✅ | 2026-11-01, C3: joins the configured network by itself; ssh over the air both ways; regulatory db installed (patches 0003–0005). MAC is the firmware default 00:03:7f:12:34:56 (same per-unit identity gap as Bluetooth) |
 | Bluetooth (WCN7860) | 🟡 | controller up, BRAHMA 2.0.1 firmware loads (0006); pairing untested; broadcasts the Perpetua board file's placeholder address AD:5A:00:00:00:25 — this unit's persist holds no bluetooth directory, so the address will be owner-supplied or derived from the SoC serial (bringup-plan.md A) |
@@ -43,7 +43,7 @@ package `ubuntu-iceland-device` 0.2.21.
 | Cameras | ❓ | camss loads safely; no pipeline, sensor or firmware work yet; last phase |
 | GDM + GNOME session | ✅ | 2026-11-02: owner logged in on glass with the on-screen keyboard — Wayland user session on seat0 (VT2), `ubuntu:GNOME`, 3392×2400@120 Hz at integer 2× scale, protected Speakers sink the default, no idle suspend, interactive power button, fwupd absent (ubuntu-desktop-minimal, 844 packages). First login had been blocked only by a `/tmp/.X11-unix` ownership artifact of starting GDM by hand (fixed; a reboot avoids it). Still owed: a cold-boot census with GDM, the 25-min idle and power-press checks, the pen (ignored by libinput until A.3) |
 | Waydroid | ❓ | binder/netfilter in `kernel/config/config-waydroid.fragment`; phase D |
-| DRM streaming (Netflix etc.) | ❓ | browser + arm64 Widevine CDM, L3 tier (HD, not 4K/HDR) is the only path on Linux |
+| DRM streaming (Netflix etc.) | ❓ | Google Chrome 156 arm64 installed 2026-11-02 and it bundles the Widevine CDM 4.10.3112.0 for linux_arm64 — L3 (HD) playback is now a test, not a hack; untested |
 | Haptics | — | no vibration motor in this tablet (stock disables it too) |
 | GNSS / location | — | no GNSS hardware (modemless SoC) |
 | Cellular | — | Wi-Fi-only device |
