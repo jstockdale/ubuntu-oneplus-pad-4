@@ -2234,3 +2234,16 @@ compatible renamed to oneplus,kaanapali-pmic-glink by 5ff346c547a7),
 0061 (board dts gained the charge pumps, thermistors and the cooling
 include). Only six head commits touch files our series touches. Owner
 confirmed the order: rung P after #44 and its flash.
+
+## 2026-11-02 — Build #42 gate PASSED (0001–0036 + 0043–0055), bundle 82219574
+
+build-vp1b.log: 49 applied, exit 0, 0 errors; built 03:14:45Z. Image
+d17b2b02; DTB 045498a9 = #41's (the fix set is driver-only); qcom-iris.ko
+44b950d9 with both kaanapali aliases; module diff vs #39 = iris only;
+bundle boot.img 82219574 (96 MiB), versioned copy
+out/bundles/boot-42-82219574.img (+ metadata). From now on every bundle
+gets a versioned copy before the next build, since the build script
+rewrites out/bundle and out/kernel-iceland. Iris module staged on the
+tablet over Wi-Fi (usb0 unplugged while it charges). Next: owner plugs
+usb0, `fastboot boot` the #42 bundle, flight-vp1 + the VP2/VP3 battery
+(now expecting the encode round-trip and mp4mux to pass), then flash.
