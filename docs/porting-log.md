@@ -3135,3 +3135,29 @@ for F1's PASS. The firmware-log witness and the device-local bench script
 are in place (the first bench run taught that a pipeline's children
 survive the kill and keep the trace pipe; the script now tracks readers by
 PID).
+
+
+## 2026-11-03 — Flight F1 PASS: the firmware hands Perpetua the PD source capabilities; the Anker offers PPS 5–11 V at 5 A
+
+A1+A2 swapped in from /run on the flashed #46 (sc8547_svooc off, battmgr
+off, insmod, svooc back; the policy unit wrote Standard on the way). The
+first charging-work run, with the port empty, already logged the list the
+firmware still held from the last contract; the replug produced the same
+list on each of its three plug events: fixed 5000 mV 3000 mA, 9000 mV
+3000 mA, 15000 mV 3000 mA, 20000 mV 2250 mA; PPS 5000–11000 mV 5000 mA,
+5000–16000 mV 3000 mA, 4500–20000 mV 2250 mA (imax 0, vmax 0). So: the
+read-buffer opcode is answered through Perpetua's pmic_glink client with
+the 528-byte reply (Q18 yes); the Anker's usable APDO is 5–11 V at 5 A
+(gate: min ≤ 5.5 V, max ≥ 9.2 V, ≥ 1.5 A — PASS with room), which makes the
+full 55 W envelope reachable on this charger (the plan's "3 A APDO ≈ 27 W"
+case does not apply); the UCSI source supply still reads 0; no "unknown
+notification" and no Oplus-SVID line (0x56) — the Anker takes the
+third-party path. Finding against the plan: the APDO selection rule
+"highest maximum voltage, ties by current" chose 4.5–20 V at 2.25 A; a
+charger that never asks above 10 V must prefer the highest current among
+the APDOs covering 5.5–9.2 V. Corrected in A2 before the next swap (both
+flight modules rebuilt; the series still applies in order, checkpatch
+clean). Two small items: each plug event re-reads and re-logs the list
+(three lines per plug; a one-line-per-change refinement is owed), and one
+"failed to report current_now: -110" at the module's load — a single 1 s
+timeout racing the probe, not repeated.
