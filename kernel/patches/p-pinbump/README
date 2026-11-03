@@ -1,0 +1,24 @@
+Rung P (kernel pin bump) — re-diffed patches
+============================================
+
+Not applied by scripts/build-mainline-kernel.sh (its glob is kernel/patches/
+*.patch). Generated 2026-11-02 by replaying the whole 60-patch series with
+`git am -3` on Perpetua origin/perpetua/v7.3 = b7d639cfb282 (100 commits past
+our pin 7c98a10e6bb7); 56 applied untouched, these four needed conflict
+resolution:
+
+- 0028: the READ_DONE half is upstream (9ba37ef1db70); WRITE_DONE half kept.
+- 0031: the head moved the CPU thermal overrides into a shared include; the
+  patch is now just the &iris block.
+- 0058: the head added Xiaomi's pmic-glink match data next to ours; both kept.
+- 0061: the head added the SuperVOOC nodes (i2c_hub_0 charge pumps, PMK8850
+  ADC channels, tlmm pump IRQ states) at the same insertion points as the
+  pen charger's; both kept (i2c_hub_1, PMIC-GPIO states, gpio169 state).
+
+When the pin moves: bump scripts/fetch-perpetua.sh, replace the same-numbered
+files in kernel/patches/ with these, re-check `kernel/config/*.fragment`
+against the head's devices/iceland/kernel.config (it now enables
+CONFIG_QCOM_SPMI_ADC5_GEN3, CHARGER_SC8547, CHARGER_SC8547_SVOOC and the
+lockup detectors Denial added after two freezes during SuperVOOC), build,
+RAM boot, run the standard-charging regression (SDP/DCP/PD 9 V, OTG,
+connected boot, 500 mA fallback) before any `Fast` opt-in.

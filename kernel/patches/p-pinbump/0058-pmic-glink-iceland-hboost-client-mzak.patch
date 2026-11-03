@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 10:38:15 +0300
+Subject: [PATCH] soc: qcom: pmic_glink: add the hBoost client device of the
+ OnePlus Pad 4
+
+On the OnePlus Pad 4 the PMIC's hBoost converter feeds the pen charger
+(a wireless power transmitter on the magnet side of the tablet). The
+converter belongs to the charger firmware, which takes the wanted
+voltage through PMIC GLINK from a client of its own (owner 32785).
+
+A client has to be a child device of the PMIC GLINK device, so create
+an auxiliary device "hboost" for it. It is only created for the
+"oneplus,iceland-pmic-glink" compatible; the other clients of that
+board stay as they are for Kaanapali.
+
+[adapted for the Ubuntu iceland port: Fedora's board file names the node
+"oneplus,iceland-pmic-glink". Perpetua's kaanapali-oneplus-iceland.dts
+has compatible = "oplus,kaanapali-pmic-glink", "qcom,kaanapali-pmic-glink"
+and its qcom_battmgr selects the OPLUS variant on that first string, so
+the hBoost client is attached to "oplus,kaanapali-pmic-glink" instead of
+a new compatible: no device tree or binding change (Perpetua documents
+neither string in qcom,pmic-glink.yaml), and that compatible is used by
+this board alone in the tree. The hunks apply at an offset: Perpetua's
+pmic_glink.c does not carry Fedora's 0028 (attach a channel that comes
+up before the platform device), which this change does not need. The
+other three clients (battery, altmode, UCSI) are created as before.]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ drivers/soc/qcom/pmic_glink.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/soc/qcom/pmic_glink.c b/drivers/soc/qcom/pmic_glink.c
+index 65bafd71a5ed..2daee96dec5e 100644
+--- a/drivers/soc/qcom/pmic_glink.c
++++ b/drivers/soc/qcom/pmic_glink.c
+@@ -21,6 +21,7 @@ enum {
+ 	PMIC_GLINK_CLIENT_BATT = 0,
+ 	PMIC_GLINK_CLIENT_ALTMODE,
+ 	PMIC_GLINK_CLIENT_UCSI,
++	PMIC_GLINK_CLIENT_HBOOST,
+ };
+ 
+ struct pmic_glink_data {
+@@ -40,6 +41,7 @@ struct pmic_glink {
+ 	struct auxiliary_device altmode_aux;
+ 	struct auxiliary_device ps_aux;
+ 	struct auxiliary_device ucsi_aux;
++	struct auxiliary_device hboost_aux;
+ 
+ 	/* serializing client_state and pdr_state updates */
+ 	struct mutex state_lock;
+@@ -340,6 +342,11 @@ static int pmic_glink_probe(struct platform_device *pdev)
+ 		if (ret)
+ 			goto out_release_altmode_aux;
+ 	}
++	if (pg->data->client_mask & BIT(PMIC_GLINK_CLIENT_HBOOST)) {
++		ret = pmic_glink_add_aux_device(pg, &pg->hboost_aux, "hboost");
++		if (ret)
++			goto out_release_ps_aux;
++	}
+ 
+ 	if (pg->data->charger_pdr_service_name && pg->data->charger_pdr_service_path) {
+ 		service = pdr_add_lookup(pg->pdr, pg->data->charger_pdr_service_name,
+@@ -358,6 +365,9 @@ static int pmic_glink_probe(struct platform_device *pdev)
+ 	return 0;
+ 
+ out_release_aux_devices:
++	if (pg->data->client_mask & BIT(PMIC_GLINK_CLIENT_HBOOST))
++		pmic_glink_del_aux_device(pg, &pg->hboost_aux);
++out_release_ps_aux:
+ 	if (pg->data->client_mask & BIT(PMIC_GLINK_CLIENT_BATT))
+ 		pmic_glink_del_aux_device(pg, &pg->ps_aux);
+ out_release_altmode_aux:
+@@ -378,6 +388,8 @@ static void pmic_glink_remove(struct platform_device *pdev)
+ 
+ 	pdr_handle_release(pg->pdr);
+ 
++	if (pg->data->client_mask & BIT(PMIC_GLINK_CLIENT_HBOOST))
++		pmic_glink_del_aux_device(pg, &pg->hboost_aux);
+ 	if (pg->data->client_mask & BIT(PMIC_GLINK_CLIENT_BATT))
+ 		pmic_glink_del_aux_device(pg, &pg->ps_aux);
+ 	if (pg->data->client_mask & BIT(PMIC_GLINK_CLIENT_ALTMODE))
+@@ -412,7 +424,19 @@ static const struct pmic_glink_data pmic_glink_xiaomi_soccp_data = {
+ 		       BIT(PMIC_GLINK_CLIENT_UCSI),
+ };
+ 
++/*
++ * The OnePlus Pad 4: the charger firmware also owns the hBoost converter that
++ * feeds the pen charger; its voltage is asked for by an own client.
++ */
++static const struct pmic_glink_data pmic_glink_iceland_data = {
++	.client_mask = BIT(PMIC_GLINK_CLIENT_BATT) |
++		       BIT(PMIC_GLINK_CLIENT_ALTMODE) |
++		       BIT(PMIC_GLINK_CLIENT_UCSI) |
++		       BIT(PMIC_GLINK_CLIENT_HBOOST),
++};
++
+ static const struct of_device_id pmic_glink_of_match[] = {
++	{ .compatible = "oplus,kaanapali-pmic-glink", .data = &pmic_glink_iceland_data },
+ 	{ .compatible = "qcom,glymur-pmic-glink", .data = &pmic_glink_soccp_data },
+ 	{ .compatible = "qcom,kaanapali-pmic-glink", .data = &pmic_glink_soccp_data },
+ 	{ .compatible = "xiaomi,kaanapali-pmic-glink", .data = &pmic_glink_xiaomi_soccp_data },

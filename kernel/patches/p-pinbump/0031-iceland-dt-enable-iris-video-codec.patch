@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Mon, 2 Nov 2026 16:59:34 -0800
+Subject: [PATCH] arm64: dts: qcom: kaanapali-oneplus-iceland: enable the iris
+ video codec
+
+Enable the VPU on the OnePlus Pad 4 with the firmware name the stock
+device ships (vpu40_2v.mbn, staged from the owner's own vendor image;
+sha256 69d4e215...). The iris driver reads firmware-name index 0 before
+falling back to the platform default (qcom/vpu/vpu40_p2.mbn), so no copy
+under the generic name is needed. Same four lines as the Fedora iceland
+port's board enable.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index f5a4a30e1a2b..91a613c83335 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -1687,3 +1687,8 @@ &usb_dp_qmpphy {
+ 
+ 	status = "okay";
+ };
++&iris {
++	firmware-name = "qcom/kaanapali/iceland/vpu40_2v.mbn";
++
++	status = "okay";
++};
