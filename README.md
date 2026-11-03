@@ -59,8 +59,10 @@ earn a ✅ here.
 | Thermal | 🟡 | zones registered; no policy daemon yet |
 | Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)) |
 | Suspend / resume | ❓ | deliberately untested so far |
-| Video decode (VPU), cameras | ❓ | planned ([docs/media-misc-plan.md](docs/media-misc-plan.md)) |
-| GNOME on Wayland, Waydroid | ❓ | next phases |
+| Video decode (VPU) | ❓ | iris series carried as patches 0029–0036; first RAM-boot flight pending ([docs/bringup-plan.md](docs/bringup-plan.md) VP) |
+| Cameras | ❓ | last phase ([docs/media-misc-plan.md](docs/media-misc-plan.md)) |
+| GNOME on Wayland | 🟡 | installed 2026-11-02; GDM greeter up (Wayland, 2× scale); on-glass login checks pending |
+| Waydroid | ❓ | after the desktop is daily-drivable |
 | Haptics, GNSS, cellular, fingerprint, microSD | — | not fitted on this device |
 
 ## How it boots

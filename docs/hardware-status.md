@@ -41,7 +41,7 @@ package `ubuntu-iceland-device` 0.2.21.
 | Suspend / resume | ❓ | never attempted (suspend_stats 0/0); mem_sleep defaults to deep, sleep targets masked since 0.2.21; known hazards and the F1 procedure in bringup-plan.md C6 |
 | Video decode (VPU) | ❓ | firmware vpu40_2v.mbn staged on the device; iris driver built but has no kaanapali compatible at the pin — patches 0029–0036 imported 2026-11-02, flight pending (bringup-plan.md VP) |
 | Cameras | ❓ | camss loads safely; no pipeline, sensor or firmware work yet; last phase |
-| GDM + GNOME session | ❓ | not installed yet; Weston (GL) proven; the C5 guards (fwupd pinned out, sleep targets masked, power-key policy, no-suspend dconf) shipped in 0.2.21 and verified 2026-11-02 |
+| GDM + GNOME session | 🟡 | 2026-11-02: ubuntu-desktop-minimal installed (844 packages, fwupd kept out); GDM greeter running as a Wayland session on seat0, gnome-shell on card0, 3392×2400@120 Hz at integer 2× scale, no gdm3/gnome-shell errors; guards 0.2.22 verified (no idle suspend, interactive power button). Still owed on glass: touch login with the OSK, four-corner taps, 25-min idle without sleep, power-press dialog, a cold-boot census |
 | Waydroid | ❓ | binder/netfilter in `kernel/config/config-waydroid.fragment`; phase D |
 | DRM streaming (Netflix etc.) | ❓ | browser + arm64 Widevine CDM, L3 tier (HD, not 4K/HDR) is the only path on Linux |
 | Haptics | — | no vibration motor in this tablet (stock disables it too) |
