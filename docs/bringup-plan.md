@@ -262,6 +262,69 @@ decoded shell model cannot run yet.
    attributes live on the I2C device (state, present, pen_soc, rx_soc,
    tx_voltage_mv, tx_current_ma, inhibit, scan_fast, chip_id,
    fw_version); a power_supply for the pen battery is a later polish.
+3c. Pen protocol (OPP) ladder — after the #44 flash. Verified 2026-11-02
+   (research run, report in /srv/ubuntu-iceland/build/pen-protocol-work,
+   its notes hold stock log extracts with addresses and never enter the
+   repo): the Stylo Pro is an "OPP" pen. Stock enables scanning with the
+   same `0x7F 0x10 0x01` we send (0040), then the controller emits a
+   20-byte uplink-timing frame (input id 30, page 6, 107–161 ms after the
+   enable), the stock daemon writes it to the pen over a bonded BLE link
+   (GATT handle 0x0067, write-with-response), and the pen's replies
+   (connection state, pen info type 2, pressure) are written back into
+   the controller as `0x7F 0x40 <opcode>` commands, refused until a fresh
+   uplink frame. We do the enable only: our parser skips the uplink frame
+   as an out-of-range slot, sends no 0x7F 0x40, has no bridge, and nothing
+   is bonded. Firmware (fw_ver 0x15, byte-identical) and DT pen
+   configuration are at parity; the FAE-firmware theory was refuted by the
+   verifiers. Leading hypothesis H1: the pen transmits only after the
+   BLE-delivered timing table; H2 (the controller's decoder opens on the
+   host-side acks alone, no radio needed) is the cheapest decisive test;
+   also H3 pen asleep/bond-bound, H4 charger-mode 0x53 never sent, H6 our
+   adapter carries the stock BT address without the pen's bond key.
+   - N0 owner's hand, nothing written: evtest on event4 with USB and the
+     charger unplugged while writing (H4); the interrupt-reaction probe
+     (pen tip on the glass, buttons pressed, no finger, against a 60 s
+     idle baseline of NVT-ts-spi in /proc/interrupts); a phone BLE scan
+     with the tip pressed (presence and name only).
+   - N1 frame logger (module swap, logging only): log every frame with
+     point_data[1]>>3 == 30, any 0xF0 pen-ID packet and bytes 109..111.
+     PASS: a page-6 frame with [3]=0, [4]=20 within 200 ms of the 0x10 ack
+     — the controller waits for the handshake exactly as on stock.
+   - N2 downlink probe (module swap, a debugfs pen_cmd node): after the
+     ack and the N1 frame write TIMING_CFG_ACK 0x02, CON_STA 0x20, CFG_ID
+     0x01, PEN_INFO 0x48, then SIZE_INFO, owner writing throughout. PASS:
+     point_data[66] leaves 0xFF / BTN_TOOL_PEN events → H2 proven, the
+     BLE leg becomes polish (pressure source, battery, double-click).
+     FAIL: H1 confirmed as necessary. Keep the stock gate semantics
+     (downlink only after a fresh uplink) in the driver either way.
+   - N3 = the 3b MT5806 flight: proof of life (present, pen_soc) and the
+     pen's address (root-only, read, never recorded) for N4.
+   - N4 BlueZ bond (owner's go-ahead for radio actions): btmon passive
+     capture while the pen wakes, scan or direct connect, pair, trust.
+     PASS: bonded, uhid "OnePlus Stylo Pro" devices, the vendor
+     characteristics (0x003d/0x0045/0x0048/0x004b, Battery 0x0021) and
+     the 0x0067 characteristic enumerated; persists across a reboot. FAIL:
+     H6 — retry with the adapter on its generated address, then the stock
+     one; if both refuse, the pen's old bond must be cleared (procedure
+     unknown; owner question: does the pen have a reset gesture?).
+   - N5 bridge: one kernel rung exposing each uplink block (sysfs + uevent
+     or a misc device) and accepting the downlink opcodes through the N2
+     node; a BSD-3-Clause daemon on the rootfs that, over BlueZ D-Bus,
+     enables notifications on 0x003d, sends the status request, writes
+     the block to 0x0067 and maps the pen's notifications to
+     CON_STA/CFG_ID/PEN_INFO/TIMING_CFG_ACK/PRESS. PASS: BTN_TOOL_PEN,
+     position and non-zero pressure within 2 s of the pen touching the
+     glass after a resume; survives 10 blank/unblank cycles.
+   - N6 polish: pressure source, battery level, double-click, the A.3
+     four-corner gate, libinput tablet mode and a drawing app; 30-min soak.
+   - Fidelity patch carried with N1 regardless: write the 0x11 deep-sleep
+     in nvt_ts_suspend; pen command conditional on the REK wait and also
+     from Boot_Update_Firmware; IRQ trigger from the DT flags once the
+     pin bias is reconciled; charger 0x53/0x51 from a power-supply
+     notifier. Licensing: driver work GPL-2.0-only (constants and
+     behaviour taken from the GPL-2.0 vendor tree as interface facts,
+     never code), the daemon BSD-3-Clause; offer the driver ABI to
+     Perpetua only once N5 passes.
 4. Thermal baseline during the C5 soak (tb323fu's thermal-stress pattern:
    600 s all-core + glmark2; CPU zones held under 95 °C, no critical
    trip). The ADC/NTC zones (Perpetua cf2156997bf7, 573a270f7b90 +
@@ -461,7 +524,7 @@ shared-kernel Android apps. Scoped when C5 lands.
 | Step | State | What it still needs |
 |---|---|---|
 | #42 video fix set | **flashed** (boot_b 82219574) | — |
-| #43 stylus input (0037–0039) | **RAM-booted and gated** 2026-11-02 21:14 (boot-43-e9368756): capabilities, udev and libinput all PASS; the pen itself silent — pen scanning in the controller is off until the stock 0x7F/0x10 command, now patch 0040 (flown live as a module swap, acknowledged), still no pen packets on any of the six pen-protocol values | pen research run (pen-protocol-work/report.md) → decide the Bluetooth-side sync work; #43+0040 are flashed with #44 |
+| #43 stylus input (0037–0039) | **RAM-booted and gated** 2026-11-02 21:14 (boot-43-e9368756): capabilities, udev and libinput all PASS; the pen itself silent — pen scanning in the controller is off until the stock 0x7F/0x10 command, now patch 0040 (flown live as a module swap, acknowledged), still no pen packets on any of the six pen-protocol values | research done (report in /srv/ubuntu-iceland/build/pen-protocol-work): the Stylo Pro is an OPP pen — stock brokers a 20-byte timing block from the controller to the pen over BLE and the pen's replies back as 0x7F 0x40 commands; ladder A.3c (N0–N6) written; the cheapest decisive test is N2 (host-side acks, no radio), after the #44 flash; #43+0040 are flashed with #44 |
 | Audio hardening + processed mic (0.2.26) + clock domains (0.2.27) | **installed and measured** 2026-11-02: audio-check "present"; both inputs listed, "voice processing" the default (owner: much higher level); the crackle that came with it traced to the two DSP-timed PCMs sharing a clock domain, fixed by capture clock.name + sink priority.driver 3000 + min-quantum 2048: 0 resyncs / 0 xruns in a 60 s soak with both sources open during playback (51 per 3 min before); owner: "rock solid" | owed: the numeric speech-level gate (≈ −40 dBFS processed vs ≈ −54 raw, needs the owner's voice for 12 s) and a call-style echo test |
 | Wi-Fi idle drops (0.2.27) | root cause: station power save on, our powersave=2 drop-in outranked by Ubuntu's default file; moved to /etc zz- name | watch: no further unreachable-when-idle events; the DFS-roam "regulatory prevented using AP config" + ath12k "Timeout while waiting for regulatory update" lines → C6/P (ath12k fixes after the pin) |
 | #44 pen charger (0056–0062) + stylus 0037–0040 | **building** since 2026-11-02 22:5x (60 patches, promoted; log out/build-44.log) | RAM boot; gate order: PMH0101 regulators (no cmd-db debugfs on this kernel, so the RPMh resources LS3B/LS4B can only be proven by the boot — abort criterion) → driver bound, fw 0x20022, hBoost 7000 mV acked → pen on the magnet edge → battmgr telemetry unchanged; then ONE flash for #43+#44 |

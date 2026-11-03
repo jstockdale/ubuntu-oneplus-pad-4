@@ -2615,3 +2615,45 @@ C6/P watch list (ath12k fixes after the pin). The interface has been
 wlan0, not wlp1s0, since 0.2.25: our .link sets the MAC without a
 NamePolicy, so udev leaves the kernel name — harmless; scripts updated as
 met.
+
+## 2026-11-02 — Pen research (9-agent run): the Stylo Pro is an "OPP" pen that needs a Bluetooth-brokered handshake
+
+Report: /srv/ubuntu-iceland/build/pen-protocol-work/report.md (570 lines; the
+notes beside it hold stock log extracts with addresses and must never enter
+the repo). Verified from OnePlus's vendor tree, the stock ramdisks and —
+decisively — the stock OS's own logcat/kmsg store found in the capture's
+sdf LUN and oplusreserve images: (1) the only pen-enable command on this
+tablet is `0x7F 0x10 <1 screen-on | 2 suspend>` — our 0040 is exactly it,
+and the five other sub-commands are unreachable (pen_support_opp
+short-circuits the per-type switch), so the sweep's null result for them
+was uninformative; (2) stock enables scanning only after userspace writes
+the pencil type to /proc/touchpanel/pencil_connected, which the pen app
+does once it has read the pen's firmware version over a bonded BLE link;
+(3) 107–161 ms after the enable the controller emits a 20-byte "uplink
+timing" frame (input id 30, function page 6) that the stock daemon
+(touchDaemon, /dev/tp_misc ioctl) hands to the Bluetooth stack, which
+writes it to the pen's GATT handle 0x0067 with write-with-response; (4)
+the pen's replies (connection state, pen info "type 2", pressure) come
+back over BLE and are written into the controller as `0x7F 0x40 <opcode>`
+commands, which the stock kernel refuses until a fresh uplink frame has
+been seen; (5) our driver does step one only: it skips the uplink frame as
+an out-of-range touch slot, sends no 0x7F 0x40, has no bridge, and nothing
+is bonded. Firmware parity: our blob is byte-identical to the firmware the
+shipped stock DT carries and the stock log shows fw_ver 0x15 on every
+captured boot — the readers' "stock runs a different FAE build" inference
+was REFUTED by the verifiers; DT pen flags match and the live firmware
+reports the stock 12×8 pen electrode geometry. Verifiers also refuted the
+76-byte payload claim (it is 20 bytes here) and narrowed the downlink
+gating. Ranked: H1 (pen transmits only after the BLE-delivered timing
+table) leading; H2 (the controller's decoder is gated on the host-side SPI
+acks alone — fixable without a radio) is the cheapest decisive test; H3
+(pen asleep/bond-bound), H4 (charger-mode 0x53 never sent), H5 (no uplink
+frame on our kernel), H6 (our adapter now carries the stock BT address
+without the pen's bond key — the pen may directed-advertise to its old
+bond and refuse a new one). Excluded by evidence: packet dropping in our
+parser, IRQ edge, the panel-follower half state, the magnet state (screen
+off only), firmware mismatch. Ladder A.3c written into the plan (N0–N6):
+owner's-hand probes, a frame logger and a downlink-probe node (module
+swaps), the MT5806 flight as proof of life and address source, a BlueZ
+bond, then a small BSD-3-Clause bridge daemon; licensing: constants and
+behaviour taken from GPL-2.0 vendor code as interface facts, never code.
