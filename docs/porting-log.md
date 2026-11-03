@@ -1976,3 +1976,15 @@ diff vs #39 (938 .ko): exactly one — qcom-iris.ko.zst — so the RAM flight
 is one variable. The tablet's #39 module tree was backed up before the
 single module was pushed and depmod re-run. VP1 = `fastboot boot
 out/bundle/boot.img` (RAM only), then scratchpad/flight-vp1.sh.
+
+## 2026-11-02 — C5 on glass: greeter seen by the owner; T2 tap gate CLOSED
+
+Owner at the device: GDM greeter visible on the panel; logging in through
+the on-screen keyboard. The touch interrupt counter (IRQ 254, NVT-ts-spi
+on msmgpio) moved 84 → 456 with those taps, on the same boot as the three
+blank/unblank cycles — touch-plan T2 is closed: touch survives panel
+power-down/up with the 0007/0008 panel-follower patches. Greeter facts
+from mutter over its session bus: DSI-1 3392×2400@120 (DRM-preferred;
+144 available), preferred scale 2.0, "Unknown experimental feature
+'scale-monitor-framebuffer'" is GNOME 50's harmless note about a retired
+key.
