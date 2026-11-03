@@ -1,5 +1,46 @@
 # Sensors/IMU bring-up plan (C4/C5 feeder): the sensor hub route to GNOME auto-rotation
 
+> **Corrections from the 2026-11-02 readiness review** (checked against the
+> pinned tree, the live tablet, the Debian/Ubuntu archives and the Fedora
+> port's current tree, now cloned under /srv/ubuntu-iceland/ref/):
+> - Patch numbering is stale: the series is 0001–0028 plus the VPU set
+>   0029–0036; the non-secure-domain DT fix (G1) and the hall node (G8)
+>   take the next free numbers after that.
+> - S0/S2 baseline is wrong: `qrtr-lookup` on the flashed system ALREADY
+>   lists QMI service 400 "Snapdragon Sensor Core service" (node 5) with no
+>   hexagonrpcd ever run, so "SSC absent until attached" is false and
+>   "qrtr-lookup now lists SSC" cannot be the S2 pass signal; use
+>   hexagonrpcd's file-request stream and, in S4, `ssccli` output.
+> - S0 step 3 cannot harvest socinfo from the tablet: mainline
+>   /sys/devices/soc0 has only family, machine, revision, serial_number,
+>   soc_id (661, 2.0). hw_platform/platform_subtype/platform_subtype_id/
+>   platform_version come from Fedora's generic socinfo set (hw_platform =
+>   "MTP"; three values still to fetch).
+> - Archive facts: Debian sid libssc is 0.4.4-2 (binaries libssc2,
+>   libssc-bin, libssc-dev); hexagonrpc is 0.4.0-2 in sid and 0.5.0-1 in
+>   experimental (rebase G3 on the 0.5.0-1 packaging, not Ubuntu's 0.4.0
+>   source); iio-sensor-proxy 3.9-1 confirmed. Ubuntu 26.04 ships none of
+>   the needed pieces (iio-sensor-proxy 3.8-1 without SSC; libssc absent).
+> - The archive hexagonrpcd 0.4.0 ships hexagonrpcd.service (+ -suspend/
+>   -resume), not hexagonrpcd-adsp-sensorspd.service; the plan's unit names
+>   hold only for the 0.5.0-based package we build.
+> - G9 "0170+0194 as one no-map patch" is contradicted by the porting log
+>   (0194 conflicts and presupposes a linux-next fastrpc change); if a
+>   remote heap is ever needed it is 0170 alone. The tablet logs "no
+>   reserved DMA memory for FASTRPC" for adsp and cdsp today.
+> - Fedora's packaging README now says hexagonrpcd runs as root and the hub
+>   writes below its registry directory, contradicting its User=fastrpc
+>   drop-in; treat "read-only registry is the proven steady state" as
+>   unverified. Their iio-sensor-proxy delta is now 0001/0002 only.
+> - Secure-node attach (open question 2) is reconfirmed in code at the pin
+>   (fastrpc.c is_session_rejected only rejects a non-secure fd on a secure
+>   channel; INIT_ATTACH_SNS has no secure gate) but is untested on the
+>   device. Perpetua's head b7d639cfb282 touches none of fastrpc.c,
+>   qcom_pd_mapper.c, the adsp fastrpc node or a lid/hall node.
+> - The per-unit registry (352 files) is calibration data: never in the
+>   repo, never in a published overlay. Idle datum for S4: ipcc_0 ≈ 1.3
+>   interrupts/s.
+
 Written 2026-11-01 from source research only — no device contact, no tree
 edits. Kernel of record: perpetua pin `7c98a10e6bb7` (pristine
 `/srv/ubuntu-iceland/linux-perpetua`, worktree

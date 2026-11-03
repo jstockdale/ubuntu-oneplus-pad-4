@@ -1,5 +1,33 @@
 # Media & misc plan: VPU, haptics, GNSS, suspend scoping, cameras
 
+> **Corrections from the 2026-11-02 readiness review** (checked against the
+> pinned tree, the build config, the overlay and the live tablet):
+> - Patch numbering: the VPU set does not start at "0011"; the series is
+>   0001–0028 (0029 withdrawn), so the VPU patches are 0029–0036 as
+>   imported on 2026-11-02 (0029 platform data, 0030 dtsi node, 0031 our
+>   board enable, 0032–0035 buffer-size fixes, 0036 bus_info).
+> - §1.4/§1.5 cite a board patch "0062-…-enable-the-video-codec"; no such
+>   entry exists in the current queue — the four-line `&iris` override was
+>   written as our own patch 0031 (content verified against the Fedora
+>   board dts).
+> - §1.5's claim that 0036 (bus_info prefix) is already upstream is wrong
+>   for our tree: iris_vidc.c still formats "plat:%s:%s"; carried as 0036
+>   (cosmetic).
+> - The actual iris node (0035) has seven power domains (MVS0C, MVS0, MXC,
+>   MMCX, VPP0, VPP1, MVS0A), ten clocks, reset-names
+>   core_freerun_reset/vcodec0_core_freerun_reset and SMMU SIDs
+>   0x1940/0x1943/0x1944/0x1a20 — the SMMU watch in §1.6 must include
+>   0x1a20.
+> - VP2 needs gstreamer1.0-tools and -plugins-bad (h264parse/h265parse) in
+>   addition to -plugins-good; none of the three is installed (rootfs-only).
+> - Perpetua's head b7d639cfb282 (100 commits past the pin) still carries
+>   no iris work; nothing to adopt from a pin bump.
+> - The dtb-work scratch directory cited in the camera section is gone; the
+>   firmware choice (vpu40_2v.mbn) rests on the manifest and the Fedora
+>   port's working choice, not on a fresh stock-DT read.
+> - The config of record is /srv/ubuntu-iceland/out/kernel-iceland/
+>   kernel.config (the cited line numbers match it).
+
 Date: 2026-11-01 (research session; no device contact, no flights flown).
 Scope: the five remaining minor subsystems after C2/C3 — video decode/encode
 (iris VPU), haptics, GNSS/location, suspend (s2idle) scoping, and cameras —

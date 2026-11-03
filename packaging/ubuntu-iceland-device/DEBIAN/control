@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.20
+Version: 0.2.21
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -23,6 +23,11 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     bring-up cap, internal mics at stock levels) and the WirePlumber
     soft-mixer rule, in front of the AudioReach topology the firmware
     overlay ships.
+  * desktop guards (C5, 0.2.21): fwupd pinned out (its scsi plugin can
+    write UFS firmware and this tablet has no recovery loader), systemd
+    sleep targets and fwupd units masked, power key ignored by logind
+    (long press powers off), GNOME and the GDM greeter default to no idle
+    suspend, an interactive power button and integer scaling;
   * audio service discovery: the userspace protection-domain mapper and
     name service (protection-domain-mapper, qrtr-tools) are masked, because
     the kernel's own qcom_pd_mapper serves this SoC and the userspace one,

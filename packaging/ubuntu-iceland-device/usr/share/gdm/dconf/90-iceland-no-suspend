@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# The GDM greeter has its own gsd-power: no idle suspend there either
+# (suspend untested, C6). Same mechanism as the gts9u port's greeter drop-in.
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+power-button-action='interactive'

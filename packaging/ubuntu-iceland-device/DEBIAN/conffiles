@@ -5,3 +5,7 @@
 /etc/initramfs-tools/scripts/init-top/iceland-usb-debug
 /etc/systemd/network/80-iceland-usb0.network
 /etc/systemd/zram-generator.conf.d/iceland.conf
+/etc/apt/preferences.d/90-iceland-no-fwupd
+/etc/systemd/logind.conf.d/10-iceland-powerkey.conf
+/etc/dconf/profile/user
+/etc/dconf/db/local.d/00-iceland-power

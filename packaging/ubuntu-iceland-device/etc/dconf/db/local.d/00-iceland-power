@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# C5 defaults for every GNOME session on the OnePlus Pad 4 (users can still
+# change them; `dconf update` compiles this into /etc/dconf/db/local).
+# - no idle suspend: s2idle/deep sleep is untested on this board (C6); the
+#   systemd sleep targets are masked as well, this keeps gsd-power quiet;
+# - power button: show GNOME's dialog instead of suspending;
+# - integer scaling only: the sibling tb323fu port saw mutter pick 2.2857x
+#   with fractional scaling on and then refuse every display change.
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+power-button-action='interactive'
+
+[org/gnome/mutter]
+experimental-features=[]

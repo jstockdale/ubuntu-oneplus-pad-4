@@ -39,6 +39,16 @@ case "$1" in
 			# qrtr-ns is the kernel name service's dormant twin. Masked, not
 			# removed, so the packages can stay installed.
 			systemctl mask pd-mapper.service qrtr-ns.service >/dev/null 2>&1 || true
+			# 0.2.21 (C5 guards): suspend is untested on this board and fwupd
+			# must never run here (see /etc/apt/preferences.d/90-iceland-no-fwupd);
+			# masking units that are not installed is harmless and sticks.
+			systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+			systemctl mask fwupd.service fwupd.socket fwupd-refresh.timer fwupd-refresh.service >/dev/null 2>&1 || true
+		fi
+		# 0.2.21: compile the dconf system db when dconf is present (it is not
+		# on the minimal profile; the desktop install runs dconf's own trigger).
+		if command -v dconf >/dev/null 2>&1; then
+			dconf update >/dev/null 2>&1 || true
 		fi
 		# A changed conf.d must reach the installed initramfs; harmless in
 		# the image build, where make-initramfs.sh regenerates anyway.

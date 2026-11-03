@@ -9,6 +9,8 @@ case "$1" in
 		# race they cause does not care whether this package is installed).
 		if command -v systemctl >/dev/null 2>&1; then
 			systemctl unmask pd-mapper.service qrtr-ns.service >/dev/null 2>&1 || true
+			systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+			systemctl unmask fwupd.service fwupd.socket fwupd-refresh.timer fwupd-refresh.service >/dev/null 2>&1 || true
 		fi
 		;;
 esac

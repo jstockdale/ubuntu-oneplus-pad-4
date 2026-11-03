@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# C5 guard (bring-up plan): fwupd's scsi plugin can offer UFS firmware
+# updates (org.jedec.ufs, SCSI WRITE BUFFER). There is no public recovery
+# loader for this tablet, so no tool that can write its UFS firmware is
+# allowed on the system. ubuntu-desktop-minimal pulls fwupd + fwupd-signed
+# through Recommends; this pin keeps apt from ever installing them. Remove
+# this file (and the masks in the device package) only with a tested
+# recovery path for the storage controller.
+Package: fwupd fwupd-signed
+Pin: release *
+Pin-Priority: -1

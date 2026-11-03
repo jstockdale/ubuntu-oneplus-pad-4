@@ -359,8 +359,9 @@ RAM boots and future kernel updates (RAM-boot gate first, always).
   C2). Manual modprobe bypasses blacklists by design: that is the
   bisect lever, use it deliberately.
 - GPU: firmware per docs/firmware-manifest.md. Weston launch for
-  tests: mkdir/export XDG_RUNTIME_DIR, --continue-without-input while
-  touch is blacklisted (no --tty in weston 14); stop with
+  tests: mkdir/export XDG_RUNTIME_DIR (no --tty in weston 14; the
+  --continue-without-input workaround retired with the touch blacklist in
+  0.2.16); stop with
   `pkill -x weston` (never pkill -f from an ssh one-liner — it
   matches itself).
 - Never edit a script while it is running. bash reads a script file
