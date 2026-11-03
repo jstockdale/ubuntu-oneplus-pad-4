@@ -2091,3 +2091,12 @@ refcount), 0292 (SMPTE 170M signalling). All 13 apply on 0001–0036;
 imported as 0043–0055 (0037–0042 are reserved for the stylus patches in
 preparation), authorship kept. Build #42 = 49 patches kicked
 (build-vp1b.log). The tablet stays on the #41 RAM boot meanwhile.
+Addendum: the H.264/HEVC "instant failures" were the test clips. gst-
+discoverer on the tablet: the host-made H.264 file is High 4:4:4 Profile,
+10-bit (x264enc took the test source's native format); the decoder
+advertises baseline/main/high/constrained-high at 8-bit 4:2:0 only, so
+GStreamer's refusal to link qtdemux→h264parse→v4l2h264dec was correct.
+Clips regenerated with explicit I420 (H.264 high, HEVC main, VP9
+profile 0), caps verified before use. Rule for the media plan: verify a
+test clip's profile/chroma/bit depth with gst-discoverer before blaming
+a decoder. Only the VP9 run exercised the firmware (→ system error).
