@@ -1717,3 +1717,108 @@ Image/DTB rebuild, bundle flight, flash). Fedora 0194 (ADSP remote-heap
 no-map) is NOT adopted: it conflicts and is a prerequisite for a
 linux-next fastrpc backport we do not carry. Proof of the race fix is
 statistical (census boots); 0029 is correct on its own merits.
+
+## 2026-11-02 — CORRECTION: 0029 was a no-op; the real audio boot race was
+## the userspace pd-mapper. FIXED (rootfs-only, 0.2.20), 10/10 reboots clean.
+
+0029 withdrawn. The claim behind it ("the signed ADSP image spans 0x5000000
+but the carveout is 0x4c00000") is true of kaanapali.dtsi — measured: the
+loadable ELF span of qcom/kaanapali/iceland/adsp.mbn is exactly 0x5000000
+(0x9f300000..0xa4300000, 80.0 MiB; ph51 is real code/data ending 1.3 MiB
+past the old boundary) — but it does not apply to this device: the board
+file kaanapali-oneplus-iceland.dts:21 does `/delete-node/ &adspslpi_mem;`
+and redefines adspslpi@a1400000 at :223 with `0x5000000`. The live DT on
+kernel #39 already reads `00 00 00 00 a1 40 00 00 00 00 00 00 05 00 00 00`
+and /proc/iomem starts System RAM at 0xa6400000. The DTB with and without
+0029 is identical for iceland, so the "hardening flight" would have tested
+nothing. Removed from the series (28 patches, 0001-0028); the mdt_loader
+bounds check (drivers/soc/qcom/mdt_loader.c:397 "segment outside memory
+range") would have refused the image outright had the carveout been short,
+which is the tell I should have checked first. Lesson, again: measure the
+live device before adopting a sibling's fix.
+
+The actual race, from the persistent journal (41 boots on this rootfs):
+three boots (-33, -22, -1) had "no soundcards". Signature in every one:
+ADSP "is now up" at ~2.3 s as always, then
+
+    PDR: service lookup for avs/audio failed: -6
+
+and never a single "Adding APR/GPR dev". -6 = -ENXIO = the ADSP's service
+locator answered but did not list avs/audio in msm/adsp/audio_pd.
+pdr_interface.c:448 returns without clearing need_locator_lookup, and
+pdr_locator_work only re-runs when a locator server (re)appears — so one
+wrong answer leaves audio dead until the next reboot (q6prm never probes,
+va_macro "unable to get macro clock", every macro/swr/card deferred).
+
+Why the ADSP sometimes did not list it: two protection-domain mappers were
+answering the DSP's domain query. The kernel's qcom_pd_mapper (=m,
+autoloaded on the qcom_common.pd-mapper auxiliary device) carries the
+kaanapali table (qcom_pd_mapper.c:394 kaanapali_domains = adsp audio, ois,
+root, sensor + cdsp root). Ubuntu's protection-domain-mapper package also
+runs pd-mapper.service, which reads JSON service lists from /lib/firmware
+— and the only one present is adspr.jsn (the ADSP root PD). Census of all
+41 boots, "Started pd-mapper.service" time vs the PDR outcome line:
+every failure had the userspace mapper up BEFORE the lookup (3 failures in
+8 such boots: -1 by 60 ms, -22 by 91 ms, -33 by 77 ms); 0 failures in the
+22 boots where it came up after. qrtr-ns.service is the kernel name
+service's dormant twin ("nameserver already running, going dormant").
+
+Fix: mask pd-mapper.service and qrtr-ns.service (device package 0.2.20
+postinst; postrm unmasks on purge). Rootfs-only — no kernel change, no
+flash. Applied live first (`systemctl mask --now`, mic still capturing),
+then an automatic 10-cycle reboot census over usb0: 10/10 boots published
+the audio PD at 2.29-2.38 s ("PDR: Indication received from
+msm/adsp/audio_pd"), card present, 2 GPR services each time. Not added:
+early loading of qrtr_smd/qcom_pd_mapper via modules-load.d — no evidence
+the kernel mapper was ever late (0/22), so it stays one variable per flight.
+
+Also measured on the way: adsp.mbn loadable span 0x5000000 (the board DT
+is right); CoreSight TNOC `111b8000.tn` is the only entry in
+devices_deferred (clock from aoss_qmp; harmless, not audio).
+
+## 2026-11-02 — Repository published: github.com/jstockdale/ubuntu-oneplus-pad-4
+
+Before the first push: history rewritten to drop out/kernel (a 39 MiB
+Image committed with the 2026-10-30 gadget-serial work) and out/ramdisk —
+148 commits kept, pack 424 KiB; full-history scan for credentials (none;
+the Wi-Fi profile was only ever applied by hand on the device) and device
+identifiers (only the fastboot serial in four provenance notes, kept on
+purpose). Licensing made explicit: BSD-3-Clause for everything this port
+wrote (SPDX headers on every script and config that takes a comment),
+GPL-2.0-only for kernel/patches (From/Signed-off-by completed on our
+own patches), MIT inherited by the three PipeWire speaker files from
+tb323fu-linux and acknowledged for the four scripts derived from the gts9u
+port; the Fedora iceland port's userspace (UCM, chain adaptation) carries
+attribution and a note that that repository declares no license. 0028 is
+prepared for Perpetua in docs/upstreaming.md. README rewritten with the
+"heavy development" banner at the top and the verified status table;
+hardware-status.md brought up to date.
+
+## 2026-11-02 — 0028 upstream status: Perpetua fixed READ_DONE itself today
+
+While preparing the submission (upstream head 5c1eafa7b755 still had both
+strict checks), perpetua/v7.3 moved to b7d639cfb282 and gained
+9ba37ef1db70 "ASoC: qcom: q6apm: accept short read-done responses"
+(Doctor Logix, 2026-11-02): READ_DONE now requires
+offsetofend(typeof(*rd_done), buf_addr_msw) — our 0028 READ_DONE hunk,
+with the comment "Kaanapali's DSP sends 56 bytes, short of the metadata
+fields at the end". So the microphone regression is fixed upstream
+independently (third implementation of the same fix: ours, Reixo0's
+fcabe5fd25c7, theirs). Consequences: 0028's READ_DONE hunk is dropped at
+the next pin bump (pin must pass 9ba37ef1db70); the WRITE_DONE hunk,
+which upstream still lacks, has no observed failure behind it on this
+device (its DSP sends the full 32 bytes) and is prepared as a one-line
+consistency patch (branch q6apm-write-done-payload-size in the local
+clone, docs/upstreaming.md) for the owner to open if wanted.
+
+Also seen on the branch since our pin, worth the next pin bump: kaanapali
+CPU passive cooling for every board (8bd03159587a), qcom_battmgr asking
+Oplus PD sources for 9 V (006b67a31bae), ath12k PCIe DRV wake knobs
+(476ac2f9e476), dpu/dp fixes for DisplayPort over USB-C.
+
+Bundle note: the 29-patch build kicked before 0029 was withdrawn finished
+as kernel #40; its DTB is byte-identical to #39's (0029 is a no-op for
+this board), the Image differs only by its build stamp. Nothing to fly or
+flash; #39 (a4060fbb) stays on boot_b. The tablet's initramfs regenerated
+by 0.2.20 (0e12c8cf) is staged at out/initrd.img-7.3.0+.post-0.2.20 for the
+next bundle build.

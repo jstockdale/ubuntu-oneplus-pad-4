@@ -1,13 +1,20 @@
 # Scratch space for anything too big or too proprietary for Git.
 work/
 
-# Build outputs live under $UBUNTU_WORKDIR, but belt and braces: no image,
-# archive or proprietary blob ever enters this repository.
+# Build outputs live under $UBUNTU_WORKDIR (default /srv/ubuntu-iceland); a
+# checkout-local out/ is never committed either (a 39 MiB kernel Image was
+# once committed by accident and had to be rewritten out of the history).
+out/
+
+# Belt and braces: no image, archive or proprietary blob ever enters this
+# repository.
 *.img
 *.zip
 *.deb
 *.mbn
 *.bin
+*.ko
+*.zst
 payload*.bin
 
 # Only checksums and release manifests are committed under artifacts/.
