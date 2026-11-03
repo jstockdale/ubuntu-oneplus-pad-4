@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.31
+Version: 0.2.33
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -51,6 +51,16 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     compressed-audio node into a second card object — the two objects
     fought over the ALSA device reservation and the loser was switched to
     profile "off", silencing the session (52-iceland-compress.conf);
+  * SuperVOOC policy at boot (0.2.32/0.2.33): a real boot on 2026-11-03
+    came up in Fast although 75-iceland-charging.rules wrote Standard on
+    every hand-triggered add event — the kernel emits no "add" uevent for
+    this supply at all (udevadm monitor on a module reload: "change" and
+    "remove" only), so a rule on "add" can never see a real appearance.
+    The rule now tags the supply on add or change and iceland-charging-
+    policy.service writes the policy once udev is done with the device,
+    and at boot on its own; the unit is idempotent and leaves the driver
+    alone while /run/iceland/svooc-opt-in exists (the staged-session script
+    sets it), so a change event during a session cannot end it;
   * SuperVOOC policy (0.2.30): the sc8547_svooc session driver boots in
     Fast, where it runs a charge-pump session the moment a VOOC adapter
     identifies; 75-iceland-charging.rules writes Standard when the supply

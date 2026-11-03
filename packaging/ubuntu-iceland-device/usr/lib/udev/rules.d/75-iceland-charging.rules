@@ -8,6 +8,19 @@
 # passed (rung P: the driver picks the session current from the charge
 # level — 2 A above 85 %, 3 A from 56 %, up to 6.2 A at 55 % and below —
 # so the stages are run at those charge levels with the thermistors
-# logged), start every boot in Standard; the session script opts in
-# deliberately. Remove this rule when the validation lands.
-SUBSYSTEM=="power_supply", KERNEL=="sc8547-svooc", ACTION=="add", ATTR{charge_types}="Standard"
+# logged), every boot starts in Standard; the session script opts in
+# deliberately (a flag under /run/iceland tells the policy unit to leave
+# the opt-in alone). Remove this rule and the unit when the validation
+# lands.
+#
+# Why the rule hands the device to systemd instead of writing the
+# attribute (0.2.30 did, and it held only on hand-triggered events): the
+# kernel never emits an "add" uevent for this supply — a module reload
+# watched with udevadm monitor on 2026-11-03 showed "change" and "remove"
+# for it and no "add" — because the power-supply core's add uevent is
+# built from get_property calls that fail before the supply is marked
+# usable, and a failed uevent is dropped silently. The "change" events do
+# arrive, so the device is tagged on add or change and the oneshot policy
+# unit runs once udev has finished with it (systemd starts the wanted unit
+# when the device is first seen, and again after a remove/re-add).
+SUBSYSTEM=="power_supply", KERNEL=="sc8547-svooc", ACTION=="add|change", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iceland-charging-policy.service"

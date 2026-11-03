@@ -14,6 +14,7 @@ case "$1" in
 			/etc/systemd/system/sysinit.target.wants/iceland-radio-ids.service \
 			/etc/systemd/system/multi-user.target.wants/ubuntu-iceland-usb-gadget.service \
 			/etc/systemd/system/multi-user.target.wants/iceland-audio-check.service \
+			/etc/systemd/system/multi-user.target.wants/iceland-charging-policy.service \
 			/etc/systemd/system/multi-user.target.wants/iceland-pen.service \
 			/etc/systemd/system/bluetooth.target.wants/iceland-bdaddr.service \
 			/etc/systemd/user/wireplumber.service.wants/iceland-speaker-default.service

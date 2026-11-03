@@ -49,6 +49,10 @@ case "$1" in
 			# 0.2.26: the audio chain's modules are listed in modules-load.d;
 			# this unit witnesses the card after boot and repairs a miss.
 			systemctl enable iceland-audio-check.service >/dev/null 2>&1 || true
+			# 0.2.32: the SuperVOOC policy unit — started by udev through
+			# SYSTEMD_WANTS when the supply appears and at boot; a direct
+			# ATTR write from the rule never held on a real add event.
+			systemctl enable iceland-charging-policy.service >/dev/null 2>&1 || true
 			# 0.2.28: the Stylo Pro handshake bridge; the unit's conditions
 			# keep it idle until the kernel exposes pen_uplink, and the daemon
 			# itself waits for the bonded pen. A running daemon keeps the old

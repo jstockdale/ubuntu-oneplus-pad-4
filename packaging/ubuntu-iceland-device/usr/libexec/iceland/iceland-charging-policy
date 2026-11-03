@@ -1,0 +1,50 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4: apply the SuperVOOC policy. The sc8547_svooc session driver
+# probes in Fast and would run a charge-pump session as soon as a VOOC
+# adapter identifies on a 5 V DCP source; until this port's staged validation
+# has passed the driver is held in Standard (no session; PD charging through
+# battmgr is untouched) and the validation opts in by hand.
+#
+# Runs at boot (multi-user.target) and whenever 75-iceland-charging.rules
+# tags the supply (udev "add" or "change": the kernel emits no "add" for this
+# supply, see the rule). Idempotent: writes only when the mode is not the
+# policy, and never while an opt-in flag exists — the session script creates
+# /run/iceland/svooc-opt-in before it writes Fast and removes it when the
+# session is over, so a change event during a staged session cannot end it.
+# Every decision is logged under the tag iceland-charging-policy.
+set -u
+
+MODE=${ICELAND_SVOOC_MODE:-Standard}
+SUPPLY=/sys/class/power_supply/sc8547-svooc/charge_types
+FLAG=/run/iceland/svooc-opt-in
+WAIT=${ICELAND_SVOOC_WAIT:-90}
+
+log() { logger -t iceland-charging-policy -p "user.$1" -- "$2"; }
+now() { cut -d' ' -f1 /proc/uptime; }
+
+i=0
+while [ ! -f "$SUPPLY" ] && [ "$i" -lt "$WAIT" ]; do
+	sleep 1; i=$((i + 1))
+done
+if [ ! -f "$SUPPLY" ]; then
+	log warning "no sc8547-svooc supply after $WAIT s; nothing to set (pumps not bound?)"
+	exit 0
+fi
+
+before=$(cat "$SUPPLY")
+if [ -e "$FLAG" ]; then
+	log info "opt-in flag present; leaving charge_types '$before' alone at $(now) s"
+	exit 0
+fi
+case "$before" in
+	*"[$MODE]"*)
+		log info "charge_types already '$before' at $(now) s"
+		exit 0 ;;
+esac
+if printf '%s\n' "$MODE" > "$SUPPLY" 2>/dev/null; then
+	log info "charge_types '$before' -> '$(cat "$SUPPLY")' at $(now) s"
+else
+	log err "could not write $MODE to $SUPPLY (was '$before')"
+fi
+exit 0

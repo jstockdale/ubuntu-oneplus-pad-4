@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4: hold the SuperVOOC session driver in Standard at boot (see
+# /usr/libexec/iceland/iceland-charging-policy). The udev rule
+# 75-iceland-charging.rules covers hotplug and module reloads; this unit
+# covers the boot, where the supply's add event has been seen to be lost.
+[Unit]
+Description=OnePlus Pad 4 SuperVOOC charging policy
+ConditionKernelCommandLine=!iceland.svooc=fast
+After=systemd-udev-trigger.service
+DefaultDependencies=no
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/iceland/iceland-charging-policy
+RemainAfterExit=no
+TimeoutStartSec=150
+
+[Install]
+WantedBy=multi-user.target

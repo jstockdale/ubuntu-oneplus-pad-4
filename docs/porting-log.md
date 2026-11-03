@@ -2868,3 +2868,55 @@ regression, and the #44 "pen charges" evidence stands for the old pin only.
 Lesson for the pin-bump checklist: after a replay with `git am -3`, grep
 every carried match table against the board file's compatibles at the new
 pin — a clean apply says nothing about a renamed string.
+
+
+## 2026-11-03 — Charging ladder on the Anker: 9 V rate PASS, connected boot PASS; the SuperVOOC policy did not survive a real boot (0.2.32/0.2.33)
+
+With the tablet on the owner's Anker PD supply at 84 %: 8.80 V × 1.49 A =
+13.1 W in, ≈ 9.6 W into the cell at 4.37 V, ICL 1.5 A — the 9 V contract
+at the firmware's PD cap (stock limits a PD source to 13.5 W), rung P item
+(a) PASS. The charger's PD identity cannot be read on this kernel: the
+Type-C partner's identity attributes are empty and UCSI exposes no source
+capabilities (the ucsi source psy reads 0), so whether the Anker is an
+OPPO-licensed SUPERVOOC unit is not decidable from the tablet; the vendor
+charger code says what stock does with any PD PPS source: adapter
+authentication over PD (pdsvooc_id_adapter → oplus_pps_verify_adapter), full
+power on success, otherwise the third-party PPS curve capped at 33 W
+(SUPPORT_THIRD_PPS_POWER) — PPS either way, never VOOC frames on D+/D-,
+which is what the VOOC session driver speaks. The PPS direct-charge rung is
+the path for this adapter; its research run is in progress.
+
+Connected boot (rebooted with the Anker attached): the contract is up from
+boot — PD_PPS 8.80 V × 1.49 A at the census, 85 %, Charging; card at
+~9 s, the WirePlumber race netted by the guard again, pen daemon up and the
+pen reconnected; 68 error lines. Three "failed to send synthetic uevent:
+-11" lines for the battmgr supplies at 1.66 s are the coldplug trigger
+hitting qcom_battmgr before its firmware service is up (its get_property
+answers EAGAIN) — inferred from the timing, benign. Wi-Fi joined slowly on
+this boot (ssh after 293 s; NetworkManager-wait-online failed), and dropped
+for one second at 679 s with "Timeout while waiting for regulatory update"
+on the reassociation — the known ath12k watch item, now with two data
+points on #45.
+
+The census also showed charge_types "[Fast] Standard": the 0.2.30 udev
+rule had not applied at boot. udev's view: `udevadm test` matches the rule;
+a hand-triggered add writes Standard; but on a real appearance of the
+supply nothing happens. `udevadm monitor` during a module reload shows the
+kernel emitting "change" and "remove" for power_supply/sc8547-svooc and
+no "add" at all (the parent vooc-phy auxiliary device gets add/bind), so a
+rule on ACTION=="add" can never see the supply on its own — reproduced 3/3
+by reloading sc8547_svooc. The power-supply core is written to emit the
+add with empty properties (use_cnt is raised after device_add() on purpose
+and get_property's ENODEV is skipped), so where this add is lost is not
+yet known — a kprobe on kobject_uevent_env for that kobject is the next
+step before any report. Fix in the package: 0.2.32 added
+iceland-charging-policy.service (waits for the supply after coldplug,
+writes the policy, logs before/after); 0.2.33 makes the udev rule tag the
+supply on add|change with SYSTEMD_WANTS instead of writing the attribute,
+makes the unit idempotent, and gives it an opt-in flag
+(/run/iceland/svooc-opt-in, set by svooc-session.sh before it writes Fast
+and cleared on abort or "end") so a change event during a staged session
+cannot end it. Verified: after each of three reloads the unit ran from the
+change event and wrote Standard within four seconds; with the flag set it
+left Fast alone; the install-time trigger ran it too. The boot-time path
+is verified at the next boot (#46 RAM boot).
