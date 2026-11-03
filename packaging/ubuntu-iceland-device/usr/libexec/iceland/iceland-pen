@@ -164,8 +164,21 @@ class Pen:
         if not props.Get(DEV_IFACE, "Connected"):
             log.info("connecting to the pen")
             dev.Connect()
+        # BlueZ exposes the GATT characteristics only once service discovery
+        # has finished; resolving before that leaves the timing characteristic
+        # unknown and the handshake silently incomplete (seen at boot).
+        for _ in range(40):
+            if props.Get(DEV_IFACE, "ServicesResolved"):
+                break
+            time.sleep(0.25)
+        else:
+            log.warning("the pen's services did not resolve within 10 s; will retry")
+            return
         self.connected = True
         self.resolve()
+        if self.cfg.timing_uuid and self.cfg.timing_uuid not in self.chars:
+            log.warning("timing characteristic missing after resolve; will retry")
+            self.connected = False
 
     def resolve(self):
         self.chars = {}

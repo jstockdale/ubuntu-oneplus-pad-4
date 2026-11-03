@@ -11,3 +11,4 @@
 /etc/dconf/db/local.d/00-iceland-power
 /etc/NetworkManager/conf.d/zz-iceland-wifi.conf
 /etc/iceland/pen.conf
+/etc/libwacom/oneplus-pad4.tablet

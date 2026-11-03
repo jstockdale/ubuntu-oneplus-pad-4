@@ -28,8 +28,41 @@ wait_for_card() {
 	card_present
 }
 
+# The second net (0.2.29): the card can register while WirePlumber's first
+# pass over it is already under way; its UCM profile then fails to attach
+# and the card sits on "off"/"pro-audio" with no sink (seen on the first
+# boot of kernel #45, 2026-11-03: card at 8.24 s, WirePlumber's pass at
+# 8.28 s). A WirePlumber restart attaches HiFi. Check the owner's session
+# for an ALSA sink once it is up and restart WirePlumber once if none.
+check_session_sink() {
+	for uid_dir in /run/user/*; do
+		uid=$(basename "$uid_dir")
+		user=$(getent passwd "$uid" | cut -d: -f1) || continue
+		[ -S "$uid_dir/pipewire-0" ] || continue
+		if ! systemd-run --quiet --wait --pipe --uid="$uid" --gid="$uid" \
+			-E XDG_RUNTIME_DIR="$uid_dir" wpctl status 2>/dev/null | grep -q 'alsa_output\|Speakers (raw'; then
+			log warning "session of $user has no ALSA sink for $CARD at $(uptime_s) s; restarting WirePlumber once"
+			systemctl --user -M "$user@" restart wireplumber.service 2>&1 | logger -t iceland-audio-check -p user.warning
+			sleep 6
+			if systemd-run --quiet --wait --pipe --uid="$uid" --gid="$uid" \
+				-E XDG_RUNTIME_DIR="$uid_dir" wpctl status 2>/dev/null | grep -q 'alsa_output\|Speakers (raw'; then
+				log warning "ALSA sink present after the WirePlumber restart"
+			else
+				log err "still no ALSA sink after the WirePlumber restart"
+			fi
+		else
+			log info "session of $user has its ALSA sink"
+		fi
+	done
+}
+
 if wait_for_card "$WAIT_PRESENT"; then
 	log info "sound card $CARD present at $(uptime_s) s"
+	# the session comes up after this unit; give it time, then verify
+	i=0
+	while [ "$i" -lt 60 ] && ! ls /run/user/*/pipewire-0 >/dev/null 2>&1; do sleep 2; i=$((i + 1)); done
+	sleep 8
+	check_session_sink
 	exit 0
 fi
 

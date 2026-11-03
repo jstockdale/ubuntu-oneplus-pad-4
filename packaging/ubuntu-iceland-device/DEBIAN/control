@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.28
+Version: 0.2.29
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -42,6 +42,16 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     compressed-audio node into a second card object — the two objects
     fought over the ALSA device reservation and the loser was switched to
     profile "off", silencing the session (52-iceland-compress.conf);
+  * boot-time audio profile (0.2.29): the card can register while
+    WirePlumber's first pass over it is under way, and its UCM profile then
+    never attaches (no sink, card on "off"); iceland-audio-check now
+    verifies the session has an ALSA sink and restarts WirePlumber once if
+    not, logging the event;
+  * Graphics Tablets panel (0.2.29): libwacom identifies a tablet from the
+    udev PRODUCT property and rejects SPI, so 74-iceland-pen.rules presents
+    the NT36536 pen and touch devices as I2C for matching, and
+    /etc/libwacom/oneplus-pad4.tablet describes the tablet (kernel patch
+    0043 supplies the vendor/product ids);
   * pen handshake bridge (0.2.28): iceland-pen brokers the Stylo Pro's
     "OPP" handshake — the touch controller's uplink timing block (sysfs
     pen_uplink from kernel patch 0041) written to the pen over its bonded
