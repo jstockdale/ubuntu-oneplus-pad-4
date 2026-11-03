@@ -36,7 +36,7 @@ the same hardware are consulted constantly and credited throughout:
 
 ## Status
 
-Verified on this hardware by this port, as of 2026-11-02. Each ✅ has its
+Verified on this hardware by this port, as of 2026-11-03. Each ✅ has its
 evidence in [docs/hardware-status.md](docs/hardware-status.md) and the dated
 entry in [docs/porting-log.md](docs/porting-log.md); upstream claims never
 earn a ✅ here.
@@ -47,7 +47,7 @@ earn a ✅ here.
 | Display (dual-DSI NT36536, 3392×2400, 144 Hz) | ✅ | console and Wayland on glass; stock timings |
 | GPU (Adreno 840, Mesa 26 / freedreno) | ✅ | OpenGL ES 3.2, GL-composited Weston |
 | Touchscreen (10-point) | ✅ | auto-loads every boot, 30-minute soak clean; touch-to-wake not yet (planned) |
-| Stylus | 🟡 | writes with pressure, taps and hovers on kernel #44 with the Bluetooth-brokered handshake (bond + bridge daemon); barrel-button mapping and battery readout still owed |
+| Stylus | 🟡 | writes with pressure, taps (click) and hovers, barrel button = right click, listed in GNOME's Graphics Tablets panel — kernel #45 with the Bluetooth-brokered handshake (bond + bridge daemon, device package 0.2.29); double/long-press codes and battery readout still owed |
 | Backlight, buttons | ✅ | |
 | Wi-Fi (WCN7860 / ath12k) | ✅ | auto-joins; ssh over the air |
 | Bluetooth | 🟡 | controller up on the device's factory address; pairing untested |
@@ -55,7 +55,7 @@ earn a ✅ here.
 | Speakers (6× TFA9865) | ✅ | stock loudness behind a PipeWire protection chain |
 | Microphones | ✅ | kernel patch 0028 (see [Upstreaming](#upstreaming)); the processed "voice processing" input with stock's recorder gain arrives in device package 0.2.26 |
 | Wired headphones | 🟡 | path starts then stops; untested with a headset |
-| Battery telemetry, charging | 🟡 | telemetry ✅; charging at 5 V/≈10 W on our kernel pin — 9 V PD and SuperVOOC (≈55 W) are in Perpetua since Oct 31 and come with the pin bump |
+| Battery telemetry, charging | 🟡 | telemetry ✅; 9 V PD contract on kernel #45 (flashed 2026-11-03; the rate at a lower charge still to be measured); SuperVOOC (≈55 W) drivers bound, held in Standard until the staged validation with the OnePlus brick |
 | Thermal | 🟡 | zones registered; no policy daemon yet |
 | Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)); no auto-rotation until then |
 | Suspend / resume | ❓ | deliberately untested so far |

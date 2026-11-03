@@ -2799,3 +2799,64 @@ usb_temp_l 24.3, svooc_mos 28.7, subboard 27.9, usb_temp_r 24.6 °C); no
 thermal zones for them, so the session script reads the channels. The
 driver's probe defaults the mode to Fast (sc8547_svooc.c:1236) — written
 back to Standard for now, to be set deliberately for the staged test.
+
+
+## 2026-11-03 — #45 flashed to boot_b, lock-in PASS; SuperVOOC policy and the staged ladder (0.2.30)
+
+`fastboot flash boot_b boot-45-3cfb46cf.img` OKAY, rebooted from storage:
+kernel 7.3.0+ #45, boot_b sha 3cfb46cf verified, boot_a 1f11e2c6
+untouched, slot _b bootable and successful, qbootctl active. Census: iris
+okay (1080p H.264 decode, 302 frames), card at 9.22 s, every remoteproc
+up, touch, GDM, pen daemon active (two handshake replays), pen connected,
+libwacom "OnePlus Pad 4", 99 % on the Anker at PD_PPS 8.87 V × 1.00 A,
+deferred only 111b8000.tn, 63 error lines. Three failed units: two were
+the audio guard's own transient `wpctl status` units for the GDM greeter
+("Failed to determine credentials for user 60578" — the greeter runs as a
+dynamic user), the third systemd-networkd-wait-online (Wi-Fi is
+NetworkManager's; known, harmless).
+
+The WirePlumber race repeated on the flashed boot — card complete at
+8.23 s, WirePlumber's pass at 8.25 s (two instances: greeter and owner),
+no sink at 17.29 s, one restart, sink back — so it is a property of this
+pin, and the 0.2.29 guard is the working net. The greeter check was a
+false positive (its WirePlumber cannot take the card while the owner's
+session holds it) and every guard line was in the journal twice (stdout
+and logger). 0.2.30 limits the check to the login range (uid 1000–59999)
+and logs through logger only; verified after install: one line each,
+"session of ubuntu has its ALSA sink", no transient units.
+
+SuperVOOC policy: the sc8547_svooc driver sets Fast at probe, so the
+Standard written on #45's RAM boot was gone after the flash. 0.2.30 ships
+75-iceland-charging.rules, which writes Standard on the supply's add
+event (verified: `charge_types` reads "Fast [Standard]" after a trigger).
+In Standard the driver never starts a session — svooc_start, svooc_check
+and the retry path all test for Fast — and PD charging through battmgr is
+untouched. The rule goes away once the staged validation has passed; the
+owner wants Fast as the shipped default after that.
+
+The staged ladder is set by the charge level, not by a knob: the driver
+has no writable current limit. svooc_entry_ua() takes 2 A above 85 %, 3 A
+from 56 to 85 %, 6.2 A (SVOOC_MAX_UA) at 55 % and below, then the minimum
+with the thermal derate (pump die 60→70 °C, each thermistor soft→hard,
+cell 38→44 °C with a 1.5 A floor, 2.5 A cap below 21 °C), the taper by
+battery voltage (1.5 A from 4.46 V) and the 55 W budget. Admissible only
+with health Good, capacity < 90 %, cell 15–44 °C, battery 3.3–4.4 V and
+every thermistor under its soft limit; a session ends normally at 90 %.
+The second pump joins when the main pump's input current passes 1.4 A.
+The charger gate is unchanged: usb_type DCP or Apple-brick and VBUS
+4.5–5.5 V, two seconds after the plug. So: stage 1 (2 A, about ten
+minutes, self-terminating at 90 %) with the brick plugged at 86–89 %;
+stage 2 (3 A, single pump) at 60–84 %; stage 3 (up to 6.2 A, Denial's
+50–55 W envelope) at 55 % or below, cell cool.
+
+Discharge for the stages: the idle desktop draws 0.8 A (43 % brightness),
+which puts 50 % eight hours out; a four-core 70 % stress-ng load draws
+3.4–3.9 A at the battery but warmed the cell from 27 to 36 °C within four
+minutes, so the load runs under a thermostat (SIGSTOP above 36 °C,
+SIGCONT below 33 °C) with stops at the target, on charger attach and at
+40 °C (discharge-to-half.sh, device-local /tmp, first target 87 %).
+Witness for the sessions: journald is persistent (33 boots kept), NMI and
+soft-lockup detectors are on (hung_task 120 s, no panic), no pstore; the
+tethered usb0 witness in the plan cannot exist with the brick in the only
+port, so the witness is ssh over Wi-Fi plus the persistent journal and
+the host-side session log.

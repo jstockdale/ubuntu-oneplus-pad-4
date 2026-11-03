@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.29
+Version: 0.2.30
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -42,6 +42,15 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     compressed-audio node into a second card object — the two objects
     fought over the ALSA device reservation and the loser was switched to
     profile "off", silencing the session (52-iceland-compress.conf);
+  * SuperVOOC policy (0.2.30): the sc8547_svooc session driver boots in
+    Fast, where it runs a charge-pump session the moment a VOOC adapter
+    identifies; 75-iceland-charging.rules writes Standard when the supply
+    appears (no session; PD charging unaffected) until the staged
+    validation has passed, and the validation opts in by hand;
+  * audio guard scope (0.2.30): iceland-audio-check only checks the
+    owner's session (uid 1000–59999); the GDM greeter's dynamic user
+    produced a false "still no ALSA sink" plus two failed transient units,
+    and every line was recorded twice (stdout and logger);
   * boot-time audio profile (0.2.29): the card can register while
     WirePlumber's first pass over it is under way, and its UCM profile then
     never attaches (no sink, card on "off"); iceland-audio-check now

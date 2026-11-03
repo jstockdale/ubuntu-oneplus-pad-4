@@ -16,7 +16,9 @@ LIST=/usr/lib/modules-load.d/iceland-audio.conf
 WAIT_PRESENT=${ICELAND_AUDIO_WAIT:-40}
 WAIT_REPAIR=${ICELAND_AUDIO_REPAIR_WAIT:-30}
 
-log() { logger -t iceland-audio-check -p "user.$1" -- "$2"; echo "$2"; }
+# logger only: the unit's stdout also lands in the journal under this
+# identifier, so echoing every line as well recorded each one twice (0.2.30)
+log() { logger -t iceland-audio-check -p "user.$1" -- "$2"; }
 uptime_s() { cut -d' ' -f1 /proc/uptime; }
 card_present() { grep -q "\[$CARD" /proc/asound/cards 2>/dev/null; }
 wait_for_card() {
@@ -37,7 +39,15 @@ wait_for_card() {
 check_session_sink() {
 	for uid_dir in /run/user/*; do
 		uid=$(basename "$uid_dir")
-		user=$(getent passwd "$uid" | cut -d: -f1) || continue
+		# Only the owner's session (the regular-user range of login.defs).
+		# The GDM greeter runs as a dynamic user: its WirePlumber cannot
+		# take the card while the owner's session holds it, and systemd-run
+		# cannot resolve the uid, so the greeter check logged a false
+		# "still no ALSA sink" and left two failed transient units (0.2.30).
+		case "$uid" in ''|*[!0-9]*) continue ;; esac
+		[ "$uid" -ge 1000 ] && [ "$uid" -lt 60000 ] || continue
+		user=$(getent passwd "$uid" | cut -d: -f1)
+		[ -n "$user" ] || continue
 		[ -S "$uid_dir/pipewire-0" ] || continue
 		if ! systemd-run --quiet --wait --pipe --uid="$uid" --gid="$uid" \
 			-E XDG_RUNTIME_DIR="$uid_dir" wpctl status 2>/dev/null | grep -q 'alsa_output\|Speakers (raw'; then

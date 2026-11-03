@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4: SuperVOOC policy. Perpetua's sc8547_svooc driver comes up
+# with charge_types = Fast (sc8547_svooc.c, probe), i.e. it would run a
+# SuperVOOC session as soon as a VOOC adapter identifies on a 5 V DCP
+# source. In Standard the driver never starts a session (the start gate,
+# the retry path and the periodic check all require Fast) and PD charging
+# through battmgr is untouched. Until this port's staged validation has
+# passed (rung P: the driver picks the session current from the charge
+# level — 2 A above 85 %, 3 A from 56 %, up to 6.2 A at 55 % and below —
+# so the stages are run at those charge levels with the thermistors
+# logged), start every boot in Standard; the session script opts in
+# deliberately. Remove this rule when the validation lands.
+SUBSYSTEM=="power_supply", KERNEL=="sc8547-svooc", ACTION=="add", ATTR{charge_types}="Standard"
