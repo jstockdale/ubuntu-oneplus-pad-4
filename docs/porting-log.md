@@ -2968,3 +2968,54 @@ else restore the previous module) once the #46 build has released the
 build tree; pass = no timeout after associations, no boot-time country
 failure, and no "Connection to AP lost" over an afternoon; the modules
 then ride the rootfs tree into the #46 boot.
+
+
+## 2026-11-03 — Wi-Fi root cause: the firmware's 802.11d scan after every radio start swallows the 4-way handshake (and DHCP after roams)
+
+The first flight of 0064–0067 (ath12k.ko swapped live over Wi-Fi) turned
+into an outage and, with it, the evidence for the real problem. The new
+module probed and associated within 9 s, but wlan0 had no address after
+the swap script's 120 s window, so it restored the previous module — which
+then needed four more minutes to get an address. Both modules behave the
+same, so the timeline of this boot is the finding: every FIRST 4-way
+handshake after the radio comes up fails 7.2 s after association —
+11.1 → 18.3 s at boot, 199.3 → 206.5 s on NetworkManager's retry, 2695.2 →
+2702.5 s and 2817.0 → 2824.4 s after the two module reloads, 3101 → 3108 s
+after NetworkManager's restart — each time as "WPA: 4-Way Handshake failed
+- pre-shared key may be incorrect", reason=4 locally generated,
+CTRL-EVENT-SSID-TEMP-DISABLED (WRONG_KEY, 10 s), after which NetworkManager
+marks the activation failed at +120 s and retries a minute later; the
+second or third attempt, with the radio already up, succeeds. The two
+mid-day drops have the same shape: CONNECTED at 273.4 s, dhcp "no lease"
+at 280.5 s, disconnected at 285.3 s; CONNECTED at 669.1 s, "no lease" at
+676.1 s, disconnected at 678.9 s — connected, then nothing gets through
+for ~7 s, then beacon loss at ~12 s. The password is right (the same
+network connects on the later attempt every time).
+
+This is the signature the Fedora port's 0189 describes: with the 11d
+offload service the driver starts a firmware 11d scan right after a host
+scan whenever a station interface was (re)started, so the firmware scans
+all bands off-channel while mac80211 associates and runs the 4-way
+handshake — the first EAPOL never arrives, beacon loss follows after 7–9 s
+— and the vendor driver of this tablet runs with g11dSupportEnabled=0. The
+regulatory timeout (0064–0067) is the same scan's other symptom: the
+country it proposes is refused by the firmware and the dropped reply left
+the driver waiting 3 s. Carried as 0068 (enable_11d, default off); flown
+as the second module swap together with 0064–0067, with the swap script's
+window raised to 300 s and the handshake outcome logged.
+
+Flight 2 (0064–0068 as one ath12k.ko, live swap at 3349 s): the radio
+probed, the FIRST 4-way handshake completed (CONNECTED 8 s after the
+reload, handshake failures 0) and wlan0 had its address 24 s after the
+swap — against four to five minutes with the stock scan on; the probe was
+followed by no "Failed to set the requested Country" line, and three
+associations produced no "Timeout while waiting for regulatory update".
+One "Connection to AP lost" still came 12 s after the first connect, then
+a clean roam to another radio of the mesh — so that drop has a cause of
+its own (watch item: it has always come 10–12 s after a fresh connect;
+candidates are the mesh's client steering and a firmware channel-list
+switch after the regd update). The swapped module (5419efdc) stays in the
+rootfs tree and rides into the #46 boot; the previous one is under
+/var/backups/iceland. Package policy note: enable_11d is a module
+parameter, so a later Perpetua pin without 0068 will silently turn the
+scan back on — the pin-bump checklist gets "grep for enable_11d".
