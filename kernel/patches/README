@@ -5,10 +5,15 @@ Patches in this directory apply on top of the pinned Perpetua commit
 (scripts/fetch-perpetua.sh), in lexical order, with `git apply --index`, and
 the build fails loudly when one stops applying.
 
-Every file here is a change to the Linux kernel and is therefore licensed
-GPL-2.0-only (LICENSES/GPL-2.0-only.txt), whoever wrote it. Authorship is the
-`From:` line of each patch; the `Signed-off-by:` lines are the Developer
-Certificate of Origin of the people who wrote or carried it.
+A kernel patch is licensed like the file it changes (the kernel's own rule,
+Documentation/process/license-rules.rst): the driver and sound patches here
+modify GPL-2.0-only files and are GPL-2.0-only (LICENSES/GPL-2.0-only.txt);
+the device-tree patches (0001, 0005, 0022–0024, 0026) modify Qualcomm's
+`kaanapali*.dts*`, which carry `SPDX-License-Identifier: BSD-3-Clause`, and
+are BSD-3-Clause. Authorship is the `From:` line of each patch; the
+`Signed-off-by:` lines are the Developer Certificate of Origin (DCO 1.1) of
+the people who wrote or carried it, which is what the kernel and Perpetua
+require instead of a contributor agreement.
 
 Policy, inherited from both parent projects:
 

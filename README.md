@@ -177,14 +177,15 @@ ledger of everything carried here and where it is going is
 ## Licensing
 
 Everything written for this port is **BSD-3-Clause** ([LICENSE](LICENSE));
-the kernel patches are **GPL-2.0-only** as derivative works of Linux. Files
+the kernel patches take the license of the file they change — **GPL-2.0-only**
+for drivers, **BSD-3-Clause** for Qualcomm's device-tree files. Files
 derived from other projects keep their origin's license and say so in their
 header:
 
 | Path | License | Origin |
 |---|---|---|
 | `scripts/`, `configs/`, `packaging/`, `tests/`, `docs/` (default) | BSD-3-Clause | this port |
-| `kernel/patches/*.patch` | GPL-2.0-only | this port, the Fedora iceland port (mzak), infiniti-mainline (Victor Fuentes) — see the patch README |
+| `kernel/patches/*.patch` | GPL-2.0-only (drivers), BSD-3-Clause (Qualcomm device-tree files) — each patch takes the license of the file it changes | this port, the Fedora iceland port (mzak), infiniti-mainline (Victor Fuentes) — see the patch README |
 | `scripts/build-mainline-kernel.sh`, `build-ubuntu-rootfs.sh`, `build-rootfs-image.sh`, `stage-firmware.py` | BSD-3-Clause, portions MIT | derived from agcarbajo/ubuntu-galaxy-tab-s9-ultra (MIT) |
 | `configs/audio/topology/` | BSD-3-Clause (Linaro) | linux-msm/audioreach-topology, with the Fedora port's Pad 4 overlay under the same headers |
 | `packaging/…/62-iceland-speakers.conf`, `62-iceland-speaker-raw.conf`, `iceland-speaker-default` | MIT | joonhoekim/tb323fu-linux, adapted via the Fedora iceland port |
