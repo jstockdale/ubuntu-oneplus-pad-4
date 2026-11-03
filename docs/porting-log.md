@@ -2881,8 +2881,13 @@ capabilities (the ucsi source psy reads 0), so whether the Anker is an
 OPPO-licensed SUPERVOOC unit is not decidable from the tablet; the vendor
 charger code says what stock does with any PD PPS source: adapter
 authentication over PD (pdsvooc_id_adapter → oplus_pps_verify_adapter), full
-power on success, otherwise the third-party PPS curve capped at 33 W
-(SUPPORT_THIRD_PPS_POWER) — PPS either way, never VOOC frames on D+/D-,
+power on success, otherwise the third-party PPS curve — on this unit at up to 55 W, the
+PPS entry of its factory arbitration table (VOOC 80 / PPS 55 / PD 13 /
+QC 13); the 33 W constant SUPPORT_THIRD_PPS_POWER applies only to a
+retention path after repeated adapter-caused drops, and "33 W" from a
+third-party brick is just a 3 A APDO at 11 V (corrected 2026-11-03 by the
+PPS research synthesis, which read the vendor code and the factory device
+tree) — PPS either way, never VOOC frames on D+/D-,
 which is what the VOOC session driver speaks. The PPS direct-charge rung is
 the path for this adapter; its research run is in progress.
 
@@ -3049,3 +3054,38 @@ tablet; no failed units at all (NetworkManager-wait-online passes now that
 the join is fast); 71 error lines; deferred only 111b8000.tn; boot_b
 untouched (3cfb46cf). Flash of #46 next, then the module tree is already
 the right one (zero differences from #45 apart from the swapped ath12k).
+
+
+## 2026-11-03 — PD PPS research complete (plan revision 2); the firmware charger log is the witness; the A-series goes to implementation
+
+The research run (six readers over stock's PPS session, the firmware
+interface, Perpetua's drivers, mainline precedent, PD/PPS safety and the
+factory configuration; synthesis; three adversarial reviews — safety,
+feasibility, completeness — each "needs revision" with one blocking
+objection; revision 2 with a review log) produced a 150 KB plan under
+/srv/ubuntu-iceland/build/pps-work/ (research material, not committed; its
+rung Q summary is in bringup-plan.md). The load-bearing facts: stock's
+arbitration table for this unit lists PPS at 55 W (the "33 W" is a
+retention constant, not a cap — the porting log's earlier sentence is
+corrected in place); the firmware interface is two properties (29 mV /
+30 mA, one pair per request), a read-buffer opcode for the seven source
+PDOs, SET_PDO 5000 to leave, and three notifications Perpetua logs as
+unknown; UCSI publishes nothing on this firmware; Denial's earlier PPS code
+never ran and is not recoverable from any ref. The reviews changed the
+design in three places that matter: the pump's first enable keeps stock's
+coupling (the PD request's operating current is the hold current), every
+request path is bounded at 10.0 V in battmgr itself with the session's cap
+at 9.5 V (nothing above 8.94 V has ever been on this PMIC input), and the
+PPS back-end needs its own run-time opt-in so Fast alone can never start it.
+
+A0 is done: the Fedora port's pmic_pdcharger_ulog patches (0069/0070) make
+Perpetua's driver match the SoCCP channel; built as a module from a new
+config fragment and loaded by hand on #46, it streams the charger firmware's
+own log as trace events — the PD policy engine's state machine (456 lines in
+the first 15 s) and the firmware's charge-control dump (icl/fcc/fv). A
+device-local bench script (pps-bench.sh, /usr/local/sbin on the tablet)
+records the supplies, the six thermistors, both pump supplies, the svooc
+status, the firmware log and the kernel log per second, with a dead-man
+rule for the modes that will hold the input vote. The A1–A3 patches are
+being written against the pin (one implementer, three reviewers); F1 on the
+Anker — the APDO list — decides whether the rung is worth the rest.

@@ -475,6 +475,56 @@ vehicle is a pin bump, not cherry-picks.
 - P3 flash — done 2026-11-03 (boot-45-3cfb46cf to boot_b, lock-in PASS, boot_a 1f11e2c6 untouched, slot _b bootable + successful; boot-44-f97398b2 is the fallback image; the 24 h soak runs since). Still owed in P: the 9 V rate at a lower charge, the standard-charging regression (SDP/DCP/PD, OTG, connected boot, 500 mA fallback), the three SuperVOOC stages, the soak, then the formal checkpoint (this pass is the interim documentation checkpoint of 2026-11-03). Then the suspend rungs of C6 (ebe4aed7e940 GDSC retention
   comes with the bump) and the thermal zones for the shell model.
 
+## Q — PD PPS through the charge pumps (after P's VOOC stages and the checkpoint; before C6)
+
+Research run of 2026-11-03 (six readers, synthesis, three adversarial
+reviews, revision 2): report and notes under
+/srv/ubuntu-iceland/build/pps-work/ (research material, never committed).
+Stock charges this unit from any PPS adapter through the same two SC8547D
+pumps at up to 55 W (its arbitration table: VOOC 80 / PPS 55 / PD 13 /
+QC 13); the firmware owns only the PD contract and the buck. Perpetua at the
+pin holds a fixed 9 V contract through the buck (13.1 W measured) and runs
+the pumps only over VOOC. Design (one driver, two adapter back-ends):
+
+- A-series, `qcom_battmgr` (variant-scoped, inert unless written, module
+  swaps): A0 the firmware's charger log as the witness (0069/0070, done
+  2026-11-03); A1 name the PD notifications (0x56/0x7f/0x91); A2 read the
+  source capabilities (opcode 0x10004, from the charging work) and decode
+  the APDO; A3 the tcpm-shaped programmable supply on qcom-battmgr-usb —
+  ONLINE 2 with the host's input vote, VOLTAGE_MIN, one 29/30 pair per
+  request, **a 10.0 V rejection on every write path**, the −1 exit refused
+  after a failed 5 V exit.
+- Flights F1–F4 (pumps untouched, Anker, hand writes ≤ 9.0 V): F1 the
+  APDO list (FAIL ends the rung for this source: it needs min ≤ 5.5 V,
+  max ≥ 9.2 V, ≥ 1.5 A); F2 the vote-gated request from the 9 V contract
+  (which write triggers the PD Request; 0x56; UPower with online = 2);
+  F3 120 s keep-alive; F4 the verified 5 V exit and the −1 recovery
+  (hard precondition of any switching).
+- B-series, `sc8547_svooc`: B1 the policy arithmetic into a KUnit-pinned
+  library (gauge-referenced window kept); B2 the adapter seam; B3 refuse
+  system suspend during a session (owed before C6's F1). The SuperVOOC
+  PASS that drops the Standard policy is taken on the module that ships.
+- C-series: C1 the PPS back-end lifting VBUS with the pumps off (IDLE APDO
+  gate, debugfs `protocols` mask default vooc, slow worker for every
+  firmware round trip, 9.5 V cap, exit with its failure branch, attempt
+  counter) → F5a lift, F5b 60 s hold at 9.5 V, F5c cable pull; C2 first
+  switching at 1 A with the RDO as the hold current and the ≤ 5 s
+  re-request → F6 three runs (normal, cable pull, deliberate 5 s watchdog
+  trip) after the S0 hard-reset drill; C3 regulation → F7a 30 min at 3 A
+  plus a reboot during a session; C4 the dual-pump join → F7b to
+  min(APDO, 5 A, 55 W); C5 docs; C6 default on, one flashed bundle; C7 the
+  two USB-connector thermistors into the envelope (a flagged DT change).
+
+Rails added by the review: no request above 10.0 V by any path; the input
+vote released only with both pumps verified off and a fixed contract back;
+no PPS-capable module on the tablet before the 0.2.33 boot-time Standard
+is verified on a connected boot; flight modules loaded from /run, never the
+first session unattended; the device-local bench script with a dead-man
+timer (Wi-Fi only mirrors). Denial's design review of the plan is the first
+item on the critical path for upstreaming (needs the maintainer's GitHub
+account). Effort about three weeks interleaved; nothing blocks on the
+OnePlus brick.
+
 ## C6 — Hardening / dailyability (after C5)
 
 Verified 2026-11-02 (suspend reader): the tablet has never suspended
@@ -549,6 +599,7 @@ shared-kernel Android apps. Scoped when C5 lands.
 | #44 pen charger (0056–0062) + stylus 0037–0040 | **RAM-booted and gated** 2026-11-03 (boot-44-f97398b2): level shifters, hBoost, pen attached and charging, address delivered, telemetry unchanged — PASS; on the same boot the pen ladder reached N5: the Stylo Pro writes with pressure (0041/0042 + iceland-pen) | flash decision 2026-11-03: #45 (rung P) builds on top of #44's content, so the #44 flash is skipped in favour of flashing #45 after its gate — done, #45 flashed 2026-11-03; boot-44-f97398b2 is the fallback image; original gate text for the record: PMH0101 regulators (no cmd-db debugfs on this kernel, so the RPMh resources LS3B/LS4B can only be proven by the boot — abort criterion) → driver bound, fw 0x20022, hBoost 7000 mV acked → pen on the magnet edge → battmgr telemetry unchanged; then ONE flash for #43+#44 |
 | Checkpoint (owner's standing order, 2026-11-02) | **after the charging fixes (rung P) land**: the next full checkpoint | README, hardware-status, plan, patch provenance, upstreaming ledger, firmware manifest, the status page artifact, memory; commit and push to GitHub. Interim pushes continue after every verified step (#44 was never flashed; the #45 flash got this interim documentation checkpoint, ordered by the owner on 2026-11-03), but the formal "we are here" checkpoint waits for the 9 V rate at a lower charge, the standard-charging regression, the three SuperVOOC stages and the 24 h soak |
 | P pin bump (charging 9 V / SuperVOOC, GDSC, thermistors) | **#45 flashed to boot_b 2026-11-03** (boot-45-3cfb46cf, lock-in PASS); RAM-boot census the same day PASS — 9 V PD contract on the Anker (PD_PPS, 8.94 V, voltage_max 9 V), both pumps bound, svooc supply + debugfs, six ADC thermistors live, AK1 regmaps at stock, lockup detectors on; two boot races found and fixed in 0.2.29 (WirePlumber HiFi attach, pen daemon GATT discovery), the WirePlumber one repeats on every boot of this pin and the guard nets it; 0.2.30 holds the svooc driver in Standard across boots (it re-probes to Fast) and scopes the guard to the owner's session; fastboot needed four attempts (bootloader USB churn) | owed: (a) done 2026-11-03 — 13.1 W at 84 % (8.80 V × 1.49 A, ICL 1.5 A, the firmware's PD cap); (b) the standard-charging regression — PD and connected boot PASS 2026-11-03; SDP at the #46 RAM boot (PC cable), DCP with the brick, OTG and the 500 mA fallback still owed; (c) the SuperVOOC staged validation with the OnePlus 80 W brick (a PD source never speaks VOOC: the Anker is PD PPS to this firmware, 0 frames at any charge). The driver has no current knob — svooc_entry_ua() picks the session current by charge level: 2 A above 85 %, 3 A from 56 %, 6.2 A at ≤ 55 %, minimum with the thermal derate, the voltage taper and the 55 W budget; a session ends at 90 % — so stage 1 (2 A, self-terminating) = brick in at 86–89 %, stage 2 (3 A, single pump) at 60–84 %, stage 3 (up to 6.2 A, Denial's 50–55 W) at ≤ 55 % with a cool cell; each attended, svooc-session.sh logging the IIO thermistors, the persistent journal as the freeze witness (no usb0 with the brick in the only port); PASS → drop 75-iceland-charging.rules so Fast is the shipped default (owner's call); (d) a 24 h soak on #45 (running since the flash); (e) build #46 (0058 matching the renamed board compatible): RAM-booted 2026-11-03, gate PASS — hBoost device present, MT5806 firmware 0x20022, docked pen charging 7.98 V × 106 mA; SDP typed with ICL 500 mA on the PC cable; policy Standard at 2.7 s; Wi-Fi joined in 27 s with the 0064–0068 module — flash of boot-46-23711786 is next; then CHECKPOINT |
+| Q PD PPS through the pumps | research done 2026-11-03 (plan revision 2 under build/pps-work); A0 (firmware charger log, 0069/0070) built and loaded on #46; the A-series patches in review | A1–A3 as module swaps → F1 (the Anker's APDO list decides) → F2–F4 pumps untouched → B → C with flights F5–F7b; predecessors: #46 flash + the 0.2.33 connected-boot check, the formal checkpoint, S0 before F6 |
 | S sensors | kernel side complete; nothing of the userspace exists (the owner's auto-rotation report is this gap) | S1 host day (arm64 mmdebstrap chroot; make-dsp-tree.sh from the factory persist registry; hexagonrpc 0.5.0-1 → 598b591 + Fedora 0001/0002; libssc 0.4.4-2; iio-sensor-proxy 3.9-1 with ssc) — start when the host is not building kernels (qemu-user builds crawl under a kernel build) |
 | C6 suspend | hazards mapped; F1 procedure written | owner: one hard-reset drill (S0); then F1 on the flashed kernel with Wi-Fi off and WAKE# disarmed; the GDSC retention fix (ebe4aed7e940) is in the pin since #45, so F1 runs on flashed #45 and a reset now would not be the GDSC hazard; CONFIG_PM_DEBUG still to be added on the F2 RAM boot |
 | A polish | identity done (0.2.25: label MAC on Wi-Fi; the stock BT address since its recovery from the capture); mic stage in 0.2.26 | classic BT pairing + libspa-0.2-bluetooth (BLE bonding is proven — the pen is bonded with LE Secure Connections since 2026-11-03, served by HOGP/uhid); pen polish — barrel double/long-press codes, middle click, battery into UPower, the libwacom SPI-bus proposal; a USB-C analog headset for the headphone rung; loudness comparison vs stock; Chrome/Widevine playback test |
@@ -571,5 +622,6 @@ S:  host debs + DSP tree → secure-node attach → (DT flight) → ssccli → i
 A:  BT/WLAN identity (0.2.25; stock BT address since) → pen (#43–#45 + A.3c N0–N6, done 11-03; polish owed) → BT audio + classic pairing (BLE bonding proven) → thermal census → headphones (needs a USB-C headset).
 W:  W1 keep-awake RAM boot → W2 double-tap gesture (KEY_WAKEUP) → flash → W3 s2idle wake source after C6.
 P:  re-diff → config re-merge → RAM-boot census (9 V contract) → flash #45 [done 11-03] → SuperVOOC staged by charge level with the brick (2 A at 86–89 % → 3 A at 60–84 % → 6.2 A at ≤ 55 %) → 9 V rate + standard regression → 24 h soak → drop the Standard rule → CHECKPOINT: docs + push (owner's order).
+Q:  A0 (done) → A1–A3 module swaps → F1 APDO list → F2–F4 (pumps off) → B1–B3 → C1 F5a/b/c → S0 → C2 F6 ×3 → C3 F7a → C4 F7b → regression → bundle with the bool → C5/C6.
 C6: S0 reset drill → F1 s2idle baseline on #45 (GDSC retention in the pin since P) → PM_DEBUG RAM boot → DT pair + pciehp → Wi-Fi-up → policy → one-shots → upstreaming (pin bump done as P, 11-03).
 D:  Waydroid.
