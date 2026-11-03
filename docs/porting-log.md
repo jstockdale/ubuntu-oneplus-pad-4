@@ -2141,3 +2141,32 @@ fixes; re-test on #42. Robustness items for VP4: a nonsensical level or
 an unsupported VP9 profile must be rejected, not crash the firmware.
 Media-plan rule: always constrain profile/level after v4l2h264enc in
 test pipelines (real apps do), and verify clips with gst-discoverer.
+
+## 2026-11-02 — Stylus input patches 0037–0039 adopted (host-verified, not flown)
+
+From the pen-input agent's work (/srv/ubuntu-iceland/build/pen-work): 0037
+= Fedora 0036 adapted (its hunk 5 targeted input_set_abs_params lines our
+DT-property probe does not have; the resolution helper now runs after
+touchscreen_parse_properties and computes DIV_ROUND_CLOSEST(max+1, mm)
+per axis from that axis's registered range, swapping the two lengths
+under touchscreen-swapped-x-y; BTN_STYLUS/BTN_STYLUS2 declared and fed
+from pen_btn1/pen_btn2, released on suspend and pen-out); 0038 =
+touchscreen-x-mm 193 / y-mm 274 in the controller's portrait frame
+(Fedora's 274/193 pairing is right only for their hard-coded landscape
+driver); 0039 = pen position clamped to prop.max_x/max_y and reported
+through touchscreen_report_pos with the finger's parsed ranges — the
+stock dtbo (entry 00, nt36536@0) gives touchpanel,panel-coords and
+touchpanel,pen-panel-coords both 24000×33920, display-coords 2400×3392
+(10 units/px), pen-max-pressure 0x4000, pen-max-tilt 60/60, so no
+scaling. Resulting resolution: 124 units/mm on ABS_X/ABS_Y and
+ABS_MT_POSITION_X/Y alike (libinput will see ~274×194 mm). libinput
+1.31's tablet_reject_device() needs x/y + (BTN_TOOL_PEN or BTN_STYLUS) +
+a non-zero resolution on both axes — resolution was the actual blocker.
+Verified: git am on a committed 0001–0036 baseline, nt36xxx.o compiles
+with 0 warnings (W=1: only the pre-existing pen_battery unused), DTB
+shows the two properties, all 52 patch files (0001–0039, 0043–0055)
+apply in order on the pin. Open for the flight: tilt axes are not
+transformed (position only) — record TILT signs per screen edge; which
+barrel button is BTN_STYLUS vs BTN_STYLUS2; pressure ceiling actually
+reached (stock also lists a 4096-max "other pencil"); the battery byte
+stays unreported until a power_supply exists (pen-charger rung).
