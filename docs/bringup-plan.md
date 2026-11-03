@@ -255,8 +255,10 @@ decoded shell model cannot run yet.
    chain reaches full volume; measure the chain vs the raw sink vs stock
    at the next audio pass (the chain is tuned never louder than stock;
    GNOME's slider caps at 100 % unless over-amplification is on);
-   (b) WirePlumber once lost the HiFi profile mid-session (runbook has the
-   recovery); capture WIREPLUMBER_DEBUG=3 logs if it recurs; (c) policy
+   (b) RESOLVED 2026-11-02: the mid-session loss of the HiFi profile was
+   WirePlumber creating a second card object from the compress node
+   (comprC0) and losing the device reservation to it; 0.2.23 disables that
+   object (52-iceland-compress.conf); (c) policy
    question for the owner: unattended-upgrades is enabled on the dev
    rootfs (it upgraded ffmpeg/imagemagick libraries tonight) — fine for
    a desktop, but on a bring-up device it moves the baseline under

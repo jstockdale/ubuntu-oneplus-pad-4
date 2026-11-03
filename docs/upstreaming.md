@@ -11,6 +11,7 @@ Status of everything this port carries that belongs somewhere else. The rule
 | 0011–0024 (TDM speaker chain), 0003/0008/0009 | mzak's Fedora iceland queue → Perpetua | theirs to submit; we carry with attribution |
 | 0025/0026 (GPR callback order, GPR intent size) | infiniti-mainline → Perpetua | theirs |
 | Userspace audio (UCM2, PipeWire chain) | alsa-ucm-conf / the Fedora iceland port | after the headphone profile exists |
+| PipeWire alsa-udev emits a second card object for an AudioReach card's compress node (`comprC0`), and the two contend for the ReserveDevice1 name — the loser is switched to profile off | pipewire (spa/plugins/alsa/alsa-udev.c) | to report with the 2026-11-02 debug log; our workaround is a WirePlumber rule (0.2.23) |
 
 ## 0028 — ASoC: qcom: q6apm: validate READ/WRITE_DONE payloads by the fields used
 

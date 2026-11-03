@@ -373,8 +373,12 @@ RAM boots and future kernel updates (RAM-boot gate first, always).
   clean compile. Edit scripts between runs, or run a copy.
 - Audio gone in a GNOME session (no sinks, "No Input Devices", `pw-play`
   into the chain says I/O error) while the card is still in /proc/asound:
-  WirePlumber lost the UCM HiFi profile (seen once on 2026-11-02, trigger
-  unknown). Recovery: `systemctl --user restart wireplumber`; check with
+  WirePlumber lost the UCM HiFi profile — root cause (2026-11-02): the
+  card's compress node became a second card object that stole the device
+  reservation; fixed by 52-iceland-compress.conf in ubuntu-iceland-device
+  0.2.23. If it ever recurs, check `journalctl --user -u wireplumber` for
+  "owner_id == 0" / "Audio0 busy" and recover with `systemctl --user
+  restart wireplumber`; check with
   `wpctl status` that the raw sink and the microphone source are back and
   `pw-metadata 0 default.audio.sink` still names effect_input.speakers.
   Note: `pactl` is not installed; use `wpctl` and `pw-dump`.

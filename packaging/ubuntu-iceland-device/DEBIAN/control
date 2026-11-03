@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.22
+Version: 0.2.23
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -31,6 +31,10 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     the mutter key is the typed empty array `@as []`; the untyped `[]` of
     0.2.21 made `dconf update` fail and broke the desktop install's
     configure step);
+  * audio stability (0.2.23): WirePlumber must not turn the card's
+    compressed-audio node into a second card object — the two objects
+    fought over the ALSA device reservation and the loser was switched to
+    profile "off", silencing the session (52-iceland-compress.conf);
   * audio service discovery: the userspace protection-domain mapper and
     name service (protection-domain-mapper, qrtr-tools) are masked, because
     the kernel's own qcom_pd_mapper serves this SoC and the userspace one,

@@ -2315,3 +2315,34 @@ units; pd-mapper masked; fwupd absent. Flashed series = 0001–0036 +
 0043–0055 (49 patches). #42 artifacts kept: out/bundles/boot-42-82219574
 .img, qcom-iris-42-44b950d9.ko.zst, backups/iceland.dtb.42, and the
 module manifest. Build #43 (stylus input: + 0037–0039, 52 patches) kicked.
+
+## 2026-11-02 — Audio outage ROOT CAUSE: WirePlumber made a second card object
+## from the compress node and the two fought over the device reservation. Fixed (0.2.23).
+
+Recurred 6 min into the fresh #42 boot (profiles off/pro-audio only, no
+nodes). With WIREPLUMBER_DEBUG=3,spa.alsa*:4,s-monitors-alsa*:5 the
+sequence is explicit: alsa-udev emits "ACP/PCM device interface for card
+hw:0" TWICE from the same sysfs path /devices/platform/sound/sound/card0
+— `alsa_card.platform-sound` and `alsa_card.comprC0` (the AudioReach
+card's compressed-audio node /dev/snd/comprC0D4, which PipeWire 1.6.2's
+udev monitor treats as a card of its own); "Enabling the use of ACP" on
+both; both then own org.freedesktop.ReserveDevice1.Audio0 →
+`m-reserve-device: wp_reserve_device_own_name: assertion 'self->owner_id
+== 0' failed` at every WirePlumber start (seen at 8.5 s on every boot and
+after each restart), and on the restart capture: `ReserveDevice1.Audio0
+busy (by :1.117)` followed by `acp_card_set_profile: activate profile:
+off (0)` — the object that loses the reservation is switched to "off"
+and loses its UCM profile. When that object is the real card, every sink
+and source disappears mid-session: silent Chrome and "No Input Devices"
+(the earlier greeter and unattended-upgrade theories are dismissed —
+neither was present on the second occurrence). Fix: WirePlumber rule
+`monitor.alsa.rules` matching `device.name = "~alsa_card.compr.*"` with
+`device.disabled = true` (52-iceland-compress.conf). Verified live and
+after the packaged install (ubuntu-iceland-device 0.2.23): one ALSA
+device object, profiles off/HiFi/pro-audio with HiFi active, sinks 1 /
+sources 1, chain the default, 0 reservation assertions, 0 busy lines,
+tone plays. The debug drop-in was removed. Upstream item: PipeWire's
+alsa-udev should not emit a card object for comprC* nodes (or should
+key the reservation on the sysfs card); filed in docs/upstreaming.md.
+Also noted: Ubuntu enables pipewire's filter-chain.service (a second
+`pipewire -c filter-chain.conf` process) — harmless, not involved.
