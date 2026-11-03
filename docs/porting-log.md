@@ -2346,3 +2346,19 @@ alsa-udev should not emit a card object for comprC* nodes (or should
 key the reservation on the sysfs card); filed in docs/upstreaming.md.
 Also noted: Ubuntu enables pipewire's filter-chain.service (a second
 `pipewire -c filter-chain.conf` process) — harmless, not involved.
+
+## 2026-11-02 — Readiness pass for #44 and the next phases
+
+No cmd-db debugfs on this kernel, so the RPMh resources LS3B_E0/LS4B_E0
+the charger's level shifters need cannot be proven before the #44 RAM
+boot; the 17 vreg_l*b regulators of the PMH0101 are registered today,
+and the flight's first check (no "could not find RPMh address", all
+vreg_l*b still present) is the abort criterion — recovery is a
+power-cycle to the flashed #42. Stylus flight prerequisites on the
+tablet: pen = event4, touch module file nt36536_ts.ko.zst (loaded),
+libinput-tools 1.31.1 + evtest installed. Build fragments: the script
+concatenates kernel/config/*.fragment (staged/ is not matched) and
+enforces every symbol (=m satisfied by =y) — promoting the charger set is
+two `git mv`s. C5 idle gate closed: no suspend attempt in ~2 h on #41 nor
+on #42 (0 "Suspending", suspend_stats 0/0, sleep targets masked).
+Readiness board added to bringup-plan.md.
