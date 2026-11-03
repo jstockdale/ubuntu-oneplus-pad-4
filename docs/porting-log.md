@@ -2716,3 +2716,41 @@ enter"; charger present=1, state=full) — it applies the timing only when
 awake ("mcu set timing" after "sleep exit"), so the daemon now replays the
 handshake on the console's "sleep exit". Verification of taps/buttons via
 libinput pending the owner's next pass with the pen in hand.
+
+## 2026-11-03 — Pen suite closed out on #44; rung P started as #45
+
+Taps and clicks: the owner reported a character on tap-down and another on
+tap-up, and clicks without touching. Cause: the pen's Bluetooth pressure
+lags the controller by tens of ms and can stay non-zero while hovering;
+0042 first replaced the packet's pressure unconditionally, so the hover
+flicker at lift looked like a fresh tip-down with pressure. 0042 now gates
+the injected magnitude on the controller's own contact byte (contact = the
+controller, magnitude = the pen); 14 taps → 14 tip-downs, pressure up to
+15507, nothing while hovering. Owner: "working great". The pen's HID
+"Mouse"/"Keyboard" uhid devices stay silent for taps and buttons — the
+barrel button only arrives on the vendor channel 180938ac (02/03), now
+injected as BTN_STYLUS; GNOME's default maps it to right click while
+hovering. Daemon: pressure/button injection, replay on the pen's "sleep
+exit" (it sleeps on the charger and when idle); shipped as device package
+0.2.28 with /etc/iceland/pen.conf (the pen model's identifiers) as a
+conffile and the unit enabled. GNOME's Graphics Tablets panel says "No
+tablet detected" because libwacom cannot match the devices: bus 0x1c
+(SPI, which libwacom does not know), vendor/product 0000, the pen device
+parentless under /devices/virtual ("is a tablet but not supported by
+libwacom"). 0043 gives both devices Novatek's vendor id 0x0603 / product
+0x6536 and the pen its SPI parent; the device package ships
+/etc/libwacom/oneplus-pad4.tablet (DeviceMatch i2c|0603|6536, integrated
+display, @generic-no-eraser styli) and 74-iceland-pen.rules, which sets
+ID_BUS=i2c on the two devices for matching only. The udev side is
+installed; the ids arrive with #45's touch module (the build had not
+reached drivers/input when the worktree was edited, so #45 carries 0043
+although its patch count says 61). libinput also logs "Ignoring pressure
+offset greater than 50%" when a tap begins without a hover frame — noise,
+noted for N6.
+
+Rung P: the pin moved to b7d639cfb282 (fetch-perpetua.sh default; the
+build script takes the pinned checkout's HEAD, so the first #45 attempt
+built the old pin and failed at the re-diffed 0031 — fetch-perpetua.sh
+moves the checkout). Series: 61 patches — the four re-diffs in place,
+0020 dropped (AK1), 0041/0042 included. Flight plan and abort criteria in
+the readiness board; scripts flight-charging.sh and svooc-session.sh.
