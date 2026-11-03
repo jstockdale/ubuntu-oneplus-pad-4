@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Re-run the address programming whenever hci0 (re)appears, e.g. after a
+# controller reset; the unit is idempotent.
+ACTION=="add", SUBSYSTEM=="bluetooth", KERNEL=="hci0", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iceland-bdaddr.service"

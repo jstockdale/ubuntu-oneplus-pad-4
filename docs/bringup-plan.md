@@ -185,14 +185,23 @@ sources do not exist here; the WLAN MAC is likewise the firmware default
 exist (90 °C passive, step_wise); no NTC/skin zones in our DT, so the
 decoded shell model cannot run yet.
 
-1. BT/WLAN identity (rootfs-only, 0.2.22): /etc/iceland/bdaddr + an
-   iceland-bdaddr.service (btmgmt power on → off → public-addr, retried,
-   re-run by udev on hci0 add; Fedora's v3 ordering) and the same for the
-   WLAN MAC. Owner decision: factory values (read from stock Android:
-   persist.vendor.service.bdroid.bdaddr) or a stable per-unit derivation
-   from /sys/devices/soc0/serial_number (phonewave's method) — derivation
-   recommended unless the factory values are already known. PASS: the new
-   address survives a reboot and a power cycle of the controller.
+1. BT/WLAN identity — mechanism shipped as 0.2.24 (2026-11-02), values
+   device-local: /etc/iceland/bdaddr and /etc/iceland/wlan-mac hold the
+   addresses from the DEVICE LABEL (the owner has it; the factory capture
+   holds no plaintext copy — persist has no bluetooth dir, devinfo is
+   empty, the NV stores are OPLUS "OEM~~OEM" blobs — and Android's
+   per-install BT address lived in the userdata we overwrote). When a file
+   is absent it is generated once from /etc/machine-id (random per
+   install) with the locally-administered bit — never from the SoC
+   serial: a public recipe over an 8-hex-digit serial would let anyone
+   recover the serial from the MAC in 2^32 guesses. Applied by
+   iceland-radio-ids.service (files + a systemd .link for ath12k_pci,
+   before NetworkManager) and iceland-bdaddr.service (Fedora's proven
+   power on → off → Set Public Address, retried; re-run by udev on hci0
+   add). The addresses never enter the repo or the logs. PASS: both
+   addresses survive a reboot and a controller power cycle;
+   /var/lib/bluetooth gains one dir for the real address; the router sees
+   the label MAC.
 2. BT audio: apt install libspa-0.2-bluetooth; pair a keyboard or headset
    (none recorded as owned). PASS: pairing persists across a reboot; an
    A2DP sink appears in `wpctl status`.

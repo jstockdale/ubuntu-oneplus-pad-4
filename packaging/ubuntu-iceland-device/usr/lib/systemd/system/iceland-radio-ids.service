@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: BSD-3-Clause
+[Unit]
+Description=OnePlus Pad 4: device-local radio addresses (files + WLAN .link)
+DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Before=network-pre.target NetworkManager.service bluetooth.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/iceland/iceland-radio-ids ensure
+ExecStart=-/usr/libexec/iceland/iceland-radio-ids wlan
+
+[Install]
+WantedBy=sysinit.target

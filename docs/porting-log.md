@@ -2372,3 +2372,22 @@ dialog (logind ignore + gsd power-button-action interactive, 0.2.21/22);
 corner taps land under the finger. With the idle gate closed earlier, the
 C5 PASS list is complete except the 24 h soak on the real charger and the
 clean-image build.
+
+## 2026-11-02 — Radio identity: label values + a non-leaking fallback (0.2.24)
+
+Owner asked for the stock addresses. Searched the factory capture: persist
+/wlan holds only CNSS configs, /secnvm is empty, no /bluetooth;
+part-devinfo is 4 KiB of zeros; nonmodemst1/2 are OPLUS "OEM~~OEM"
+blobs (no readable EFS2 paths, no textual MACs); oplus_sec is signed
+firmware; no "wlan_mac"/"bdaddr" strings anywhere. Android's BT address
+on an unprovisioned unit lives in userdata, which our install replaced.
+The owner has the MAC on the device label — the factory WLAN identity —
+so that becomes /etc/iceland/wlan-mac (device-local, never committed).
+Fallback for an absent file: SHA-256 over "iceland-radio-ids:<label>:" +
+/etc/machine-id, first 6 bytes, locally-administered bit set — NOT the
+SoC serial (an 8-hex serial behind a public recipe is recoverable from
+the MAC in 2^32 guesses). 0.2.24 ships iceland-radio-ids (ensure/wlan/bt),
+a .link file generator for ath12k_pci, iceland-bdaddr.service on
+bluetooth.target with udev re-run on hci0 add, Depends bluez + iproute2.
+The BT sequence is the one the Fedora port proved on this chip (power on
+→ off → Set Public Address, retried) rewritten under BSD-3-Clause.

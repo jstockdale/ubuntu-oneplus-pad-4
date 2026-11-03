@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: BSD-3-Clause
+[Unit]
+Description=OnePlus Pad 4: program the controller's own Bluetooth address
+After=iceland-radio-ids.service sys-subsystem-bluetooth-devices-hci0.device
+Before=bluetooth.service
+ConditionPathExists=/etc/iceland/bdaddr
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/iceland/iceland-radio-ids bt
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=bluetooth.target

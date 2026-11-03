@@ -1,12 +1,12 @@
 Package: ubuntu-iceland-device
-Version: 0.2.23
+Version: 0.2.24
 Section: admin
 Priority: optional
 Architecture: arm64
 Maintainer: Ubuntu iceland port contributors <noreply@example.invalid>
 Depends: systemd, kmod, e2fsprogs, util-linux, cloud-guest-utils,
  systemd-zram-generator, alsa-ucm-conf, alsa-utils, pipewire, pipewire-pulse,
- wireplumber, swh-plugins
+ wireplumber, swh-plugins, bluez, iproute2
 Description: Device support for the OnePlus Pad 4 (iceland)
  Board-specific integration for the OPD2514 running an Ubuntu userspace on
  the Perpetua mainline kernel:
@@ -31,6 +31,12 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     the mutter key is the typed empty array `@as []`; the untyped `[]` of
     0.2.21 made `dconf update` fail and broke the desktop install's
     configure step);
+  * radio identity (0.2.24): the controller's own Bluetooth address and
+    the WLAN MAC from /etc/iceland/{bdaddr,wlan-mac} (owner-supplied from
+    the device label; generated once from /etc/machine-id when absent —
+    never from the SoC serial), applied by iceland-radio-ids.service, a
+    systemd .link file and iceland-bdaddr.service (bluetooth.target, re-run
+    by udev on hci0 add);
   * audio stability (0.2.23): WirePlumber must not turn the card's
     compressed-audio node into a second card object — the two objects
     fought over the ALSA device reservation and the loser was switched to

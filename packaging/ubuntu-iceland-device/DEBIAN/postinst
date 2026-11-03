@@ -43,6 +43,8 @@ case "$1" in
 			# must never run here (see /etc/apt/preferences.d/90-iceland-no-fwupd);
 			# masking units that are not installed is harmless and sticks.
 			systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+			# 0.2.24: device-local radio addresses.
+			systemctl enable iceland-radio-ids.service iceland-bdaddr.service >/dev/null 2>&1 || true
 			systemctl mask fwupd.service fwupd.socket fwupd-refresh.timer fwupd-refresh.service >/dev/null 2>&1 || true
 		fi
 		# 0.2.21: compile the dconf system db when dconf is present (it is not

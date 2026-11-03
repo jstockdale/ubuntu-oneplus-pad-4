@@ -1,0 +1,90 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+# iceland-radio-ids: give the OnePlus Pad 4's radios their own addresses.
+#
+# On Perpetua every Pad 4 boots with the board file's placeholder Bluetooth
+# address and the WCN7860 firmware's default WLAN MAC. The real ones are
+# device-local: /etc/iceland/bdaddr and /etc/iceland/wlan-mac (one address
+# each, xx:xx:xx:xx:xx:xx, owner-supplied from the device label). When a file
+# is absent it is generated ONCE from /etc/machine-id (random per install,
+# never from the SoC serial, so the address reveals nothing about the unit)
+# with the locally-administered bit set; it then stays fixed for the life of
+# the install. Nothing here is ever shipped in a package or a repository.
+#
+#   ensure   create missing files and the WLAN .link file (boot, before NM)
+#   wlan     apply /etc/iceland/wlan-mac to the interface now (if down/up is ok)
+#   bt       program /etc/iceland/bdaddr into hci0 (bluetooth.target, udev)
+set -u
+DIR=/etc/iceland
+IDX=${ICELAND_HCI_INDEX:-0}
+WAIT=${ICELAND_BDADDR_WAIT:-60}
+IFACE=${ICELAND_WLAN_IFACE:-wlp1s0}
+log() { printf 'iceland-radio-ids: %s\n' "$*"; }
+valid() { printf '%s' "$1" | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'; }
+derive() {	# $1 = label -> locally administered unicast address from machine-id
+	id=$(cat /etc/machine-id 2>/dev/null) || return 1
+	[ -n "$id" ] || return 1
+	h=$(printf 'iceland-radio-ids:%s:%s' "$1" "$id" | sha256sum | cut -c1-12)
+	b0=$(( (0x$(printf '%s' "$h" | cut -c1-2) | 0x02) & 0xfe ))
+	printf '%02x:%s:%s:%s:%s:%s\n' "$b0" "$(printf '%s' "$h" | cut -c3-4)" \
+		"$(printf '%s' "$h" | cut -c5-6)" "$(printf '%s' "$h" | cut -c7-8)" \
+		"$(printf '%s' "$h" | cut -c9-10)" "$(printf '%s' "$h" | cut -c11-12)"
+}
+ensure_file() {	# $1 = file, $2 = label
+	f=$DIR/$1
+	if [ -s "$f" ] && valid "$(tr -d ' \n' < "$f")"; then return 0; fi
+	a=$(derive "$2") || { log "cannot derive $1: no machine-id"; return 1; }
+	umask 077; printf '%s\n' "$a" > "$f" && log "generated $1 from machine-id (locally administered); replace with the label value if known"
+}
+ensure() {
+	mkdir -p "$DIR"; chmod 0755 "$DIR"
+	ensure_file bdaddr bluetooth
+	ensure_file wlan-mac wlan
+	m=$(tr -d ' \n' < "$DIR/wlan-mac")
+	# udev applies the address when the interface appears (also fixes naming:
+	# MACAddressPolicy none keeps predictable names from the bus path).
+	mkdir -p /etc/systemd/network
+	printf '[Match]\nDriver=ath12k_pci\n\n[Link]\nMACAddress=%s\n' "$m" > /etc/systemd/network/20-iceland-wlan.link
+}
+wlan() {
+	m=$(tr -d ' \n' < "$DIR/wlan-mac" 2>/dev/null) || exit 0
+	[ -e "/sys/class/net/$IFACE" ] || { log "no $IFACE yet"; exit 0; }
+	cur=$(cat "/sys/class/net/$IFACE/address")
+	[ "$cur" = "$m" ] && exit 0
+	ip link set dev "$IFACE" down && ip link set dev "$IFACE" address "$m" && ip link set dev "$IFACE" up \
+		&& log "$IFACE address set" || { log "could not set the $IFACE address"; exit 1; }
+}
+# ---- bluetooth (the sequence the Fedora iceland port proved on this chip) ----
+addr_now() { btmgmt --index "$IDX" info 2>/dev/null | grep -oE 'addr ([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' | head -n 1 | cut -d' ' -f2 | tr 'A-F' 'a-f'; }
+powered() { btmgmt --index "$IDX" info 2>/dev/null | grep 'current settings:' | grep -qw powered; }
+bt() {
+	t=$(tr -d ' \n' < "$DIR/bdaddr" 2>/dev/null | tr 'A-F' 'a-f') || exit 0
+	valid "$t" || { log "bad address in $DIR/bdaddr"; exit 2; }
+	i=0; until [ -n "$(addr_now)" ]; do i=$((i + 1)); [ $i -ge "$WAIT" ] && { log "no controller"; exit 1; }; sleep 1; done
+	[ "$(addr_now)" = "$t" ] && { log "controller already has its address"; exit 0; }
+	d=1; n=0
+	while :; do
+		n=$((n + 1))
+		# Set Public Address is accepted only while the controller is powered
+		# off; on this chip it must have been powered once first (btqca marks
+		# the NVM default invalid and takes the device tree's address).
+		powered || btmgmt --index "$IDX" power on >/dev/null 2>&1
+		sleep 1
+		btmgmt --index "$IDX" power off >/dev/null 2>&1
+		sleep 0.5
+		o=$(btmgmt --index "$IDX" public-addr "$t" 2>&1)
+		if [ "$(addr_now)" = "$t" ]; then
+			btmgmt --index "$IDX" power on >/dev/null 2>&1
+			log "address set (attempt $n)"; exit 0
+		fi
+		log "attempt $n refused: $(printf '%s' "$o" | tail -n 1)"
+		[ $n -ge 8 ] && { btmgmt --index "$IDX" power on >/dev/null 2>&1; exit 1; }
+		sleep $d; d=$((d * 2)); [ $d -gt 8 ] && d=8
+	done
+}
+case "${1:-}" in
+	ensure) ensure ;;
+	wlan) wlan ;;
+	bt) bt ;;
+	*) echo "usage: $0 ensure|wlan|bt" >&2; exit 2 ;;
+esac
