@@ -3161,3 +3161,56 @@ clean). Two small items: each plug event re-reads and re-logs the list
 (three lines per plug; a one-line-per-change refinement is owed), and one
 "failed to report current_now: -110" at the module's load — a single 1 s
 timeout racing the probe, not repeated.
+
+
+## 2026-11-03 — Flights F2, F3, F4 PASS: the firmware takes a host-programmed PPS contract, keeps it, and gives it back
+
+A1–A3 (module 44c3fcdc, loaded from /run; the policy unit re-applied
+Standard on the way) on the flashed #46, the Anker attached at the 9 V
+contract, the bench in hold mode with the dead-man armed and the firmware
+log tracing; the flight script ran on the tablet (every write logged with
+its result, VBUS sampled every 0.5 s, abort on any write error, offline or
+VBUS > 9.2 V, release only through the exit). Numbers:
+
+- F2.1 `online` = 2 with the buck input at 1.5 A: refused (the vote gate).
+  F2.2 ICL 0: the input went quiet at once (0.000 A, three samples at
+  9.01 V). F2.3 `online` = 2: accepted; journal "PPS contract requested at
+  5500 mV 1000 mA of 5000-11000 mV 5000 mA"; the firmware log shows "set
+  pps volt[5500]" followed immediately by "PD Contract request: voltage=5500
+  mV, Current=1000 mA, bPPS=1: PDO#4" and then "set pps curr[1000]" with no
+  second request — the voltage write triggers the PD Request (Q23), and
+  the firmware chose the 5–11 V / 5 A object itself. VBUS read 5.50 V at
+  +0.5 s, then 5.00 V from +1.0 s to +3.0 s (watch item: the firmware's
+  "ActiveVoltage" stayed 5500 while its attach path re-ran — five 0x57
+  plug-in notifications in seven seconds — so either the source or the
+  PMIC's reading sat at the APDO's floor; F5a compares the request with
+  the pump's VAC ADC). F2.4 `voltage_now` = 6 000 000: VBUS 6.000 V at
+  +0.5 s and steady (Q3: honoured straight from the 9 V contract with ICL
+  0; Q4: the ack and the bus move inside 0.5 s). F2.5 `current_now` =
+  1 500 000: voltage unchanged at 6.00 V. F2.6 `voltage_now` = 10 500 000:
+  refused (the rail). F2.7 PPS_Status (property 28): 0x00000000 — answered
+  but empty for this source (Q6: not usable). F2.8 UPower: "power supply:
+  yes; online: yes" with `online` = 2 (Q28: no userspace issue). F2.9 the
+  charging-work trigger (CHG_EN = 1 with ICL 0): the input stayed at 0.000 A
+  (Q26: harmless).
+- F3: 120 s with no write from the host — `online` 2 and VBUS 6.00 V
+  throughout; the firmware log shows no further PD Request, so the firmware
+  maintains the contract below its logged level (Q5: the contract survives;
+  the ≤ 5 s re-request of C2 stays as insurance).
+- F4.1 `online` = 1: "left the PPS contract for the fixed 5 V PDO"; the
+  firmware requested 5000 mV / 3000 mA PDO#0; VBUS 5.00 V at +0.5 s (Q11:
+  SET_PDO 5000 accepted from a live host-steered contract). F4.2 ICL −1:
+  VBUS 8.92 V at +0.5 s, the ramp to 1.5 A over the next seconds, final
+  8.89 V × 0.83 A at ICL 1.5 A — the 9 V contract back with no replug and
+  no 500 mA fallback.
+- Notifications: the firmware sent 0x57 five times around the entry and
+  four times around the exit (Q7: the plug-in notification repeats on
+  contract transitions — advisory, as the plan has it); no 0x56, 0x7f or
+  0x91; the driver's charging work re-read the capabilities once.
+
+A1–A3 enter the series as 0071–0073 (72 patch files; the 73-step series
+check applies in order on the pin). Owed on the A-series before it is
+offered: one capabilities line per change instead of per work run; the
+2.5 s per-request timeout the plan allows is not needed (acks were fast).
+The hardware is untouched: both pumps stayed off throughout, the
+sc8547_svooc driver in Standard.
