@@ -20,7 +20,7 @@ keeps it in every packet until released; both are cleared with the pen.
 Signed-off-by: John Stockdale <jstockdale@gmail.com>
 ---
 diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
-index 4df3fd54e8fc..ff32a57a9d21 100644
+index 4df3fd54e8fc..28a8e70c86bb 100644
 --- a/drivers/input/touchscreen/nt36536/nt36xxx.c
 +++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
 @@ -302,9 +302,51 @@ static ssize_t pen_downlink_store(struct device *dev, struct device_attribute *a
@@ -85,13 +85,20 @@ index 4df3fd54e8fc..ff32a57a9d21 100644
  	if (ts && ts->pen_input_dev) {
  		input_report_abs(ts->pen_input_dev, ABS_X, 0);
  		input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-@@ -1290,6 +1335,11 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+@@ -1290,6 +1335,18 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
  				pen_y = min_t(uint32_t, pen_y, ts->prop.max_y);
  				touchscreen_report_pos(ts->pen_input_dev, &ts->prop,
  						       pen_x, pen_y, false);
-+				/* the pen's own pressure and buttons, when userspace has them */
++				/*
++				 * The pen's own pressure and buttons, when userspace has
++				 * them.  Contact stays the controller's call (its byte is
++				 * non-zero while the tip touches, and it leads the pen's
++				 * Bluetooth stream by tens of milliseconds); the pen only
++				 * supplies the magnitude.  Using the stale stream after a
++				 * lift made every tap end in a second tip-down.
++				 */
 +				if (pen_inject.valid)
-+					pen_pressure = pen_inject.pressure;
++					pen_pressure = pen_pressure ? pen_inject.pressure : 0;
 +				pen_btn1 |= pen_inject.btn[0];
 +				pen_btn2 |= pen_inject.btn[1];
  				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, pen_pressure);
