@@ -2279,3 +2279,25 @@ panel. Recovery line added to the runbook. Owner note: "not sure we are
 at full volume" — compare chain loudness vs stock at the next audio pass
 (the chain is tuned never louder than stock's measured loudness; GNOME's
 slider caps at 100 % without over-amplification).
+
+## 2026-11-02 — VP2/VP3 PASSED on kernel #42 (RAM boot): video decode AND encode
+
+RAM boot of bundle 82219574 (0001–0036 + 0043–0055). Flight check at
+7.4 s: iris node okay, driver bound, decoder/encoder nodes with all
+formats, no SMMU faults on the video SIDs; the "no soundcards" in that
+early snapshot was timing — at 46 s: card registered at 8.23 s, PDR
+"Indication received from msm/adsp/audio_pd" at 2.79 s, 2 GPR services,
+only 111b8000.tn deferred, Wi-Fi connected, GDM active, 0 failed units.
+Battery: H.264 1080p30 302/302 frames in 0.38–0.43 s wall (0.08–0.12 s
+user), two runs bit-identical with md5 bfd227becf56 — the same digest #41
+produced, so the decoder is deterministic across the fix set; HEVC 302
+frames in 0.31 s; VP9 302 in 0.34 s. Encode (High/4.1 constrained):
+60 × 720p30 in 0.35 s, parsed caps now colorimetry=bt601 (0055 = Fedora
+0292, the VUI fix), hardware decode-back 61 frames (60 + one flushed
+duplicate at drain), software reference 60; 300 × 1080p30 encoded
+straight into an MP4 (24.6 MB) in 1.02 s and decoded back by the hardware:
+302 frames. Remaining red line — remuxing a SAVED raw Annex-B file through
+h264parse ! mp4mux (flow -5) — is a GStreamer caps quirk on parsed raw
+files, not the driver: the encoder → mp4mux path works. Zero firmware
+system errors, zero SMMU video faults. Owner: "Green light!" → flashing
+boot_b with the same file.
