@@ -2362,3 +2362,13 @@ enforces every symbol (=m satisfied by =y) — promoting the charger set is
 two `git mv`s. C5 idle gate closed: no suspend attempt in ~2 h on #41 nor
 on #42 (0 "Suspending", suspend_stats 0/0, sleep targets masked).
 Readiness board added to bringup-plan.md.
+
+## 2026-11-02 — C5 gate items from the owner on #42
+
+Owner: the panel blanked at the GDM login screen (greeter idle blank;
+touch and login worked afterwards — a real-life repeat of T2 on the
+greeter's own blank path); a short power press shows GNOME's power
+dialog (logind ignore + gsd power-button-action interactive, 0.2.21/22);
+corner taps land under the finger. With the idle gate closed earlier, the
+C5 PASS list is complete except the 24 h soak on the real charger and the
+clean-image build.
