@@ -2033,3 +2033,17 @@ profile) and the 24 h soak follow. Phase order so far today: C4 closed,
 landed.
 Owner confirmed the in-session tone through the protected Speakers sink
 ("good speaker output") — audio in the GNOME session closed as well.
+
+## 2026-11-02 — Google Chrome (arm64) installed on request
+
+Google now publishes Linux arm64 builds: google-chrome-stable
+156.0.8078.79-1, 137 MB. Provenance verified on the host before anything
+touched the tablet: Google's linux_signing_key.pub → good signature on
+dists/stable/Release → Packages (binary-arm64) sha256 matches Release →
+the exact pool file the index names, sha256
+dc66f2d96853153e350c4a0944da4503cae39c2fcbcdb4e0057c64f6c49202ff,
+matches. Installed with `apt install ./deb` (dependencies from the
+archive; the package adds google-chrome.sources + key so it updates via
+apt), dpkg --audit clean, fwupd still absent. Headless sanity as the
+ubuntu user renders a data: URL and exits 0; `google-chrome --version` =
+156.0.8078.79. Kept outside the repo at /srv/ubuntu-iceland/out/chrome/.
