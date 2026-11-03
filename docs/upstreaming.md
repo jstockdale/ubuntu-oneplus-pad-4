@@ -96,3 +96,29 @@ every capture completion on iceland (mic capture dead, hw_ptr frozen)
 
 Body: the PR body above, plus "Patch attached / available at
 github.com/jstockdale/ubuntu-oneplus-pad-4/blob/main/kernel/patches/0028-q6apm-accept-dsp-read-write-done-payload-size.patch".
+
+## Asks to other projects
+
+### mzakamin-hub/iceland-mainline — please state a license
+
+Their repository declares no license. We carry, with attribution, their
+Pad 4 topology overlay (under the Linaro BSD-3-Clause headers it keeps),
+their UCM2 profile (adapted) and their adaptation of tb323fu-linux's
+PipeWire chain. Their kernel patches are GPL-2.0 like any kernel change
+and carry their sign-off, so those are fine. Draft issue text:
+
+> Title: Could you add a LICENSE to iceland-mainline?
+>
+> Hi mzak — the Ubuntu port of the Pad 4
+> (github.com/jstockdale/ubuntu-oneplus-pad-4) adapts a few of your
+> userspace files (the AudioReach topology overlay, the UCM2 profile and
+> your version of the tb323fu PipeWire speaker chain), with attribution in
+> every file. Your repository has no LICENSE file, so strictly those
+> pieces are "all rights reserved" and nobody can redistribute them. Would
+> you consider adding one? BSD-3-Clause would match the Linaro topology
+> sources you build on, MIT would match tb323fu-linux, and either is
+> compatible with how the Ubuntu port (BSD-3-Clause) and Fedora packaging
+> use them. Thank you for the port — the TDM speaker chain and the touch
+> fixes saved weeks.
+
+Status: not yet sent (the port maintainer's GitHub account is needed).
