@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.26
+Version: 0.2.27
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -41,6 +41,18 @@ Description: Device support for the OnePlus Pad 4 (iceland)
     compressed-audio node into a second card object — the two objects
     fought over the ALSA device reservation and the loser was switched to
     profile "off", silencing the session (52-iceland-compress.conf);
+  * clock domains (0.2.27): the card's playback and capture PCMs are timed
+    independently by the DSP and the capture PCM reports its delay in whole
+    40 ms periods, so whenever both ran PipeWire hard-resynced the follower
+    (speaker crackle while the mic was open). The capture node gets its own
+    clock domain, the speaker sink is the preferred driver, and the graph's
+    minimum quantum is 2048 frames (64-iceland-clock.conf,
+    64-iceland-clocks.conf);
+  * Wi-Fi power save (0.2.27): the wifi.powersave=2 drop-in moved to
+    /etc/NetworkManager/conf.d/zz-iceland-wifi.conf, because Ubuntu's own
+    default-wifi-powersave-on.conf in /etc sorted after the 0.2.x file in
+    /usr/lib and won (the merged config read 3; the tablet went
+    unreachable within minutes of idling twice);
   * processed microphone (0.2.26): the UCM keeps the codec at stock's
     register gains, where stock's echo canceller wants its input, and stock
     adds its 14 dB recorder gain later in the DSP; that stage was missing

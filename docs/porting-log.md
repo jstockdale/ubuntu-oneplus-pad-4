@@ -2550,3 +2550,68 @@ dependency is now explicit). Gate when the tablet is back: both sources
 listed, the processed one default, speech RMS ≈ −40 dBFS on it vs ≈ −54 on
 the raw one (the Fedora port's numbers), echo test with the speakers
 playing. Never above stock: the codec stays at ADC 14 / TX_DEC 84.
+
+## 2026-11-02 — Crackle after the mic stage: two DSP-timed PCMs in one clock domain (0.2.27)
+
+Owner: brief dropouts/crackle on the speakers, new since the mic change.
+Quantified, not by ear: PipeWire logs one "resync" line per follower jump
+and pw-top counts xruns. The user journal had 0 resyncs in the first
+3015 s of the boot, then 210 between the 0.2.26 install and the fix (51 in
+one 3-minute window) — every one of them `spa.alsa: hw:OnePlusPad4,0p:
+follower avail/delay … target:736 thr:256, resync`: the SPEAKER sink
+running as a follower. Cause: the owner had Sound settings open to
+compare the two inputs, whose meter keeps the mic open; with a capture
+device running, PipeWire picks the ALSA source as the graph driver
+(WirePlumber gives sources priority.driver 1712, sinks 1000) and the sink
+becomes a follower. Both PCMs are timed by the audio DSP independently
+and carried the same default clock name, so the follower was never
+rate-matched, only hard-resynced whenever its delay error passed the
+threshold — a discontinuity, i.e. the crackle. The 0.2.26 echo reference
+(the AEC taps the sink's monitor) makes the pairing structural whenever
+anything records. Three runtime experiments, each measured with the raw
+mic held open by pw-record while Chrome played: (1) capture node in its
+own clock domain (`clock.name`) → the follower is resampled but still
+resyncs (7 per 30 s); (2) + sink preferred as driver (`priority.driver
+3000`) → the resyncs move to the capture side (`hw:OnePlusPad4,2c:
+follower delay:1045 target:2176 thr:256 resample:1`, 16 per 36 s): the
+capture PCM reports its delay in whole 40 ms periods (period 1920;
+PipeWire treats it as a batch device, headroom 2176), so a follower's
+error jumps by ~1100-1700 frames, far past a 256-frame threshold; a
+smaller capture period was not accepted by the device; (3) + graph
+quantum forced to 2048 → 0 resyncs in 34 s. Packaged as 0.2.27
+(64-iceland-clocks.conf: clock.name + priority.driver;
+64-iceland-clock.conf: default.clock.min-quantum 2048 = 42.7 ms minimum
+latency); then a 60 s soak with BOTH the raw and the processed source
+open during playback: 0 resyncs, 0 xrun lines, every node's error
+counter 0. Owner: "rock solid". Output gain unchanged (protected sink
+0.58, raw sink 1.00, vol_ctrl pinned at 8192); the louder impression is
+the gaps gone. Side fix: the default input kept falling back to the raw
+source after WirePlumber restarts — a saved choice in
+~/.local/state/wireplumber/default-nodes pointed at it; cleared
+(`wpctl clear-default`), the processed source wins by priority (2000 vs
+1712) and is pinned with `wpctl set-default`.
+
+## 2026-11-02 — Wi-Fi vanishing when idle: station power save was never off (0.2.27)
+
+Twice tonight the tablet dropped off Wi-Fi within minutes of going idle
+(no ARP entry for its MAC, mDNS gone, the owner re-connected from the
+panel). `iw dev wlan0 get power_save` said ON although our NetworkManager
+drop-in says `wifi.powersave = 2`: `NetworkManager --print-config` showed
+the merged value 3, because Ubuntu ships /etc/NetworkManager/conf.d/
+default-wifi-powersave-on.conf (= 3) and NM merges conf.d files in
+lexical order across /usr/lib and /etc, so our 30-iceland-wifi.conf in
+/usr/lib sorted before "default-…" and lost. (Our kernel pin's HEAD
+commit is precisely the Perpetua change that makes station power save
+reach the WCN7860 firmware, so the setting started to matter.) The second
+drop's journal shows a WNM BSS-transition roam to another mesh node on a
+DFS channel (5680 MHz) with "regulatory prevented using AP config,
+downgraded" and ath12k's "Timeout while waiting for regulatory update";
+the first drop logged nothing at all — the silent kind power save
+produces. 0.2.27 moves the drop-in to /etc/NetworkManager/conf.d/
+zz-iceland-wifi.conf (sorts last; conffile); after `systemctl reload
+NetworkManager` and a re-activation the merged value is 2 and iw reports
+power save off. The regulatory-timeout line and DFS roaming stay on the
+C6/P watch list (ath12k fixes after the pin). The interface has been
+wlan0, not wlp1s0, since 0.2.25: our .link sets the MAC without a
+NamePolicy, so udev leaves the kernel name — harmless; scripts updated as
+met.
