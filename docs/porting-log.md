@@ -2100,3 +2100,23 @@ Clips regenerated with explicit I420 (H.264 high, HEVC main, VP9
 profile 0), caps verified before use. Rule for the media plan: verify a
 test clip's profile/chroma/bit depth with gst-discoverer before blaming
 a decoder. Only the VP9 run exercised the firmware (→ system error).
+
+## 2026-11-02 — VP2 DECODE PASSED on kernel #41 (RAM boot) with correct clips
+
+With 8-bit 4:2:0 clips (profiles verified by gst-discoverer), on the same
+#41 boot that had logged the VP9 system error: H.264 1080p30 → NV12,
+302/302 frames, two runs bit-identical (md5 bfd227becf56), 0.38 s wall
+for 10 s of video, 0.06 s user + 0.23 s sys (hardware, ~800 fps
+throughput, frame 0 luma min 0 / max 254 / mean 120.9 = real SMPTE
+bars); HEVC 302 frames in 0.30 s; VP9 302 frames in 0.29 s with NO
+system error. Zero SMMU faults on the video SIDs, no new kernel errors,
+audio card untouched. Conclusion: the earlier system error was provoked
+by the defective VP9 clip (a 4:4:4/10-bit profile the hardware does not
+support — the firmware faulted instead of rejecting the stream; the
+driver recovered the core on the next session). Tracked for VP4: an
+unsupported VP9 profile must be rejected at S_FMT/stream start, not
+crash the firmware. Encoder: v4l2h264enc produced 4.2 MB for 60 frames
+of 720p in 0.11 s; the decode-back gave 0 frames — under investigation
+(SPS/PPS / stream format), not a hardware fault per the kernel log.
+Build #42 (0001–0036 + the 13 iris fixes) continues; it is the flashing
+candidate once its own RAM-boot battery passes.
