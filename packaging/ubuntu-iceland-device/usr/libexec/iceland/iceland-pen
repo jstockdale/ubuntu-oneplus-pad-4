@@ -57,17 +57,26 @@ class Config:
         self.address = pen.get("address", "").strip().upper() or None
         self.sysfs = pen.get("sysfs", "/sys/bus/spi/devices/spi0.0")
         self.timing_uuid = gatt.get("timing_uuid", "").lower() or None
+        self.log_uuid = gatt.get("log_uuid", "").lower() or None
         self.status_uuid = gatt.get("status_uuid", "").lower() or None
         self.status_request = bytes.fromhex(gatt.get("status_request", "").replace(" ", "")) \
             if gatt.get("status_request") else None
         self.notify_uuids = [u.strip().lower() for u in gatt.get("notify_uuids", "").split(",") if u.strip()]
         self.after_timing = [s.strip() for s in gatt.get("after_timing", "").split(",") if s.strip()]
+        self.wake_words = [s.strip() for s in gatt.get("wake_words", "sleep exit").split(",") if s.strip()]
         # rules: "<uuid>:<hex prefix>" = "<downlink command>"
         self.rules = []
         if "rules" in cp:
             for key, cmd in cp["rules"].items():
                 uuid, _, prefix = key.partition(":")
                 self.rules.append((uuid.strip().lower(), bytes.fromhex(prefix.replace(" ", "")), cmd.strip()))
+        # buttons: "<n>" = "<uuid> <press hex> <release hex>"
+        self.buttons = []
+        if "buttons" in cp:
+            for n, spec in cp["buttons"].items():
+                parts = spec.split()
+                if len(parts) == 3:
+                    self.buttons.append((parts[0].lower(), int(n), bytes.fromhex(parts[1]), bytes.fromhex(parts[2])))
 
 
 class Controller:
@@ -76,6 +85,7 @@ class Controller:
     def __init__(self, sysfs):
         self.up = os.path.join(sysfs, "pen_uplink")
         self.down = os.path.join(sysfs, "pen_downlink")
+        self.inp = os.path.join(sysfs, "pen_input")
         self.last_seq = None
 
     def read_uplink(self):
@@ -95,6 +105,16 @@ class Controller:
             log.warning("downlink %r refused: %s", cmd, e)
             return False
 
+    def inject(self, cmd):
+        """pen_input: "pressure <0..16384>" or "button <1|2> <0|1>" into the pen input device."""
+        try:
+            with open(self.inp, "w") as f:
+                f.write(cmd + "\n")
+            return True
+        except OSError as e:
+            log.warning("pen_input %r refused: %s", cmd, e)
+            return False
+
 
 class Pen:
     """The BlueZ side."""
@@ -104,6 +124,8 @@ class Pen:
         self.dev_path = None
         self.chars = {}        # uuid -> object path
         self.connected = False
+        self.press = None
+        self.pressure = None
 
     def _objects(self):
         om = dbus.Interface(self.bus.get_object(BLUEZ, "/"), "org.freedesktop.DBus.ObjectManager")
@@ -179,10 +201,52 @@ class Pen:
         if "Value" not in changed:
             return
         data = bytes(bytearray(changed["Value"]))
-        log.info("notify %s: %s", uuid, data.hex())
+        # The pen streams its tip pressure on the timing characteristic as
+        # aa 01 01 02 <u16 little-endian>, ~140 Hz while the tip is down;
+        # the controller only wants to know whether the tip is pressed
+        # (stock's PRESS command), so mirror the state on change.
+        if uuid == self.cfg.timing_uuid and data[:4] == b"\xaa\x01\x01\x02" and len(data) >= 6:
+            pressure = data[4] | (data[5] << 8)
+            # the controller's own pressure byte only steps 0/16/32: the
+            # pen's value is the real one, injected into the pen input device
+            if pressure != self.pressure:
+                self.pressure = pressure
+                self.ctl.inject("pressure %d" % pressure)
+            has = 1 if pressure > 0 else 0
+            if has != self.press:
+                self.press = has
+                self.ctl.downlink("press %d" % has)
+            return
+        # the barrel buttons arrive only over Bluetooth on this pen
+        for b_uuid, button, press_bytes, release_bytes in self.cfg.buttons:
+            if b_uuid != uuid:
+                continue
+            if data == press_bytes:
+                self.ctl.inject("button %d 1" % button)
+            elif data == release_bytes:
+                self.ctl.inject("button %d 0" % button)
+            log.info("button %d: %s", button, data.hex())
+            return
+        text = data.decode("ascii", "replace") if uuid == self.cfg.log_uuid else data.hex()
+        log.info("notify %s: %s", uuid, text)
+        # The pen sleeps on the charger and when idle, and applies the panel
+        # timing only when awake ("mcu set timing" follows "sleep exit"):
+        # replay the handshake on every wake so picking the pen up is enough.
+        if uuid == self.cfg.log_uuid and any(k in text for k in self.cfg.wake_words):
+            GLib.timeout_add(400, self.replay_now)
         for r_uuid, prefix, cmd in self.cfg.rules:
             if r_uuid == uuid and data.startswith(prefix):
                 self.ctl.downlink(cmd)
+
+    def replay_now(self):
+        try:
+            seq, typ, payload = self.ctl.read_uplink()
+        except (OSError, ValueError, IndexError):
+            return False
+        if seq:
+            log.info("pen awake: replaying uplink #%d type %d", seq, typ)
+            self.on_uplink(typ, payload)
+        return False
 
     def on_uplink(self, typ, payload):
         if not self.connected:
@@ -192,8 +256,21 @@ class Pen:
             self.write(self.cfg.timing_uuid, payload, with_response=True)
         else:
             log.warning("no timing_uuid configured; uplink type %d not forwarded: %s", typ, payload.hex())
+        self.press = None
         for cmd in self.cfg.after_timing:
             self.ctl.downlink(cmd)
+
+    def replay_last_uplink(self):
+        """At start-up the controller may already be waiting (its frame
+        predates us): forward the last block once if the pen is connected."""
+        try:
+            seq, typ, payload = self.ctl.read_uplink()
+        except (OSError, ValueError, IndexError):
+            return
+        if seq and seq != self.ctl.last_seq:
+            self.ctl.last_seq = seq
+            log.info("start-up: forwarding uplink #%d type %d", seq, typ)
+            self.on_uplink(typ, payload)
 
 
 def main():
@@ -210,6 +287,7 @@ def main():
             try:
                 if pen.find():
                     pen.connect()
+                    pen.replay_last_uplink()
             except dbus.DBusException as e:
                 log.warning("pen: %s", e)
         return True

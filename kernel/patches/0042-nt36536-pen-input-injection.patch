@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 3 Nov 2026 00:55:00 -0800
+Subject: [PATCH] Input: nt36536: take the pen's pressure and buttons from
+ userspace
+
+Ours (2026-11-03, A.3c N6). Exit: offer to Perpetua with 0041 once the
+handshake is proven end to end.
+
+With the OPP handshake complete the controller reports the Stylo Pro's
+position, tilt and hover, but its pressure byte only steps through 0, 16
+and 32 of 16384 and its button bits stay 0: on this pen the real tip
+pressure (streamed at ~140 Hz) and the barrel buttons travel over
+Bluetooth. libinput therefore never saw the tip go down and no button was
+ever reported. Let the bridge daemon inject them through pen_input on the
+SPI device: "pressure <0..16384>" replaces the packet's pressure while the
+pen is in range, "button <1|2> <0|1>" sets a stylus button at once and
+keeps it in every packet until released; both are cleared with the pen.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index 4df3fd54e8fc..ff32a57a9d21 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -302,9 +302,51 @@ static ssize_t pen_downlink_store(struct device *dev, struct device_attribute *a
+ }
+ static DEVICE_ATTR_WO(pen_downlink);
+ 
++/*
++ * Pen input injected by userspace.  On this pen the real tip pressure and
++ * the barrel buttons travel over Bluetooth, not in the controller's packet:
++ * its pressure byte only steps 0/16/32 and its button bits stay 0.  The
++ * bridge daemon writes "pressure <0..16384>", which replaces the packet's
++ * pressure while the pen is in range, and "button <1|2> <0|1>", reported
++ * at once and kept in every packet until released.  Cleared with the pen.
++ */
++static struct {
++	bool valid;			/* a pressure value was injected since the last release */
++	u16 pressure;
++	bool btn[2];
++} pen_inject;
++
++static ssize_t pen_input_store(struct device *dev, struct device_attribute *attr,
++			       const char *buf, size_t count)
++{
++	char word[16];
++	unsigned int a = 0, b = 0;
++	int n;
++
++	n = sscanf(buf, "%15s %u %u", word, &a, &b);
++	if (n < 2 || !ts || !ts->pen_input_dev)
++		return -EINVAL;
++	mutex_lock(&ts->lock);
++	if (!strcmp(word, "pressure")) {
++		pen_inject.pressure = min_t(unsigned int, a, PEN_PRESSURE_MAX);
++		pen_inject.valid = true;
++	} else if (!strcmp(word, "button") && n == 3 && a >= 1 && a <= 2) {
++		pen_inject.btn[a - 1] = !!b;
++		input_report_key(ts->pen_input_dev, a == 1 ? BTN_STYLUS : BTN_STYLUS2, !!b);
++		input_sync(ts->pen_input_dev);
++	} else {
++		mutex_unlock(&ts->lock);
++		return -EINVAL;
++	}
++	mutex_unlock(&ts->lock);
++	return count;
++}
++static DEVICE_ATTR_WO(pen_input);
++
+ static struct attribute *nvt_pen_attrs[] = {
+ 	&dev_attr_pen_uplink.attr,
+ 	&dev_attr_pen_downlink.attr,
++	&dev_attr_pen_input.attr,
+ 	NULL
+ };
+ static const struct attribute_group nvt_pen_attr_group = {
+@@ -977,6 +1019,9 @@ static void release_touch_event(void) {
+ }
+ 
+ static void release_pen_event(void) {
++	pen_inject.valid = false;
++	pen_inject.btn[0] = false;
++	pen_inject.btn[1] = false;
+ 	if (ts && ts->pen_input_dev) {
+ 		input_report_abs(ts->pen_input_dev, ABS_X, 0);
+ 		input_report_abs(ts->pen_input_dev, ABS_Y, 0);
+@@ -1290,6 +1335,11 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ 				pen_y = min_t(uint32_t, pen_y, ts->prop.max_y);
+ 				touchscreen_report_pos(ts->pen_input_dev, &ts->prop,
+ 						       pen_x, pen_y, false);
++				/* the pen's own pressure and buttons, when userspace has them */
++				if (pen_inject.valid)
++					pen_pressure = pen_inject.pressure;
++				pen_btn1 |= pen_inject.btn[0];
++				pen_btn2 |= pen_inject.btn[1];
+ 				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, pen_pressure);
+ 				input_report_key(ts->pen_input_dev, BTN_TOUCH, !!pen_pressure);
+ 				input_report_abs(ts->pen_input_dev, ABS_TILT_X, pen_tilt_x);
+-- 
+2.47.0

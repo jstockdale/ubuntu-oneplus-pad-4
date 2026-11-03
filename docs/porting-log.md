@@ -2657,3 +2657,62 @@ owner's-hand probes, a frame logger and a downlink-probe node (module
 swaps), the MT5806 flight as proof of life and address source, a BlueZ
 bond, then a small BSD-3-Clause bridge daemon; licensing: constants and
 behaviour taken from GPL-2.0 vendor code as interface facts, never code.
+
+## 2026-11-03 — #44 RAM boot: pen charger PASS; the Stylo Pro WRITES (OPP handshake brokered over Bluetooth)
+
+#44 (boot-44-f97398b2; the kernel build script does not assemble the
+bundle — build-boot-bundle.sh with INITRAMFS=initrd.img-7.3.0+.post-0.2.21
+does; the first "#44" copy I made was #43's image and was deleted) RAM-booted
+on the owner's `fastboot boot`. Charger gate in the planned order: PMH0101
+level shifters vreg_ls3b/ls4b present and enabled, no RPMh complaint (the
+abort criterion); pmic_glink and the RPMh regulator driver are built in, so
+the hBoost client and the shifters come with the image and only the new
+mt5806_pen_charger.ko needed staging (plus #44's nt36536_ts.ko); the driver
+bound at 0-002b, firmware 0x20022, 7000 mV supply acknowledged; the pen
+docked → "pen attached (id 3)" within a second, state charging, 7.96 V ×
+0.11 A, the pen's BLE address delivered (root-only, never recorded);
+tablet telemetry unchanged, no battmgr errors. Watch items: pen_soc stays
+−1, and no 10 V step was logged (charging proceeds at ≈ 8 V).
+
+Ladder A.3c on the same boot, as module swaps: N1 (0041): the controller
+emitted the 20-byte uplink timing frame within a second of the enable,
+type 0, payload 0b 14 78 35 31 0f 2f 0f aa 0f 2f 0f 05 1e 70 0f 2f 0f 0f 0c
+— the same pattern the stock log shows. N2: every downlink command was
+accepted (status byte back to 0x00; the controller re-emitted its frame
+after the first ack) yet no pen packets — H2 refuted, the pen needs the
+Bluetooth leg. N4: the pen advertises while docked as "OnePlus Stylo Pro",
+public address, connectable ADV_IND every 16 s, Appearance Digital Pen,
+Flags 0x04 only — no LE-discoverable bit, so BlueZ's plain discovery never
+creates a device object (and the adapter's experimental ConnectDevice is
+not exported on Ubuntu's bluetoothd); a discovery filter with the pen's
+address as `pattern` makes BlueZ report it, and pair/trust/connect then
+bonded it with LE Secure Connections — uhid "OnePlus Stylo Pro Mouse" and
+"… Keyboard" appear, Battery 100 %, and the barrel button starts giving
+haptic feedback (the pen knows it has a host). GATT: BlueZ names
+characteristics by their declaration handle, one below the value handles
+in the stock log — stock's 0x0067 is our char0066
+(0783b03e-…-a304d2495cbb, write+notify), 0x003d is char003c
+(18093046-2a69-11ec-…, the "2c 90 01 01 xx" status), 0x0048 is char0047
+(180938ac, barrel button: 02 press / 03 release), Battery 0x0021 is
+char0020; 6e400003 (Nordic UART TX) is the pen's text console ("chg evt
+…", "sleep enter/exit", "enable/disable preload algorithm", "force sensor
+5306 89", "mcu set timing 1"). N5: writing the controller's block to
+char0066 (write-with-response) made the pen say "enable preload
+algorithm"; with the acknowledgements at stock's values — cfg_id 1,
+pen_info 2, con_sta 1, timing_ack 1, hopfrq_ack 1 — and the pen's
+pressure stream (aa 01 01 02 <u16>, ~140 Hz on the same characteristic)
+mirrored as `press 0/1`, the controller reported BTN_TOOL_PEN, BTN_TOUCH,
+ABS_X … — the owner saw the cursor track the hovering pen. The daemon
+(iceland-pen, python3 + BlueZ D-Bus + pyudev, /etc/iceland/pen.conf with
+the UUIDs, service enabled) replays the block and the sequence on every
+uplink frame and at start-up. Then the owner's "no clicks, taps or
+buttons": the controller's pressure byte only steps 0/16/32 of 16384 (so
+libinput never puts the tip down) and its button bits stay 0 — on this
+pen pressure and buttons travel over Bluetooth. 0042 adds `pen_input` on
+the SPI device ("pressure <n>" replaces the packet's pressure, "button
+<1|2> <0|1>" sets a stylus button at once) and the daemon injects both.
+Then three silent windows: the pen was on the charger, asleep ("sleep
+enter"; charger present=1, state=full) — it applies the timing only when
+awake ("mcu set timing" after "sleep exit"), so the daemon now replays the
+handshake on the console's "sleep exit". Verification of taps/buttons via
+libinput pending the owner's next pass with the pen in hand.
