@@ -2010,3 +2010,24 @@ run `systemd-tmpfiles --create` or reboot before the first login).
 Also seen in the same attempt, as predicted by the polish reader:
 `libinput error: event4 - NVTCapacitivePen: missing tablet capabilities:
 btn-stylus resolution. Ignoring this device` — the pen patch rung (A.3).
+
+## 2026-11-02 — MILESTONE: GNOME desktop login on glass. C5 flight PASSED.
+
+After the /tmp/.X11-unix fix the owner logged in through the on-screen
+keyboard: "It works!!!". Verified over ssh: session 86 Type=wayland
+Class=user Seat=seat0 VT=2, XDG_CURRENT_DESKTOP=ubuntu:GNOME, mutter
+current mode 3392x2400@120 with preferred scale 2.0, gsettings
+sleep-inactive-{ac,battery}-type 'nothing' and power-button-action
+'interactive' in effect, fwupd 0 processes, mem_sleep still "[deep]"
+behind the masked sleep targets, PipeWire default sink
+effect_input.speakers (filter-chain sinks appear under Filters in
+WirePlumber 0.5, hence no star in the Sinks list) with a 1 s tone played
+through it, default source the internal microphones, CPU zones at 41 °C
+idle, touch IRQ 254 at 1307 and rising. Shell errors this boot: only the
+two pre-fix Xwayland aborts. Pen ignored by libinput (A.3). Owed for the
+C5 gate: a cold-boot census with GDM (the next reboot), the 25-min idle
+observation, the power-press dialog, four-corner taps under the
+compositor. The clean-image path (guards folded into the desktop
+profile) and the 24 h soak follow. Phase order so far today: C4 closed,
+0029 withdrawn, pd-mapper race fixed, repo published, VP0 built, C5
+landed.

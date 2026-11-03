@@ -21,8 +21,8 @@ Ubuntu 26.04 LTS (arm64) running natively on the OnePlus Pad 4 — model
 [Perpetua](https://github.com/denialwm/linux-perpetua) mainline kernel
 (upstream Linux 7.3 plus the Denial project's iceland device support). GNOME
 on Wayland and Waydroid are the goal; today the tablet boots to a console and
-a Weston session with display, GPU, touch, Wi-Fi, speakers and microphones
-working from its own storage.
+a GNOME on Wayland desktop with display, GPU, touch, Wi-Fi, speakers and
+microphones working from its own storage.
 
 The structure is modeled on
 [agcarbajo/ubuntu-galaxy-tab-s9-ultra](https://github.com/agcarbajo/ubuntu-galaxy-tab-s9-ultra)
@@ -61,7 +61,7 @@ earn a ✅ here.
 | Suspend / resume | ❓ | deliberately untested so far |
 | Video decode (VPU) | ❓ | iris series carried as patches 0029–0036; first RAM-boot flight pending ([docs/bringup-plan.md](docs/bringup-plan.md) VP) |
 | Cameras | ❓ | last phase ([docs/media-misc-plan.md](docs/media-misc-plan.md)) |
-| GNOME on Wayland | 🟡 | installed 2026-11-02; GDM greeter up (Wayland, 2× scale); on-glass login checks pending |
+| GNOME on Wayland | ✅ | 2026-11-02: logged in on glass — Wayland session, 2× scale, 120 Hz, touch + on-screen keyboard; cold-boot census and idle checks still owed |
 | Waydroid | ❓ | after the desktop is daily-drivable |
 | Haptics, GNSS, cellular, fingerprint, microSD | — | not fitted on this device |
 
