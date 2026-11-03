@@ -1988,3 +1988,25 @@ from mutter over its session bus: DSI-1 3392×2400@120 (DRM-preferred;
 144 available), preferred scale 2.0, "Unknown experimental feature
 'scale-monitor-framebuffer'" is GNOME 50's harmless note about a retired
 key.
+
+## 2026-11-02 — C5 on glass: password accepted, session died at Xwayland
+## (/tmp/.X11-unix owned by the greeter) — fixed live; GDM-started-by-hand artifact
+
+Owner reports: touchscreen, on-screen keyboard and the greeter all work,
+login bounces back. Journal: pam_unix(gdm-password:session) opened the
+session and the keyring unlocked each time, then 1.2 s later
+`org.gnome.Shell@ubuntu.service: Main process exited, code=killed,
+status=6/ABRT` and `GdmDisplay: Session never registered, failing`. The
+shell's own line: `Failed to start X Wayland: Wrong ownership for
+directory "/tmp/.X11-unix", owned by 60578 but should be same as /tmp
+(owned by 0) or 1000`. Cause: systemd-tmpfiles creates /tmp/.X11-unix
+root:root 1777 at BOOT (x11.conf `D!`), the minimal rootfs never had it,
+and GDM was started by hand after the in-place install, so the greeter's
+Xwayland (uid 60578) created it; mutter's ownership check then aborts
+every user session. Fix: chown root:root + chmod 1777 on
+/tmp/.X11-unix and siblings; a reboot would have done the same. Not a
+port bug; noted in the C5 procedure (after an in-place desktop install,
+run `systemd-tmpfiles --create` or reboot before the first login).
+Also seen in the same attempt, as predicted by the polish reader:
+`libinput error: event4 - NVTCapacitivePen: missing tablet capabilities:
+btn-stylus resolution. Ignoring this device` — the pen patch rung (A.3).
