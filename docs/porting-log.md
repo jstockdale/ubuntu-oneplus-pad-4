@@ -2754,3 +2754,48 @@ built the old pin and failed at the re-diffed 0031 — fetch-perpetua.sh
 moves the checkout). Series: 61 patches — the four re-diffs in place,
 0020 dropped (AK1), 0041/0042 included. Flight plan and abort criteria in
 the readiness board; scripts flight-charging.sh and svooc-session.sh.
+
+## 2026-11-03 — #45 (rung P, pin b7d639cfb282) RAM-booted: 9 V PD on the first try; two boot races fixed in 0.2.29
+
+`fastboot boot` failed three times ("Write to device failed … Protocol
+error", then "Status read failed (No such device)"): the host log showed
+the bootloader's USB device re-enumerating every few seconds (device
+numbers 115→119 in a minute); after it settled the fourth attempt went
+through. The tablet has one USB-C port, so the Anker PD/SuperVOOC supply
+was plugged after the boot. Boot census: kernel #45, card at 9.0 s, all
+five codec macros and both soundwire controllers bound, touch and pen
+devices up, iris okay, lockup detectors on, 71 error lines (12 new clk
+WARNINGs at 1.5 s: clk_core_unprepare/disable on display clocks, cosmetic
+so far). AK1 verified: the middle amplifiers (now 3-0037/7-0037 — I2C bus
+numbers changed with the pin) read 5f:00e0 76:d700, stock's playing state.
+
+Sound was silent: WirePlumber listed only "off" and "pro-audio" for the
+card, no sink, although `alsaucm -c OnePlus-Pad4 set _verb HiFi` ran
+clean — the card completed at 8.24 s (USEC_INITIALIZED) and WirePlumber's
+only pass over it logged at 8.28 s, and it never re-reads UCM for a card
+it already has. A WirePlumber restart attached HiFi and the Speakers chain
+relinked. 0.2.29: iceland-audio-check now checks the session for an ALSA
+sink once the session is up and restarts WirePlumber once if none,
+logging it. Pen: connected and bonded after the reboot, but the daemon had
+resolved the GATT table before BlueZ finished service discovery ("not
+resolved; cannot write 20 bytes") — it now waits for ServicesResolved;
+after the fix the owner has movement, click and right click again.
+Graphics Tablets panel: libwacom identifies a device from the udev
+PRODUCT property and accepts only bus 0/3/5/0x18 (libwacom.c
+get_bus_vid_pid), so our SPI bus 0x1c was rejected even with 0043's ids;
+74-iceland-pen.rules now sets PRODUCT=18/603/6536/0 on the two devices and
+`libwacom-list-local-devices` answers "OnePlus Pad 4".
+
+Charging census (battery 99–100 %, Anker PD/SuperVOOC wall supply):
+usb_type [PD_PPS], 8.94 V × 0.51 A, ICL 1.5 A, voltage_max 9 V,
+current_max 5 A — the 9 V contract Perpetua's battmgr asks for is in
+place (4.6 W only because the battery is full; the rate measurement waits
+for a lower charge). Both SC8547D pumps bound (0-006a, 2-006a) and the
+sc8547-svooc supply exists; its debugfs status: idle, 0 frames, model 00 —
+the Anker never spoke VOOC, it is a PD PPS source to this firmware, so
+SuperVOOC needs the OnePlus adapter. The PMK8850 Gen4 ADC exposes the six
+thermistors as labelled IIO channels (batt_con 28.4, usb_con 29.8,
+usb_temp_l 24.3, svooc_mos 28.7, subboard 27.9, usb_temp_r 24.6 °C); no
+thermal zones for them, so the session script reads the channels. The
+driver's probe defaults the mode to Fast (sc8547_svooc.c:1236) — written
+back to Standard for now, to be set deliberately for the staged test.
