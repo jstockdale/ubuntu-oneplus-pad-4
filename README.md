@@ -47,7 +47,7 @@ earn a ✅ here.
 | Display (dual-DSI NT36536, 3392×2400, 144 Hz) | ✅ | console and Wayland on glass; stock timings |
 | GPU (Adreno 840, Mesa 26 / freedreno) | ✅ | OpenGL ES 3.2, GL-composited Weston |
 | Touchscreen (10-point) | ✅ | auto-loads every boot, 30-minute soak clean; touch-to-wake not yet (planned) |
-| Stylus | 🟡 | a proper tablet device for libinput on kernel #43; the Stylo Pro itself does not transmit yet (its Bluetooth-side sync is being researched) |
+| Stylus | 🟡 | writes with pressure, taps and hovers on kernel #44 with the Bluetooth-brokered handshake (bond + bridge daemon); barrel-button mapping and battery readout still owed |
 | Backlight, buttons | ✅ | |
 | Wi-Fi (WCN7860 / ath12k) | ✅ | auto-joins; ssh over the air |
 | Bluetooth | 🟡 | controller up on the device's factory address; pairing untested |
