@@ -2201,3 +2201,25 @@ not in the build glob, until stylus-input bundle #43 has flown — the
 level-shifter regulator prerequisite could fail the whole PMH0101
 rpmh-regulator probe if LS3B_E0/LS4B_E0 were missing from the command
 DB (display rails), which must not confound the stylus evaluation.
+
+## 2026-11-02 — Why the tablet charges at ~10 W: the pin predates Denial's charging work
+
+Live on the PD 3.0 adapter (over Wi-Fi; usb0 unplugged): qcom-battmgr-usb
+online, voltage_max 5000000, input_current_limit 2000000, 4.898 V ×
+1.990 A = 9.75 W at the input; battery Charging at 54 %, 3.999 V ×
+1.736 A = 6.94 W; typec power_operation_mode usb_power_delivery, PD 3.0,
+partner supports PD; the UCSI source supply reports 0 (no capabilities
+surfaced); dmesg: qcom_battmgr "unknown message 0x1000a" — the firmware's
+input-event notification our driver drops. Perpetua perpetua/v7.3 since
+our pin: eleven qcom_battmgr commits (request matching, errno results,
+service-up enable, host-set and type-based input limit with a ramp, wall
+chargers to 3 A, input events, status/power derivation, and on Nov 3
+"ask Kaanapali Oplus PD sources for 9 V": 500 mA → 9 V PDO → 1.5 A, the
+stock 13.5 W) plus SuperVOOC: SC8547D charge-pump driver, oplus_svooc
+protocol library, sc8547_svooc session driver, WCD939x D+/D- mux, PMK8850
+Gen4 ADC + four thermistors; devices/iceland/charging.md records 51–55 W
+from the 80 W adapter with the firmware's overheat trip at 59 °C pumps
+and a design target of ~55 W under 70 °C limits. The battmgr series does
+not apply standalone on our pin (depends on the five earlier battmgr
+commits); cherry-picking ~25 commits is the wrong vehicle → new rung P
+(pin bump) in bringup-plan.md, after the VP/stylus flights and flash.

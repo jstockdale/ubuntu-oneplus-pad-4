@@ -256,6 +256,53 @@ decoded shell model cannot run yet.
    Headphones UCM device from the wcd939x sequences alsa-ucm-conf already
    ships; if detection never fires, obtain Fedora's q90w2 headset fixes.
 
+## P — Kernel pin bump (charging: PD 9 V and SuperVOOC; suspend; thermal ADC)
+
+Measured 2026-11-02 on a PD 3.0 charger (the owner's SuperVOOC-capable
+adapter): contract held at 5 V (voltage_max 5 V), input limit 2 A →
+4.90 V × 1.99 A = 9.75 W in, 6.9 W into the battery; the driver logs
+"unknown message 0x1000a" (the firmware's input events). Cause: our pin
+7c98a10e6bb7 (Oct 28) predates Denial's Oplus-Kaanapali charging work on
+perpetua/v7.3 (Oct 31 – Nov 3): request matching and errno results,
+charging enabled when the service comes up, host-set input limit, input
+events reported, input limit by charger type with a ramp (wall chargers
+to 3 A), battery status/power derivation, and "ask PD sources for 9 V"
+(006b67a31bae: drop to 500 mA, request the fixed 9 V PDO, ramp to 1.5 A
+= stock's 13.5 W; Denial measured 8.9 V × 1.39 A ≈ 12.4 W). Beyond PD,
+SuperVOOC landed the same days: the Southchip SC8547D charge-pump driver
+(both pumps, VOOC PHY over D+/D- through the WCD939x mux), the
+oplus_svooc protocol library (KUnit-tested), sc8547_svooc session driver,
+PMK8850 Gen4 ADC with the four thermistors (battery connector, USB
+connector, SVOOC MOSFETs, subboard) — devices/iceland/charging.md:
+51–55 W from the 80 W adapter (model 0x4B), battery 11.2 A, connector
+48 °C / MOSFETs 44 °C; an earlier run tripped the firmware's own
+"Overheat" at 54 W with pumps at 59 °C; design target "about 55 W with
+70 °C hardware limits". The battmgr commits do not apply on our pin on
+their own (they sit on five earlier battmgr changes) and the SuperVOOC
+set is ~25 commits across power/supply, iio/adc, typec mux and DT: the
+vehicle is a pin bump, not cherry-picks.
+
+- P0 host: new pin = perpetua/v7.3 head (b7d639cfb282 or later). Re-apply
+  the series: 0028's READ_DONE hunk drops (9ba37ef1db70), expect
+  conflicts in sound/soc/qcom (0011–0028 vs head's q6apm changes) and
+  none in iris (head has no iris work); re-diff, apply-check as files,
+  config fragments re-merged (+CONFIG_QCOM_SPMI_ADC5_GEN3, the SC8547 /
+  SVOOC options as Perpetua's devices/iceland/kernel.config sets them).
+  Build gate: modules diff census, DTB diff reviewed.
+- P1 RAM boot on the 5 V-only charger first (the PD adapter): the whole
+  system census (display, touch, audio, Wi-Fi, BT, GDM, iris, stylus) +
+  PD: expect 9 V × ~1.4 A ≈ 12–13.5 W, battmgr no "unknown message".
+- P2 SuperVOOC on the owner's adapter, tethered to the serial/usb0
+  witness: sc8547 pumps bound, sc8547-svooc MAINS supply present, debugfs
+  status; watch the four thermistors and battery current; PASS = Denial's
+  envelope (≈50–55 W, pumps < 60 °C, no firmware overheat trip) and a
+  clean fallback to PD when the session is refused. Safety: the
+  firmware's 500 mA fallback after a failed session needs a replug; never
+  run the first session unattended; the thermistor zones must exist
+  before the session is enabled (their absence is the abort criterion).
+- P3 flash; then the suspend rungs of C6 (ebe4aed7e940 GDSC retention
+  comes with the bump) and the thermal zones for the shell model.
+
 ## C6 — Hardening / dailyability (after C5)
 
 Verified 2026-11-02 (suspend reader): the tablet has never suspended

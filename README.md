@@ -55,7 +55,7 @@ earn a ✅ here.
 | Speakers (6× TFA9865) | ✅ | stock loudness behind a PipeWire protection chain |
 | Microphones | ✅ | kernel patch 0028 (see [Upstreaming](#upstreaming)) |
 | Wired headphones | 🟡 | path starts then stops; untested with a headset |
-| Battery telemetry, charging | ✅ | fast charge (SuperVOOC) not verified |
+| Battery telemetry, charging | 🟡 | telemetry ✅; charging at 5 V/≈10 W on our kernel pin — 9 V PD and SuperVOOC (≈55 W) are in Perpetua since Oct 31 and come with the pin bump |
 | Thermal | 🟡 | zones registered; no policy daemon yet |
 | Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)) |
 | Suspend / resume | ❓ | deliberately untested so far |
