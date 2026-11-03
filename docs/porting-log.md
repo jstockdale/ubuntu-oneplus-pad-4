@@ -2047,3 +2047,16 @@ archive; the package adds google-chrome.sources + key so it updates via
 apt), dpkg --audit clean, fwupd still absent. Headless sanity as the
 ubuntu user renders a data: URL and exits 0; `google-chrome --version` =
 156.0.8078.79. Kept outside the repo at /srv/ubuntu-iceland/out/chrome/.
+
+## 2026-11-02 — VP1 FIRST LIGHT PASSED: iris VPU probes on kernel #41 (RAM boot)
+
+Owner `fastboot boot`ed bundle aa88f542 (kernel #41 = 0001–0036). At 21 s
+uptime: live DT has soc@0/video-codec@2000000 status okay, firmware-name
+qcom/kaanapali/iceland/vpu40_2v.mbn; `platform 2000000.video-codec:
+Adding to iommu group 12` at 0.24 s; driver qcom-iris bound; /dev/video0
+= "Iris Decoder" (OUT: H264, HEVC, VP90, AV01; CAP: NV12, Q08C, P010,
+Q10C), /dev/video1 = "Iris Encoder" (OUT: NV12, Q08C; CAP: H264, HEVC);
+zero iris error lines; SMMU: only the baseline cbfrsynra=0x800 lines,
+none on 0x1940/0x1943/0x1944/0x1a20; audio card, ADSP/CDSP, touch, the
+single deferred TNOC entry all as on #39. Firmware/PAS happens at the
+first session open — VP2 (decode) is the proof.
