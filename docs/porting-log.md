@@ -2223,3 +2223,14 @@ and a design target of ~55 W under 70 °C limits. The battmgr series does
 not apply standalone on our pin (depends on the five earlier battmgr
 commits); cherry-picking ~25 commits is the wrong vehicle → new rung P
 (pin bump) in bringup-plan.md, after the VP/stylus flights and flash.
+
+## 2026-11-02 — Pin-bump dry run: 55/59 of our patches apply on Perpetua head
+
+Scratch worktree at origin/perpetua/v7.3 = b7d639cfb282 (100 commits past
+7c98a10e6bb7); `git apply --index` of kernel/patches/0001–0055 +
+staged/0056–0062 as files: 55 apply, 4 conflict — 0028 (READ_DONE hunk
+now upstream), 0031 (board dts tail moved), 0058 (pmic_glink.c +
+compatible renamed to oneplus,kaanapali-pmic-glink by 5ff346c547a7),
+0061 (board dts gained the charge pumps, thermistors and the cooling
+include). Only six head commits touch files our series touches. Owner
+confirmed the order: rung P after #44 and its flash.

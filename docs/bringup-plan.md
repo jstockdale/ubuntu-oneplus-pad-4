@@ -282,13 +282,22 @@ their own (they sit on five earlier battmgr changes) and the SuperVOOC
 set is ~25 commits across power/supply, iio/adc, typec mux and DT: the
 vehicle is a pin bump, not cherry-picks.
 
-- P0 host: new pin = perpetua/v7.3 head (b7d639cfb282 or later). Re-apply
-  the series: 0028's READ_DONE hunk drops (9ba37ef1db70), expect
-  conflicts in sound/soc/qcom (0011–0028 vs head's q6apm changes) and
-  none in iris (head has no iris work); re-diff, apply-check as files,
-  config fragments re-merged (+CONFIG_QCOM_SPMI_ADC5_GEN3, the SC8547 /
-  SVOOC options as Perpetua's devices/iceland/kernel.config sets them).
-  Build gate: modules diff census, DTB diff reviewed.
+- P0 host: new pin = perpetua/v7.3 head (b7d639cfb282 or later). Dry run
+  2026-11-02 on b7d639cfb282 (100 commits past the pin): 55 of our 59
+  patch files apply unchanged; the four that conflict, each small:
+  0028 (READ_DONE hunk merged upstream as 9ba37ef1db70 — keep only the
+  WRITE_DONE hunk), 0031 (head appended nodes at the end of the board
+  dts — re-diff the &iris append), 0058 (pmic_glink.c changed once by
+  e02224f94012, and 5ff346c547a7 renames the board's pmic-glink
+  compatible to oneplus,kaanapali-pmic-glink with the generic fallback —
+  key the hBoost client on the new string), 0061 (the board dts gained
+  the SuperVOOC charge pumps f87a3641ea94, the charger thermistors
+  573a270f7b90 and the CPU cooling include 8bd03159587a — re-diff the
+  charger node and pinctrl against the new neighbours). 0011–0027 and
+  the iris set apply as-is. Config fragments re-merged with Perpetua's
+  devices/iceland/kernel.config for the new drivers (ADC5 Gen3/Gen4,
+  SC8547, SC8547_SVOOC, oplus_svooc). Build gate: modules diff census
+  against the previous bundle, DTB diff reviewed node by node.
 - P1 RAM boot on the 5 V-only charger first (the PD adapter): the whole
   system census (display, touch, audio, Wi-Fi, BT, GDM, iris, stylus) +
   PD: expect 9 V × ~1.4 A ≈ 12–13.5 W, battmgr no "unknown message".
