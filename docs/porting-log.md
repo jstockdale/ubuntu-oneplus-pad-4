@@ -1962,3 +1962,17 @@ three the sensors plan lacked). Its README grants only the right to use
 the files with a Pad 4 ("all rights remain with their owners") — the
 thermal-model.json there is NOT redistributable under our license; the
 thermal daemon rung must either get permission or re-derive the model.
+
+## 2026-11-02 — VP0 build gate PASSED: kernel #41 (0001–0036), bundle aa88f542
+
+build-vp0.log attempt 2: 36/36 applied, 0 errors, built 01:49:59Z. Image
+bae96cc8, DTB 045498a9 (differs from #39's 7a366caa by the iris node),
+initramfs 812ed6c3 (post-0.2.21), bundle boot.img aa88f542 (96 MiB).
+Gate: `modinfo qcom-iris.ko.zst` → 2 × qcom,kaanapali-iris aliases;
+`dtc -I dtb` → video-codec@2000000 compatible qcom,kaanapali-iris, reg
+0x2000000/0xf0000, IRQ 174, iommus SIDs 0x1940/0x1943/0x1944/0x1a20,
+status okay, firmware-name qcom/kaanapali/iceland/vpu40_2v.mbn. Module
+diff vs #39 (938 .ko): exactly one — qcom-iris.ko.zst — so the RAM flight
+is one variable. The tablet's #39 module tree was backed up before the
+single module was pushed and depmod re-run. VP1 = `fastboot boot
+out/bundle/boot.img` (RAM only), then scratchpad/flight-vp1.sh.
