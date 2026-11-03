@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Sat, 3 Oct 2026 14:14:07 +0300
+Subject: [PATCH] wifi: ath12k: make the firmware 802.11d scan optional, off on
+ this tablet
+
+With the 11d offload service the driver starts a firmware 11d scan
+right after a host scan whenever a station interface was (re)started.
+After a disconnect that is the reconnect scan of the supplicant, so the
+firmware can scan all bands off-channel while mac80211 authenticates,
+associates and runs the 4-way handshake.
+
+In one rehearsal on the OnePlus Pad 4 (WCN7860) every reconnect after a
+drop failed this way: the association completed, the first EAPOL frame
+never arrived, the firmware reported beacon loss after 7-9 s and some
+authentication attempts timed out without an answer. The failure has
+not been reproduced since, so this cause is not proven, but the vendor
+driver of this tablet runs without the 11d scan
+(g11dSupportEnabled=0) and this change matches it.
+
+Add a read-only module parameter enable_11d, off by default, and check
+it together with the firmware service wherever the 11d state is armed
+or the scan would start, so the driver behaves as on firmware without
+the service. The regulatory domain is the firmware's own; the 11d scan
+only proposed country changes that the firmware refuses.
+ath12k.enable_11d=1 restores the previous behaviour.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+[Carried by the Ubuntu port from the Fedora iceland queue (0189 there), with the author's sign-off; module parameter enable_11d, off by default. Why here: on kernel #45 two of the day's reconnects ended in "Connection to AP … lost" 10–12 s after the association — the window in which the firmware's 11d scan goes off-channel — the same signature the author saw on this tablet, and the vendor driver runs with g11dSupportEnabled=0. Flown as its own module swap after 0064–0067 (one variable per flight). Exit: an upstream way to opt out of the 11d scan, or Perpetua carrying this; else permanent with this reason.]
+---
+ drivers/net/wireless/ath/ath12k/core.c  |  5 +++++
+ drivers/net/wireless/ath/ath12k/debug.h |  1 +
+ drivers/net/wireless/ath/ath12k/mac.c   | 19 ++++++++++++++++---
+ 3 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index b0107cde99ff..9a5c45191fd7 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -35,6 +35,11 @@ module_param_named(ftm_mode, ath12k_ftm_mode, bool, 0444);
+ MODULE_PARM_DESC(ftm_mode, "Boots up in factory test mode");
+ EXPORT_SYMBOL(ath12k_ftm_mode);
+ 
++bool ath12k_enable_11d;
++module_param_named(enable_11d, ath12k_enable_11d, bool, 0444);
++MODULE_PARM_DESC(enable_11d, "Run the firmware's 802.11d country scan (default: off)");
++EXPORT_SYMBOL(ath12k_enable_11d);
++
+ /* protected with ath12k_hw_group_mutex */
+ static struct list_head ath12k_hw_group_list = LIST_HEAD_INIT(ath12k_hw_group_list);
+ 
+diff --git a/drivers/net/wireless/ath/ath12k/debug.h b/drivers/net/wireless/ath/ath12k/debug.h
+index 658b8083c9c3..57e3ff2182c3 100644
+--- a/drivers/net/wireless/ath/ath12k/debug.h
++++ b/drivers/net/wireless/ath/ath12k/debug.h
+@@ -39,6 +39,7 @@ __printf(2, 3) void __ath12k_warn(struct device *dev, const char *fmt, ...);
+ 
+ extern unsigned int ath12k_debug_mask;
+ extern bool ath12k_ftm_mode;
++extern bool ath12k_enable_11d;
+ 
+ #ifdef CONFIG_ATH12K_DEBUG
+ __printf(3, 4) void __ath12k_dbg(struct ath12k_base *ab,
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 92a46597028e..0a2c7f1e5034 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -10296,6 +10296,19 @@ static bool ath12k_mac_vif_ap_active_any(struct ath12k_base *ab)
+ 	return false;
+ }
+ 
++/*
++ * The firmware 802.11d scan runs off-channel next to the host scan that
++ * started it; while connecting it can take the radio away from the
++ * authentication and the 4-way handshake. It needs the firmware service and
++ * the enable_11d module parameter; without either, the 11d state stays idle
++ * as on firmware without the service.
++ */
++static bool ath12k_mac_11d_enabled(struct ath12k_base *ab)
++{
++	return ath12k_enable_11d &&
++	       test_bit(WMI_TLV_SERVICE_11D_OFFLOAD, ab->wmi_ab.svc_map);
++}
++
+ void ath12k_mac_11d_scan_start(struct ath12k *ar, u32 vdev_id)
+ {
+ 	struct wmi_11d_scan_start_arg arg;
+@@ -10309,7 +10322,7 @@ void ath12k_mac_11d_scan_start(struct ath12k *ar, u32 vdev_id)
+ 	if (ar->vdev_id_11d_scan != ATH12K_11D_INVALID_VDEV_ID)
+ 		goto fin;
+ 
+-	if (!test_bit(WMI_TLV_SERVICE_11D_OFFLOAD, ar->ab->wmi_ab.svc_map))
++	if (!ath12k_mac_11d_enabled(ar->ab))
+ 		goto fin;
+ 
+ 	if (ath12k_mac_vif_ap_active_any(ar->ab))
+@@ -10622,7 +10635,7 @@ int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arvif)
+ 			arvif->set_wds_vdev_param = true;
+ 		}
+ 
+-		if (test_bit(WMI_TLV_SERVICE_11D_OFFLOAD, ab->wmi_ab.svc_map) &&
++		if (ath12k_mac_11d_enabled(ab) &&
+ 		    ahvif->vdev_type == WMI_VDEV_TYPE_STA &&
+ 		    ahvif->vdev_subtype == WMI_VDEV_SUBTYPE_NONE) {
+ 			reinit_completion(&ar->completed_11d_scan);
+@@ -12460,7 +12473,7 @@ ath12k_mac_op_unassign_vif_chanctx(struct ieee80211_hw *hw,
+ 	}
+ 	arvif->is_started = false;
+ 
+-	if (test_bit(WMI_TLV_SERVICE_11D_OFFLOAD, ab->wmi_ab.svc_map) &&
++	if (ath12k_mac_11d_enabled(ab) &&
+ 	    ahvif->vdev_type == WMI_VDEV_TYPE_STA &&
+ 	    ahvif->vdev_subtype == WMI_VDEV_SUBTYPE_NONE &&
+ 	    ar->state_11d != ATH12K_11D_PREPARING) {
+-- 
+2.43.0
+

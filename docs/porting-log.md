@@ -2920,3 +2920,51 @@ cannot end it. Verified: after each of three reloads the unit ran from the
 change event and wrote Standard within four seconds; with the flag set it
 left Fast alone; the install-time trigger ran it too. The boot-time path
 is verified at the next boot (#46 RAM boot).
+
+
+## 2026-11-03 — ath12k "Timeout while waiting for regulatory update": cause found, fixes carried (0064–0068), flight pending
+
+The owner asked why the line keeps appearing. On kernel #45 the trace is
+regular: every association is followed exactly 3 s later by the timeout
+(5 per boot over 30 min, 12 on an earlier boot), the boot carries two
+"Failed to set the requested Country regulatory setting" lines at 10.5 s,
+and two of the day's reconnects ended in "Connection to AP
+00:00:00:00:00:00 lost" 10–12 s after the association. The regulatory
+domain itself is right: the phy is self-managed and runs the firmware's
+US/FCC rules (the global "00" the `iw reg get` header shows is not what
+the radio uses).
+
+Mechanism, from the driver at the pin: on a station (re)start the driver
+launches the firmware's 802.11d scan (mac.c ath12k_mac_11d_scan_start);
+the country it proposes goes through cfg80211 to ath12k_reg_notifier,
+which sends WMI set-current-country and queues ath12k_regd_update_work;
+ath12k_regd_update() then waits up to ATH12K_REG_UPDATE_TIMEOUT_HZ (3 s)
+on regd_update_completed. The firmware answers with a reg-chan-list event
+whose status is not PASS (it keeps its own domain), and in
+ath12k_reg_chan_list_event() the DROP/FALLBACK paths jump to mem_free
+with pdev_idx still 255, so `ar` stays NULL and complete_all() is never
+reached — the waiter runs out the full 3 s every time. This is Baochen
+Qiang's "fix timeout while waiting for regulatory update on bring-up"
+series (ath/ath-next for 7.4: f2576dc0f894 sets pdev_idx before
+validation; af8d103b2b23, 04497f2a7721, 8ab8a5ee16b2 make the
+registration-time country set skip an unchanged country, which is the
+boot-time failure line), and the Fedora iceland queue carries it as
+0139–0142; their 0143 (single-pdev frequency range) is already covered by
+Perpetua 25c660d8bee0 in the pin. Carried here as 0064–0067, applying in
+order on b7d639cfb282 (67-patch series check clean).
+
+The drops are a second matter: the Fedora port's 0189 ("make the firmware
+802.11d scan optional, off on this tablet") describes the same signature —
+association completes, the first EAPOL never arrives, beacon loss after
+7–9 s while the firmware scans all bands off-channel — and notes that the
+vendor driver runs with g11dSupportEnabled=0; the scan only proposes
+countries the firmware refuses anyway. Carried as 0068 (module parameter
+enable_11d, default off), to fly on its own after 0064–0067.
+
+Flight plan: ath12k is a module (ath12k.ko.zst + ath12k_wifi7), so both
+changes fly as live module swaps on the running kernel with a detached,
+self-healing script (unload, install, reload, wait 120 s for an address,
+else restore the previous module) once the #46 build has released the
+build tree; pass = no timeout after associations, no boot-time country
+failure, and no "Connection to AP lost" over an afternoon; the modules
+then ride the rootfs tree into the #46 boot.

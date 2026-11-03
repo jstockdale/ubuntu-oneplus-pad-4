@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Baochen Qiang <baochen.qiang@oss.qualcomm.com>
+Date: Wed, 29 Jul 2026 15:18:14 +0800
+Subject: [PATCH] wifi: ath12k: skip setting country code during registration
+ when unchanged
+
+Currently ath12k_mac_hw_register() unconditionally sets ab->new_alpha2 to
+firmware. But when ab->new_alpha2 is the same as the country already
+applied at boot time (stored in ab->default_regd), setting it again is
+meaningless. So skip it in that case.
+
+Tested-on: WCN7850 hw2.0 PCI WLAN.HMT.1.1.c7-00108-QCAHMTSWPL_V1.0_V2.0_SILICONZ_UPSTREAM-3
+
+Signed-off-by: Baochen Qiang <baochen.qiang@oss.qualcomm.com>
+Reviewed-by: Rameshkumar Sundaram <rameshkumar.sundaram@oss.qualcomm.com>
+Link: https://patch.msgid.link/20260729-ath12k-regd-wait-timeout-v1-4-504aa6e7e93c@oss.qualcomm.com
+Signed-off-by: Jeff Johnson <jeff.johnson@oss.qualcomm.com>
+[ upsync: commit 8ab8a5ee16b2 in ath/ath-next (for 7.4) ]
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+[Carried by the Ubuntu port from the Fedora iceland queue (0142 there), sign-off kept: patch 4 of the same ath-next series (8ab8a5ee16b2, for 7.4). Why here: at boot the driver re-sends the country the firmware already runs and the firmware answers "Failed to set the requested Country regulatory setting" (twice per boot on #45). Patch 5 of the queue's set (0143, the single-pdev frequency range) is not carried: Perpetua 25c660d8bee0 in the pin covers it. Exit: drop with 0064.]
+---
+ drivers/net/wireless/ath/ath12k/mac.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index eeae2a49ca82..92a46597028e 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -15071,6 +15071,8 @@ static int ath12k_mac_hw_register(struct ath12k_hw *ah)
+ 
+ 		if (this_ab->hw_params->current_cc_support) {
+ 			struct wmi_set_current_country_arg current_cc = {};
++			struct ieee80211_regdomain *default_regd;
++			bool same_cc = false;
+ 
+ 			spin_lock_bh(&this_ab->base_lock);
+ 			memcpy(&current_cc.alpha2, this_ab->new_alpha2, 2);
+@@ -15081,6 +15083,16 @@ static int ath12k_mac_hw_register(struct ath12k_hw *ah)
+ 
+ 			memcpy(&ar->alpha2, current_cc.alpha2, 2);
+ 
++			spin_lock_bh(&this_ab->base_lock);
++			default_regd = this_ab->default_regd[ar->pdev_idx];
++			if (default_regd)
++				same_cc = !memcmp(default_regd->alpha2,
++						  current_cc.alpha2, 2);
++			spin_unlock_bh(&this_ab->base_lock);
++
++			if (same_cc)
++				goto fw_stats_init;
++
+ 			reinit_completion(&ar->regd_update_completed);
+ 
+ 			ret = ath12k_wmi_send_set_current_country_cmd(ar, &current_cc);
+-- 
+2.43.0
+
