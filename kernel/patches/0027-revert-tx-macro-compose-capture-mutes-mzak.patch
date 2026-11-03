@@ -1,4 +1,4 @@
-From: jstockdale <jstockdale@gmail.com>
+From: John Stockdale <jstockdale@gmail.com>
 Subject: [PATCH] Revert perpetua "lpass-tx-macro: compose capture mutes"
 
 Perpetua commit aad249d15433 moved register writes into the TX-macro
@@ -19,6 +19,7 @@ mixer_update_power, no register IO) and enable_dec PRE_PMU
 KEPT by this revert (verified: file == upstream v7.3 + ADPT only).
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
 ---
 diff --git a/sound/soc/codecs/lpass-tx-macro.c b/sound/soc/codecs/lpass-tx-macro.c
 index a6cef9541648..cd446c0fb211 100644

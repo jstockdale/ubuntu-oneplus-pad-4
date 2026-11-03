@@ -1,3 +1,11 @@
+From: John Stockdale <jstockdale@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: kaanapali-oneplus-iceland: S1J real voltage floor
+
+Ours (2026-11-01, C3 radios): the S1J rail floor at the stock 892 mV; a lower
+floor reset the SoC on radio power-on. Exit: submit to Perpetua with 0003/0004.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
 index 193a4a669b66..e3737a80aee7 100644
 --- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts

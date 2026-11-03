@@ -1,4 +1,4 @@
-From: Ubuntu iceland port <jstockdale@gmail.com>
+From: John Stockdale <jstockdale@gmail.com>
 Subject: [PATCH] arm64: dts: qcom: kaanapali-oneplus-iceland: drop panic=0 from bootargs
 
 panic=0 on the command line is read twice: the kernel takes it as
@@ -13,6 +13,8 @@ retry. An Ubuntu initramfs needs the argument gone; Perpetua's own
 rescue init never parses it, so its boot flow is unchanged aside from
 relying on the identical built-in panic timeout default.
 
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
 index e22aade66262..3d0c91d262cc 100644
 --- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts

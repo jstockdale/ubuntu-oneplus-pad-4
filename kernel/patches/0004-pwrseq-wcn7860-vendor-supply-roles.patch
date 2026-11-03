@@ -1,3 +1,12 @@
+From: John Stockdale <jstockdale@gmail.com>
+Subject: [PATCH] pwrseq: qcom-wcn: WCN7860 vendor supply roles for iceland
+
+Ours (2026-11-01, C3 radios): the supply-role list the pwrseq-qcom-wcn driver
+expects for the WCN7860 as wired on the OnePlus Pad 4, taken from the stock
+device tree's regulator roles. Exit: submit to Perpetua with 0003/0005.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/drivers/power/sequencing/pwrseq-qcom-wcn.c b/drivers/power/sequencing/pwrseq-qcom-wcn.c
 index 97692c4de340..b3f06aacc604 100644
 --- a/drivers/power/sequencing/pwrseq-qcom-wcn.c

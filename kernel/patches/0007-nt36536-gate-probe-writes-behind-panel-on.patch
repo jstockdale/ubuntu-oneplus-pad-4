@@ -1,3 +1,12 @@
+From: John Stockdale <jstockdale@gmail.com>
+Subject: [PATCH] Input: nt36536: gate the probe-time engineering reset behind panel-on
+
+Ours (2026-11-01, C2 touch), informed by the Fedora iceland port's patch 0174:
+the unconditional nvt_eng_reset in probe reset the live panel. Pairs with 0008
+(mzak's follower). Exit: submit to Perpetua together with 0008.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
 index 50090cb8d91f..9e594e5b73aa 100644
 --- a/drivers/input/touchscreen/nt36536/nt36xxx.c

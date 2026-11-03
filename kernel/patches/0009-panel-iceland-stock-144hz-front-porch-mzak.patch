@@ -1,3 +1,12 @@
+From: John Stockdale <jstockdale@gmail.com>
+Subject: [PATCH] drm/panel: oneplus-iceland-nt36536: stock 144 Hz front porch
+
+Re-diffed from the Fedora iceland port (mzakamin-hub/iceland-linux patch
+queue, author mzak <mzak.amin@gmail.com>) against our tree; porch values
+measured from stock. Exit: drop when Perpetua carries the same timing.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/drivers/gpu/drm/panel/panel-oneplus-iceland-nt36536.c b/drivers/gpu/drm/panel/panel-oneplus-iceland-nt36536.c
 index 22694d64c4a2..d8212ecef9ad 100644
 --- a/drivers/gpu/drm/panel/panel-oneplus-iceland-nt36536.c

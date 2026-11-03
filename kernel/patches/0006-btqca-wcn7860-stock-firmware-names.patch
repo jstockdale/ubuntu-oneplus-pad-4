@@ -1,3 +1,12 @@
+From: John Stockdale <jstockdale@gmail.com>
+Subject: [PATCH] Bluetooth: btqca: WCN7860 stock firmware names for iceland
+
+Ours (2026-11-01, C3 radios): load the brh* firmware names the stock
+Bluetooth stack ships for this WCN7860 (/lib/firmware/qca). Exit: submit to
+Perpetua once the firmware naming is agreed with the Denial project.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/drivers/bluetooth/btqca.c b/drivers/bluetooth/btqca.c
 index 7f3358acaa50..4226b204b07d 100644
 --- a/drivers/bluetooth/btqca.c

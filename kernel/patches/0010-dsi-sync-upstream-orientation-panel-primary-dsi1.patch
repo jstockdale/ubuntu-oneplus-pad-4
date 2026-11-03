@@ -1,3 +1,12 @@
+From: John Stockdale <jstockdale@gmail.com>
+Subject: [PATCH] drm/msm/dsi: sync the upstream orientation for the primary-dsi1 panel
+
+Ours (2026-11-01, C2 touch): restores the upstream DSI sync orientation for
+the panel on the primary DSI1 link; this was THE touch-coordinate fix.
+Exit: submit to Perpetua.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
 index 80dac0b79313..959daa88b1d0 100644
 --- a/drivers/gpu/drm/msm/dsi/dsi_manager.c

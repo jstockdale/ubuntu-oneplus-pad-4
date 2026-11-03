@@ -1,4 +1,4 @@
-From: Ubuntu iceland port <jstockdale@gmail.com>
+From: John Stockdale <jstockdale@gmail.com>
 Subject: [PATCH] watchdog: qcom: stop a bootloader-armed watchdog at probe
 
 The OnePlus Pad 4's ABL hands off with the (hypervisor-emulated) APSS
@@ -10,6 +10,8 @@ further. Upstream U-Boot took the same decision for Snapdragon
 at probe; anything that wants one running can open the device and own
 it on purpose.
 
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
 diff --git a/drivers/watchdog/qcom-wdt.c b/drivers/watchdog/qcom-wdt.c
 index 4eb1bf979012..72993d34a712 100644
 --- a/drivers/watchdog/qcom-wdt.c
