@@ -29,7 +29,7 @@
 > - A0–A7 are complete (A7 PASSED 2026-11-02): the topology ships at the stock ceiling (VOL_CTRL_MAX 8192, d8f4b5f3…) behind the PipeWire protection chain (0.2.18); speakers ✅ and microphones ✅ in hardware-status.md. §4's rungs landed as kernel/patches/0011–0024 (A2: their 0041/0042/0045/0048/0044/0049/0046/0047/0104/0290/0051 + DT 0038/0043/0050 — 14 patches, not 15: 0059 was already complete in Perpetua, POST_PMU write included), 0025/0026 (A8's 0109 and 0131, built into #36), and two fixes the plan did not foresee, both ours: 0027 (revert of Perpetua aad249d15433, the tx-macro capture mutes that kept the analog capture chain dark) and 0028 (q6apm dropped every DSP capture completion as "too short", 56 vs 60 bytes; the READ_DONE half is upstream as 9ba37ef1db70 and was dropped at the pin bump, the WRITE_DONE half is still carried). Fedora 0130 is a no-op here (the board file already redefines adspslpi_mem at 0x5000000; 0029 withdrawn 2026-11-02); 0184/0194/0201 not adopted.
 > - Pin bump 2026-11-03 (build #45, flashed): every "our tree"/"@7c98a10e" citation below is against the old pin; the pin is b7d639cfb282. 0020 (= their 0290, the middle amps' gain/boost) was retired because Perpetua's TFA9865 driver now puts the middle pair in stock's playing state by itself (5f:00e0, 76:d700 read back on #45); the I2C bus numbers changed with the pin (middle amps 3-0037/7-0037). Series: 0001–0063 less 0020 (62 files).
 > - Landed since the ladder: the processed microphone (0.2.26 — stock's 14 dB recorder gain lives in its DSP; WebRTC AEC + gain control, then +14 dB under a limiter, as the Fedora port does it; default input "Internal microphones (voice processing)", raw selectable); the clock-domain fix for the crackle (0.2.27 — capture clock.name, sink priority.driver 3000, min-quantum 2048; two DSP-timed PCMs were being hard-resynced); four boot outages, each root-caused with a package fix: the userspace pd-mapper race (0.2.20), WirePlumber's second card object from the compress node (0.2.23, 52-iceland-compress.conf), four chain modules not autoloaded on one boot (0.2.26, modules-load.d + iceland-audio-check), and the card registering during WirePlumber's first pass so its UCM profile never attaches (repeats on every boot of #45; the 0.2.29 guard restarts WirePlumber once and logs it, 0.2.30 scopes it to the owner's session) — Q7's ordering worry came true on WirePlumber's side, not alsactl's.
-> - Still open: wired headphones (Q5 — a USB-C analog headset is the only blocker; the Headphones UCM device still to be written), BT A2DP (libspa-0.2-bluetooth), Q1 (phonewave's 11b78ff1… differs from both our builds, f9bfb173…/d8f4b5f3…), the loudness comparison against stock. Next audio rung after sensors (it needs hexagonrpcd's audio-PD file server): the Goodix SpeakerBoost DSP engine (AMDB registration, ACDB; blobs stay device-local). Upstream candidates not yet filed (docs/upstreaming.md): 0028's WRITE_DONE half, PipeWire's alsa-udev card object for comprC* nodes, WirePlumber's first-pass UCM attach.
+> - Still open: wired headphones (Q5 — a USB-C analog headset is the only blocker; the Headphones UCM device still to be written), BT A2DP (libspa-0.2-bluetooth), Q1 (phonewave's 11b78ff1… differs from both our builds, f9bfb173…/d8f4b5f3…), the loudness comparison against stock. The Goodix SpeakerBoost DSP engine is a committed phase since 2026-11-04 (owner's decision: a full implementation of the sensor and SpeakerBoost path after the charging sprint) — §7, rungs SB0–SB7, after sensors S2/S3, which bring up the FastRPC daemon it needs; the research behind it (one agent, 2026-11-04) is under /srv/ubuntu-iceland/build/audio-work/ (never committed). Upstream candidates not yet filed (docs/upstreaming.md): 0028's WRITE_DONE half, PipeWire's alsa-udev card object for comprC* nodes, WirePlumber's first-pass UCM attach.
 
 Date: 2026-11-01 (research night; flights when C4 opens). Companion to
 docs/porting-log.md (:981-986, the C4 doorbell) and docs/firmware-manifest.md
@@ -93,6 +93,13 @@ Audio-specific rails (hard rules of this plan, §5 has the reasoning):
   stream (Fedora's pc-026 S12 lesson, §2.4).
 - **A6. The stock ADSP image is never modified**; we fly the same
   `adsp.mbn` we already ship (byte-identical to the Fedora port's, §1.5).
+- **A7. The protection engine is never instantiated open-loop** (added
+  2026-11-04 with §7): the SpeakerBoost rx module runs only with its full
+  calibration blob, enable set, the per-unit Re25 injected and the sense (tx)
+  graph started and linked — without the IV path it logs "RX process without
+  IV" and keeps applying its gains while protecting nothing. The sense capture
+  front end is held open whenever the speaker sink is active, the PipeWire
+  limiter never leaves, and a flat R0 under load means open-loop: stop.
 
 ---
 
@@ -187,6 +194,16 @@ configs/required.config:14). The whole set is in the diag-flight blacklist
   register profiles only, no DSP blob. This is the provenance source for every
   amp register the port writes, and the proof the TFA9865 here is a DSP-less
   part (§5.1).
+- The engine itself **[verified 2026-11-04, §7]**: stock's protection is two
+  Goodix CAPI-v3 modules the ADSP loads *dynamically* into its audio PD —
+  `odm:/lib/rfsa/adsp/libtfadsp_rx_6pa_sb7_0.so` (module 0x1700B911,
+  SpeakerBoost 7.0 for six PAs) and `libtfadsp_tx_6pa_sb7_0.so` (0x1700B912,
+  the V/I sense half) — registered with the AMDB from the OPLUS ACDB's MODM
+  chunk (`odm:/etc/acdbdata/acdb_cal.acdb`), hash-allowlisted inside the very
+  `adsp.mbn` below, fetched at the first GRAPH_OPEN through the audio PD's
+  FastRPC file listener. Not in the amps, not static in the ADSP image. The
+  per-unit Re25/F0 live in persist (`/media/tfa_cali*.bin`). All three stay
+  device-local (Appendix B).
 - Our shipped `adsp.mbn` (sha `781512db…`) is **byte-identical to the Fedora
   port's** (iceland-firmware MANIFEST.tsv, same hash, source
   `modem_a:/image/adsp.mdt` squashed) — their topology ran against exactly our
@@ -325,7 +342,8 @@ the measured gap to stock.
 
 So the protection path on this port is **userspace (PipeWire), with kernel
 backstops** (topology cap + 0051 clamp + stock amp registers). There is no
-kernel or ADSP excursion model — see §5.1.
+kernel or ADSP excursion model — see §5.1. Stock's engine, and the committed
+plan to run it on our ADSP behind this chain, is §7 (2026-11-04).
 
 ### 2.5 Proof of life + sequencing **[verified]**
 
@@ -487,7 +505,8 @@ fastrpc backports).
 only register profiles ("dummy" patch entries, §1.5), and stock Android runs
 the excursion/thermal protection model **on the ADSP** (the sense-data TDM
 return slots the container maps — regs 0x21/0x22 high fields, 0x68 — feed it).
-Our mainline graph has **no such module**; the chip's own last-ditch hardware
+Our mainline graph has **no such module** (until §7's rungs SB0–SB7 bring
+stock's own engine up, 2026-11-04 decision); the chip's own last-ditch hardware
 protections (OCP/OTP/UVP, clip control) plus the stock boost/attenuation
 registers are all that exist below userspace. Therefore:
 
@@ -567,6 +586,180 @@ registers are all that exist below userspace. Therefore:
 
 ---
 
+## 7. SpeakerBoost DSP engine (rungs SB0–SB7) — committed 2026-11-04
+
+Owner's decision 2026-11-04: the port implements stock's speaker-protection
+engine in full, after the charging sprint (bringup-plan P and Q) and on top of
+the sensors ladder (S1 builds the FastRPC daemon, S2 attaches it, S3 opens the
+non-secure node — SB reuses all three). Research: one agent's report, written
+2026-11-04 without fan-out, under `/srv/ubuntu-iceland/build/audio-work/`
+(`speakerboost-dsp-research.md`, `acdb_walk.py`, the ACDB walk; research
+material, never committed). **[verified]** below was read from the stock
+extraction or parsed from the ACDB itself; **[unverified]** is named as such.
+
+### 7.1 What stock runs **[verified]**
+
+- Two Goodix CAPI-v3 modules loaded **dynamically** into the ADSP audio PD:
+  `libtfadsp_rx_6pa_sb7_0.so` (module 0x1700B911, tag `capi_tfadsp_rx`,
+  SpeakerBoost 7.0 for six PAs) and `libtfadsp_tx_6pa_sb7_0.so` (0x1700B912,
+  `capi_tfadsp_tx`, the V/I sense half). Shipped in `odm:/lib/rfsa/adsp/`,
+  registered with the AMDB from the OPLUS ACDB's MODM chunk (proc 2), hash-
+  allowlisted in the `adsp.mbn` we already boot, fetched by the DSP at the
+  first GRAPH_OPEN through the audio PD's FastRPC file listener (stock:
+  `audioadsprpcd audiopd adsp`, a static PD with a 3 MiB heap, bootup preload
+  list empty). Not in the amps (§1.5), not static in the ADSP image.
+- Graph: speaker device subgraph 0xB0000002 = SAL → MFC → **tfadsp_rx**
+  @0x40CC → splitter → LOG → TDM sink (PRIMARY TDM RX, 8 × 32); VI subgraph
+  0xB00000D5 = TDM source (PRIMARY TDM TX, 8 ch × 32 bit, 48 kHz) → LOG →
+  OPLUS module 0x10012D19 → splitter → **tfadsp_tx** @0x4032; an IMCL control
+  link tfadsp_tx:0x80000000 ↔ tfadsp_rx:0x80000002 (intent 0x08001231) is
+  declared in both subgraphs. All six amps return sense data on their own TDM
+  slot (0x68 = 0x0914, Appendix A); the 32-bit word layout is **[unverified]**
+  (E4).
+- Calibration: 74 ACDB parameters (14,844 B) for the rx instance per use-case
+  variant, seven variants keyed by CKV 0xEF000000 ∈ {0, 2, 3, 4, 5, 7, 10}
+  (43 of 74 identical across them; which is music playback is
+  **[unverified]**, 0 inferred — E1). Each blob is a raw SpeakerBoost message
+  (LSMODEL, ALGO_PARAMS, MBDRC, excursion filters, a default Re25 of 7.4 Ω).
+  tx: enable only. Runtime PIDs 0x1800B921 TFADSP_RX_SET_COMMAND and
+  0x1800B922 TFADSP_RX_GET_RESULT. Per-unit Re25 ×6 / F0 ×4 live only in
+  persist `/media/tfa_cali*.bin` and are injected at every speaker start.
+- The hardware-relevant fact: with the VI graph not started and linked the rx
+  module logs "RX process without IV" and runs **open-loop while still
+  applying its gains**. That is rail A7.
+
+### 7.2 What mainline lacks at our pin **[verified]**
+
+Topology per-module private data exists but is sent only for SMECNS_V2
+(audioreach.c); the control-link graph-open code exists but nothing populates
+it and topology.c has no tokens; no AMDB_CMD_REGISTER_MODULES; no set/get-
+parameter bytes control; fastrpc has INIT_CREATE_STATIC but our DT lacks the
+remote-heap region and VMIDs (Fedora 0170/0194 lineage, 12 MiB); hexagonrpcd
+has no static-PD mode and a partial `apps_std` (flen, getenv, search paths
+missing; an unsupported method ends its serve loop). No community tool converts
+this ACDB format; the walker written for the research reproduces GSL's
+14,844-byte set.
+
+### 7.3 The ladder
+
+Host work (no tablet; interleaves with the charging flights' drains and the
+S1 host day):
+
+- **SB0 acdb-tool** (BSD-3-Clause, ours, from `acdb_walk.py`): given an
+  `.acdb`, emit the AMDB manifest for proc 2, the module list / connections /
+  control links of chosen subgraphs, and the calibration blob of a chosen
+  (subgraph, iid, CKV) as `[iid, pid, size, 0, data]` records; unit-tested
+  against both ACDBs. E1 (the CKV variant) is settled here on the host.
+- **SB1 plumbing**: four kernel patches (GPL-2, upstream candidates) — K1
+  private data for any module (a few lines), K2 AMDB registration from q6apm
+  with re-registration after an ADSP restart, K3 control-link topology tokens
+  (vendor-tuple namespace until accepted), K4 a TLV bytes kcontrol per module
+  widget (set → SET_CFG, get → GET_CFG + response); hexagonrpcd `-S audiopd`
+  static-PD mode (GPL-3, in the sensors daemon package: INIT_CREATE_STATIC
+  with 3 MiB, the listener, `ADSP_LIBRARY_PATH` to the device-local tree,
+  benign answers for the missing `apps_std` methods — E2 names them); the DT
+  patch for the FastRPC remote heap + VMIDs (one variable, flown right after
+  S3); the **"speakerboost" topology flavour** built on-device by the
+  installer — `[MFC] → [tfadsp_rx 0x1700B911 @0x40CC, priv = CKV blob] →
+  [LOG] → [TDM SINK]`, a capture subgraph `[TDM SOURCE] → [LOG] → [tfadsp_tx
+  0x1700B912 @0x4032, priv = enable]`, the control link, a MultiMedia7 capture
+  front end on `PRIMARY_TDM_TX_0` (8 ch S32), `VOL_CTRL_MAX 2056`; the plain
+  flavour stays the default until SB7; the device package's extraction step
+  (the two `.so`, the ACDB, the persist cal → the device-local tree, sha256
+  manifest, never shipped), a WirePlumber rule holding the sense front end
+  open whenever the speaker sink is active, and an `iceland-speakerboost`
+  helper (Re25 injection through K4 at every speaker start, R0/F0 polling).
+
+Flights (after S2/S3; one variable each; RAM boots; audio at 2056; the
+PipeWire chain stays the default sink throughout):
+
+- **SB2 audio-PD attach**: `hexagonrpcd -S audiopd` on the secure node first,
+  then `/dev/fastrpc-adsp` with the heap. Gate: INIT_CREATE_STATIC returns 0,
+  no "no reserved DMA memory for FASTRPC", no ADSP restart, battmgr alive.
+  E2: log every `apps_std` method for five minutes.
+- **SB3 AMDB registration** (K2): GPR basic response 0 for 0x0100101E; the
+  daemon shows no file opens yet (registration does not load).
+- **SB4 the TX graph alone** (speakerboost flavour with the RX subgraph still
+  plain): the MultiMedia7 capture opens; the daemon logs the `_tx_` open;
+  `arecord` yields 8-channel S32 with six live slots while a −30 dBFS tone
+  plays through the plain path (E4: record the sense words); negative control:
+  withhold the file → GRAPH_OPEN fails. E7 (two PRI TDM IBIT votes) here.
+- **SB5 the RX graph**: tfadsp_rx + the full CKV blob + enable + the control
+  link, the TX front end open first, first-sound rules (A3). Gate: `_rx_` open
+  logged, GRAPH_OPEN 0, tone audible, GET_API_VERSION / GET_TAG answered
+  through K4, MANSTATE 9 on six amps, chassis cool. E6 (16 KB in-band SET_CFG;
+  else K1 splits per parameter), E9 (0x10012D19 omitted first).
+- **SB6 calibration and proof**: Re25 injection + memtrack readback (R0 within
+  the DT ranges 6.0–8.5 Ω / 4.0–6.5 Ω, F0 100–2000 Hz, damaged-speaker bit
+  clear; a flat R0 under load means open-loop — stop); then protection
+  evidence: the V/I capture with enable 1 against 0 on 60 Hz / 200 Hz bursts
+  at −20 dBFS (E5), 60 s of pink noise at the cap with R0 polled every 5 s
+  (a visible, bounded thermal rise).
+- **SB7 ship**: A/B against the PipeWire chain at matched loudness (the
+  −1 dBFS limiter stays; decide which chain stages become redundant),
+  `VOL_CTRL_MAX` back to 8192 as the last change (A7's SPL gate repeated with
+  the engine on), default only after a 24 h soak with the TX front end
+  auto-held; manifest rows, upstreaming ledger, hardware-status.
+
+### 7.4 Hard rules (every SB flight; A1–A6 verbatim, A7 added)
+
+1. `VOL_CTRL_MAX = 2056` in the speakerboost flavour until SB7; the UCM pin
+   and the 0021 clamp stay; the PipeWire chain remains the default sink, the
+   raw sink demoted.
+2. No test signal above −20 dBFS and nothing longer than 10 s before SB6;
+   first sound is always 1 s / −30 dBFS / 440 Hz, hand on the chassis; A4's
+   stop conditions.
+3. No amp register is written above stock's *playback* profile (TDMSPKG ≥
+   stock, DCVOS ≤ stock, BSS fields unchanged); regmap reads only.
+4. The engine runs only with: the full 74-parameter blob of one CKV variant,
+   enable = 1, Re25 injected (SB6 onward), the TX subgraph started and the
+   control link confirmed.
+5. Never both protections asleep: while the engine is unproven the PipeWire
+   chain stays as built; the −1 dBFS limiter is never removed.
+6. One variable per flight, RAM boots, `asound.state` wiped after every
+   topology change (A5); any ADSP restart ends the flight.
+7. Nothing in this ladder exceeds the A7-measured stock loudness; the 8192
+   raise repeats A7's SPL check with the engine on.
+
+Measurements per flight: dmesg (`q6apm`, `gpr`, `remoteproc`), the daemon's
+stdout (file opens, unsupported methods), `amixer contents` of the bytes
+control, the six regmaps (0x10/0x11/0x12/0x16), V/I captures (`arecord -D
+hw:OnePlusPad4,<MM7> -f S32_LE -c8 -r48000`), SPL at 50 cm for the A/B, the
+battery UI alive (the ADSP is shared with battmgr and the sensor hub).
+
+### 7.5 Risks
+
+Open-loop protection (rail A7, the TX front end auto-held, the SB6 readback
+gate, the limiter kept); the wrong CKV variant (E1; start with 0, never a
+variant whose tag is unexplained); loader compatibility (E2 before any audio
+flight); the remote heap (12 MiB for a 3 MiB request, one flight); the in-band
+SET_CFG size (K1 splits); PRI TDM clock contention between RX and TX (E7);
+a crashing dynamic module takes the audio PD and possibly the ADSP — battmgr
+and sensors — down (flights stop at the first restart); upstream friction on
+K3's UAPI tokens; licensing — the daemon changes are GPL-3 in its own package,
+and no Goodix or OPLUS byte and no generated tplg ever enters the repo or a
+published overlay. Fallback if the engine cannot be brought up: the same TX
+capture gives a measured thermal model (Re(T) against the per-unit Re25) for
+the PipeWire chain; the amps' hardware limits (BSS, DCMCC, DCVOS, clip detect,
+OCP/OTP/UVP/OVP) are at stock values in our tables but hold no excursion or
+voice-coil model.
+
+### 7.6 Open questions and the experiment that settles each
+
+| # | question | experiment |
+|---|---|---|
+| E1 | which CKV 0xEF000000 value is normal media playback | diff the seven variants' ALGO_PARAMS/MBDRC blocks against the SpeakerBoost message layout (host); if ambiguous pick 0 and compare R0/F0 and LF limiting across 0 and 10 at −20 dBFS (SB6) |
+| E2 | which `apps_std` methods the audio PD and its loader call | SB2 with the daemon verbose: log every method id for 5 min and during SB4's first open |
+| E3 | does the APM accept AMDB_CMD_REGISTER_MODULES in-band from the kernel's GPR port | SB3; fallback out-of-band via the kernel's shared-memory map |
+| E4 | TDM sense word layout (V/I/clip packing) | SB4 capture during a 440 Hz −30 dBFS tone on the plain path; correlate slot words with the drive |
+| E5 | does the engine limit excursion/thermal on this build | SB6 A/B capture, enable 1 vs 0; R0 drift under 60 s pink at the cap |
+| E6 | 16 KB in-band SET_CFG accepted | SB5 with one packet; else K1 per-parameter |
+| E7 | concurrent PRI TDM IBIT votes (RX + TX) | SB4/SB5 ordering tests |
+| E8 | does GET_RESULT need the OPLUS exception-dump params (0x1800B927–2A) first | SB6 |
+| E9 | 0x10012D19 identity and whether rx needs it | omit first (SB5); if "RX process without IV" persists with the link up, add it with its two ACDB params |
+
+---
+
 ## Appendix A — handy numbers
 
 Amps (DT :913-978; container slots from their 0046, decoded from our own cnt):
@@ -610,3 +803,6 @@ Key controls (names from their UCM, ALSA-truncated):
 | OnePlus-Pad4-tplg.bin (built) | A0 output | BSD-3-Clause | record sha256 in firmware-manifest.md before staging |
 | tfa98xx.cnt (reference only, never shipped) | OUR odm.img `/firmware/tfa98xx.cnt`, dump.erofs --cat | proprietary | sha256 `9ef2463d5196…da2d`, 3702 B; register provenance for 0046/0104/0290 |
 | adsp.mbn / adsp_dtb.mbn | already shipped (firmware-manifest.md) | qcom | `781512db…` / `09e35c42…`; byte-identical to Fedora's set |
+| libtfadsp_rx_6pa_sb7_0.so / libtfadsp_tx_6pa_sb7_0.so (never shipped) | OUR odm.img `/lib/rfsa/adsp/` | proprietary (Goodix) | sha256 `02908be9…` / `07f373ff…`; extracted on the owner's unit into the device-local tree, sha256 in the device manifest (§7, SB1) |
+| OPLUS ACDB `acdb_cal.acdb` (never shipped) | OUR odm.img `/etc/acdbdata/` | proprietary (OPLUS / Qualcomm) | AMDB records + the 74-parameter rx calibration per CKV variant; parsed on device by acdb-tool (ours, BSD-3-Clause) into the speakerboost topology flavour (§7, SB0) |
+| `/media/tfa_cali*.bin` (never shipped) | OUR persist partition | per-unit data | Re25 ×6 / F0 ×4; injected at every speaker start (§7, SB6) |

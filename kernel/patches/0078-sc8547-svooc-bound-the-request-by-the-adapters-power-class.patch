@@ -1,0 +1,318 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 10:44:34 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: bound the request by the
+ adapter's power class
+
+A SuperVOOC adapter reports its model during identification, and the
+factory charger keeps a table of what each model is rated for
+(oplus_chg_vooc.c, adapter_id_table: the 0x24-0x27 models are 55 W
+adapters, 0x2c-0x2e 67 W, 0x4b-0x4e 80 W, and so on). The factory host
+publishes that class (its sid power) but does not bound its request by
+it: its curves ask 6.1 A (67 W boards) or 7.3 A (80 W boards) of any
+SuperVOOC adapter. This driver asked the charge level's current, 6.2 A
+at or below 55 %, of every adapter.
+
+On the OnePlus Pad 4 the factory adapter identifies as model 0x24. Asked
+6.2 A it delivers its 5.1 A ceiling, and exactly 300 s after granting
+fast charge it lowers its output one level (5.1 to 4.1 A), and again
+660 s later (to 3.1 A), on its own clock: an I2C-level trace of every
+frame of a session shows nothing on the wire before either step, and the
+adapter body stays cool. The steps are the transient that reset the
+tablet before the cpu latency QoS hold; with the hold they only cost
+current.
+
+Give the protocol library the table's SuperVOOC rows
+(oplus_svooc_adapter_power(): model to watts, 0 for an unknown or
+VOOC-only model) and the policy library the class current
+(sc8547_direct_class_ua(): the rating over 11 V in 100 mA steps; the
+11 V is inferred from the ratings, 55 W / 5 A, 67 W / 6.1 A,
+80 W / 7.3 A, not read from the vendor code; the board's maximum for an
+unknown adapter). This is a ceiling the factory host does not apply,
+motivated by the traced steps, not vendor conformance. When
+the adapter is granted, which is after it told its model, bound the
+session's limit and its taper by the class, so the first current asked
+and every one after it stay within what the adapter can give: 5.0 A for
+this one, 6.0 A for a 67 W adapter, the board's 6.2 A from 80 W up.
+Say the class in the start message and in the debugfs status. KUnit
+covers nine of the table's rows at both ends, the gaps, the VOOC-only
+models and the class currents of the ratings in the table.
+
+Flown next on the factory adapter: whether a session asked 5.0 A still
+sees the adapter's steps.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/oplus_svooc.c               |   44 ++++++++++++++++++++++
+ drivers/power/supply/oplus_svooc_test.c          |   25 +++++++++++++
+ drivers/power/supply/sc8547_direct_policy.c      |   23 ++++++++++++
+ drivers/power/supply/sc8547_direct_policy.h      |    3 ++
+ drivers/power/supply/sc8547_direct_policy_test.c |   23 ++++++++++++
+ drivers/power/supply/sc8547_svooc.c              |   22 +++++++++--
+ include/linux/power/oplus_svooc.h                |    1 +
+ 7 files changed, 137 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/power/supply/oplus_svooc.c b/drivers/power/supply/oplus_svooc.c
+index 5350b229aeeb..814f8d7ce302 100644
+--- a/drivers/power/supply/oplus_svooc.c
++++ b/drivers/power/supply/oplus_svooc.c
+@@ -227,5 +227,49 @@ u8 oplus_svooc_vbus(int vbus_uv, int vbat_uv)
+ }
+ EXPORT_SYMBOL_GPL(oplus_svooc_vbus);
+ 
++/*
++ * The adapter models that charge as SuperVOOC and the power each is rated
++ * for, from the factory charger's adapter identity table (oplus_chg_vooc.c,
++ * adapter_id_table, the SVOOC rows). Models that only charge as VOOC are
++ * left out.
++ */
++static const struct {
++	u8 first;
++	u8 last;
++	u8 watts;
++} oplus_svooc_adapters[] = {
++	{ 0x11, 0x12,  50 }, { 0x14, 0x14,  65 }, { 0x1a, 0x1b,  33 },
++	{ 0x1c, 0x1c,  45 }, { 0x1d, 0x1e,  44 }, { 0x21, 0x21,  50 },
++	{ 0x22, 0x22,  44 }, { 0x23, 0x23,  50 }, { 0x24, 0x27,  55 },
++	{ 0x28, 0x28,  65 }, { 0x2a, 0x2a,  65 }, { 0x2b, 0x2b,  66 },
++	{ 0x2c, 0x2e,  67 }, { 0x31, 0x31,  50 }, { 0x32, 0x32, 120 },
++	{ 0x33, 0x33,  50 }, { 0x35, 0x35,  65 }, { 0x36, 0x36,  66 },
++	{ 0x37, 0x3a,  88 }, { 0x3b, 0x3e, 100 }, { 0x47, 0x48, 120 },
++	{ 0x49, 0x4a,  33 }, { 0x4b, 0x4e,  80 }, { 0x51, 0x51, 125 },
++	{ 0x61, 0x61,  33 }, { 0x62, 0x62,  50 }, { 0x63, 0x63,  65 },
++	{ 0x64, 0x64,  66 }, { 0x65, 0x65,  80 }, { 0x66, 0x66,  65 },
++	{ 0x67, 0x68, 125 }, { 0x69, 0x6a, 100 }, { 0x6b, 0x6b, 120 },
++	{ 0x6c, 0x6d,  67 }, { 0x6e, 0x6e,  65 },
++};
++
++/**
++ * oplus_svooc_adapter_power() - the power an adapter model is rated for
++ * @model: the model the adapter reported, see struct oplus_svooc
++ *
++ * Return: the SuperVOOC rating in watts, or 0 for a model the table does
++ * not know or one that only charges as VOOC.
++ */
++int oplus_svooc_adapter_power(u8 model)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(oplus_svooc_adapters); i++)
++		if (model >= oplus_svooc_adapters[i].first &&
++		    model <= oplus_svooc_adapters[i].last)
++			return oplus_svooc_adapters[i].watts;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(oplus_svooc_adapter_power);
++
+ MODULE_DESCRIPTION("Oplus SuperVOOC adapter protocol");
+ MODULE_LICENSE("GPL");
+diff --git a/drivers/power/supply/oplus_svooc_test.c b/drivers/power/supply/oplus_svooc_test.c
+index 81e84a5281e9..5c61bff48988 100644
+--- a/drivers/power/supply/oplus_svooc_test.c
++++ b/drivers/power/supply/oplus_svooc_test.c
+@@ -152,11 +152,36 @@ static void oplus_svooc_test_replies(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, oplus_svooc_frame(oplus_svooc_vbus(8250000, 4000000), false), 0x220);
+ }
+ 
++static void oplus_svooc_test_adapter_power(struct kunit *test)
++{
++	/* The factory table's rows, at both ends of a range. */
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x24), 55);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x27), 55);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x28), 65);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x2c), 67);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x2e), 67);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x4b), 80);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x4e), 80);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x65), 80);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x6e), 65);
++	/* Gaps, VOOC-only models and the ends of the byte. */
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x00), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x01), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x13), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x1f), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x29), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x34), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x6f), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0x7f), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0xff), 0);
++}
++
+ static struct kunit_case oplus_svooc_test_cases[] = {
+ 	KUNIT_CASE(oplus_svooc_test_decode),
+ 	KUNIT_CASE(oplus_svooc_test_session),
+ 	KUNIT_CASE(oplus_svooc_test_rejects),
+ 	KUNIT_CASE(oplus_svooc_test_replies),
++	KUNIT_CASE(oplus_svooc_test_adapter_power),
+ 	{}
+ };
+ 
+diff --git a/drivers/power/supply/sc8547_direct_policy.c b/drivers/power/supply/sc8547_direct_policy.c
+index 1da8d610d6f8..133c328bde3e 100644
+--- a/drivers/power/supply/sc8547_direct_policy.c
++++ b/drivers/power/supply/sc8547_direct_policy.c
+@@ -93,6 +93,29 @@ int sc8547_direct_taper_ua(int uv)
+ }
+ EXPORT_SYMBOL_GPL(sc8547_direct_taper_ua);
+ 
++/**
++ * sc8547_direct_class_ua() - the current an adapter's power class allows
++ * @watts: the adapter's SuperVOOC rating, or 0 when it is not known
++ *
++ * The factory host publishes the class (its sid power) but does not bound
++ * its request by it; its curves ask 6.1 or 7.3 A of any SuperVOOC adapter.
++ * Asked above its class, the factory 55 W adapter holds its 5.1 A ceiling
++ * for five minutes and then steps its output down, twice, so this driver
++ * asks no more than the class allows. The 11 V is inferred from the ratings
++ * (55 W / 5 A, 67 W / 6.1 A, 80 W / 7.3 A), not read from the vendor code.
++ *
++ * Return: the rating over 11 V in whole 100 mA steps, or the board's maximum
++ * for an unknown adapter.
++ */
++int sc8547_direct_class_ua(int watts)
++{
++	if (watts <= 0)
++		return SC8547_DIRECT_MAX_UA;
++	return div_s64((s64)watts * 1000000 * 1000000, SC8547_DIRECT_CLASS_UV) /
++	       100000 * 100000;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_class_ua);
++
+ /**
+  * sc8547_direct_admissible() - whether a session may start
+  * @bat: the battery
+diff --git a/drivers/power/supply/sc8547_direct_policy.h b/drivers/power/supply/sc8547_direct_policy.h
+index 808f1fd551f7..24a4f8adfd76 100644
+--- a/drivers/power/supply/sc8547_direct_policy.h
++++ b/drivers/power/supply/sc8547_direct_policy.h
+@@ -21,6 +21,8 @@
+ #define SC8547_DIRECT_POWER_SETTLE_UW	54500000LL
+ /* A session ends normally at this charge level, in percent. */
+ #define SC8547_DIRECT_CAPACITY_END	90
++/* A SuperVOOC adapter's power rating is at this output voltage. */
++#define SC8547_DIRECT_CLASS_UV		11000000
+ /* The buck has let go of the input when it draws no more than this. */
+ #define SC8547_DIRECT_QUIET_UA		25000
+ /*
+@@ -69,6 +71,7 @@ struct sc8547_direct_battery {
+ int sc8547_direct_scale(int value, int soft, int hard);
+ int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp);
+ int sc8547_direct_taper_ua(int uv);
++int sc8547_direct_class_ua(int watts);
+ bool sc8547_direct_admissible(const struct sc8547_direct_battery *bat,
+ 			      const int *therm_mc);
+ int sc8547_direct_entry_ua(const struct sc8547_direct_battery *bat,
+diff --git a/drivers/power/supply/sc8547_direct_policy_test.c b/drivers/power/supply/sc8547_direct_policy_test.c
+index f92f26f20e47..b48903629b9d 100644
+--- a/drivers/power/supply/sc8547_direct_policy_test.c
++++ b/drivers/power/supply/sc8547_direct_policy_test.c
+@@ -624,6 +624,28 @@ static void sc8547_direct_test_pregrant(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 10000001, max), -EPROTO);
+ }
+ 
++static void sc8547_direct_test_class(struct kunit *test)
++{
++	/* The factory table's classes over 11 V, in 100 mA steps. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(33), 3000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(44), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(45), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(50), 4500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(55), 5000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(65), 5900000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(66), 6000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(67), 6000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(80), 7200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(125), 11300000);
++	/* Unknown adapters keep the board's maximum. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(0), SC8547_DIRECT_MAX_UA);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_class_ua(-1), SC8547_DIRECT_MAX_UA);
++	/* The board's ladder is the lower bound from the 80 W class up. */
++	KUNIT_EXPECT_EQ(test, min(sc8547_direct_class_ua(67), SC8547_DIRECT_MAX_UA), 6000000);
++	KUNIT_EXPECT_EQ(test, min(sc8547_direct_class_ua(80), SC8547_DIRECT_MAX_UA),
++			SC8547_DIRECT_MAX_UA);
++}
++
+ static struct kunit_case sc8547_direct_test_cases[] = {
+ 	KUNIT_CASE(sc8547_direct_test_constants),
+ 	KUNIT_CASE(sc8547_direct_test_scale),
+@@ -631,6 +653,7 @@ static struct kunit_case sc8547_direct_test_cases[] = {
+ 	KUNIT_CASE(sc8547_direct_test_thermal_thermistors),
+ 	KUNIT_CASE(sc8547_direct_test_thermal_cell),
+ 	KUNIT_CASE(sc8547_direct_test_taper),
++	KUNIT_CASE(sc8547_direct_test_class),
+ 	KUNIT_CASE(sc8547_direct_test_admissible),
+ 	KUNIT_CASE(sc8547_direct_test_entry),
+ 	KUNIT_CASE(sc8547_direct_test_regulate),
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 4a26951f996d..21a9208108bc 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -180,6 +180,8 @@ struct sc8547_svooc {
+ 	unsigned int worst_us;
+ 	unsigned int quiet;
+ 	unsigned int disagree;
++	/* The adapter's power class, from its model, once it is granted. */
++	int class_w;
+ 	int limit_ua;
+ 	int taper_ua;
+ 	int target_ua;
+@@ -490,6 +492,16 @@ static int svooc_receive(struct sc8547_svooc *sv, u8 rx, u8 flags)
+ 						OPLUS_SVOOC_VBUS_HIGH, false);
+ 			if (ret)
+ 				return ret;
++			/*
++			 * The adapter has told its model: its power class bounds
++			 * the session from here (the factory host publishes the
++			 * class and asks above it; this one does not, see
++			 * sc8547_direct_class_ua()).
++			 */
++			sv->class_w = oplus_svooc_adapter_power(sv->proto.model);
++			sv->limit_ua = min(sv->limit_ua,
++					   sc8547_direct_class_ua(sv->class_w));
++			sv->taper_ua = min(sv->taper_ua, sv->limit_ua);
+ 			sv->state = SVOOC_GRANTED;
+ 		}
+ 		return svooc_send(sv, payload, req.shifted);
+@@ -726,6 +738,7 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 	mutex_lock(&sv->lock);
+ 	sv->state = SVOOC_IDENTIFY;
+ 	sv->error = 0;
++	sv->class_w = 0;
+ 	sv->ticks = 0;
+ 	sv->taper_ua = sv->limit_ua;
+ 	sv->target_ua = 0;
+@@ -858,8 +871,9 @@ static int svooc_check(struct sc8547_svooc *sv)
+ 			sv->state = SVOOC_RUNNING;
+ 			sv->retries = 0;
+ 			sv->ramp_after = now + msecs_to_jiffies(SVOOC_RAMP_MS);
+-			dev_info(sv->dev, "%s adapter %02x at %d mA\n", sv->ops->name,
+-				 sv->proto.model, sv->applied_ua / 1000);
++			dev_info(sv->dev, "%s adapter %02x (%d W) at %d mA\n",
++				 sv->ops->name, sv->proto.model, sv->class_w,
++				 sv->applied_ua / 1000);
+ 		} else if (time_after(now, sv->enabled_at +
+ 				      msecs_to_jiffies(SVOOC_START_MS))) {
+ 			return -ETIMEDOUT;
+@@ -1180,9 +1194,9 @@ static int svooc_status_show(struct seq_file *s, void *data)
+ 	const struct sc8547_sample *m = &sv->sample[0], *c = &sv->sample[1];
+ 
+ 	mutex_lock(&sv->lock);
+-	seq_printf(s, "state %s error %d frames %u irqs %u rx %02x flags %02x model %02x\n",
++	seq_printf(s, "state %s error %d frames %u irqs %u rx %02x flags %02x model %02x class %d W\n",
+ 		   svooc_state_names[sv->state], sv->error, sv->frames, sv->irqs,
+-		   sv->rx, sv->flags, sv->proto.model);
++		   sv->rx, sv->flags, sv->proto.model, sv->class_w);
+ 	seq_printf(s, "worst reply %u us\n", sv->worst_us);
+ 	seq_printf(s, "limit %d target %d applied %d pending %d taper %d uA\n",
+ 		   sv->limit_ua, sv->change ? sv->target_ua : 0, sv->applied_ua,
+diff --git a/include/linux/power/oplus_svooc.h b/include/linux/power/oplus_svooc.h
+index 2ba3c5d52e87..fcdf2f61d0dd 100644
+--- a/include/linux/power/oplus_svooc.h
++++ b/include/linux/power/oplus_svooc.h
+@@ -83,5 +83,6 @@ int oplus_svooc_handle(struct oplus_svooc *svooc,
+ int oplus_svooc_current(int ua, u8 *payload);
+ u8 oplus_svooc_vbat(int uv);
+ u8 oplus_svooc_vbus(int vbus_uv, int vbat_uv);
++int oplus_svooc_adapter_power(u8 model);
+ 
+ #endif

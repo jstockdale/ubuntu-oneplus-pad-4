@@ -48,8 +48,13 @@ vpu40_2v.mbn, adspr.jsn. Sourced from our stock extraction in Phase A.
 - ~~Audio: LPASS topology + UCM2 profiles — C4.~~ Built and shipped (section
   below; A0 2026-11-01, stock ceiling since A7 2026-11-02); the UCM2 profile
   ships in ubuntu-iceland-device.
-- Open now: the ACDB/AMDB for the Goodix SpeakerBoost engine (planned after
-  sensors; blobs stay device-local) and the sensor-hub tree (phase S).
+- Open now: the Goodix SpeakerBoost engine — its two dynamically loaded ADSP
+  modules (odm `/lib/rfsa/adsp/libtfadsp_{rx,tx}_6pa_sb7_0.so`), the OPLUS
+  ACDB (odm `/etc/acdbdata/acdb_cal.acdb`) and the per-unit persist
+  calibration (`/media/tfa_cali*.bin`); all three stay device-local, extracted
+  on the owner's unit with their sha256 in the device manifest, never staged
+  here (committed phase SB, docs/audio-plan.md §7, 2026-11-04) — and the
+  sensor-hub tree (phase S).
 
 ## Rules
 

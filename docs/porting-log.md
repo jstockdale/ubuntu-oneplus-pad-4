@@ -4124,3 +4124,125 @@ not reset). It stays the separate open item. As the cheapest
 discriminator, a userspace hold of /dev/cpu_dma_latency at 0 (the same
 constraint 0077 places during a session) is kept across this drain
 (deep-idle usage sum flat); the drain restarted 10:44:24.
+
+## 2026-11-04 — Flight D2: the brick steps on its own clock even when asked its class current; 0078 enters as conformance; the VBUS window trips four more times (0084 confirmed); a third silent reset ten seconds after the session end
+
+The drain first. discharge-to-half.sh's thermostat paused the two CPU
+workers at 37 °C sixty seconds into the run and never resumed them
+(resume needs < 32 °C), so the 25-minute drain to 58 % was the
+backlight at maximum plus the userspace cpu_dma_latency hold at
+2.75–2.95 A, about 2.8 min per percent, the cell at 35–37 °C. At
+11:04:53 the draw rose to 3.4–3.8 A and the cell climbed 38 → 41 °C:
+the owner was playing YouTube in Chrome. At 11:09:24 the script's 40 °C
+watchdog ended the run and its EXIT trap wrote the saved backlight
+(1256) back — the "brightness went back to normal" the owner saw was
+that, not a SoC throttle (no cooling device engaged, hottest CPU zone
+44 °C). Thirty minutes of drain under the hold with no reset: one data
+point for the no-charger item. Backlight back to maximum with no CPU
+load took the last 4 % in twelve minutes; at 54 % the backlight went to
+1256 and the hold was released (deep-idle entries 0 → 1390 per 5 s),
+the cell cooled to 32 °C by 11:33.
+
+The flight: 0077 + 0078 as a module swap on #46 (oplus_svooc 29fbb0e4,
+sc8547_direct_policy ebfb1bc8, sc8547_svooc afb79e18; the running
+kernel carries the 0078 symbols, the debugfs status its new class
+field). Four host witnesses, the follower, stage-go. 11:38:46 BrickID at
+5.15 V, 11:38:49 gate open, pump enable ≈ 11:38:51:
+
+- "SuperVOOC adapter 24 (55 W) at 5000 mA" — the class cap works:
+  limit = applied = taper 5.0 A, target 0. Ramp to 9.3–9.5 A into the
+  pack at 4.27 V by +6 s (bus 8.96 V, 2.6 + 2.6 A into the pumps: the
+  brick's 5.2 A ceiling, as in D1). Worst reply 1.5 ms.
+- **+5:00: the step is still there.** Between 11:43:51 and 11:43:52
+  (+300/301 s) the pack current fell 9.2–9.5 → 7.2–7.5 A and the bus
+  8.96 → 8.73 V — the same 5.2 → 4.1 A step as D1, A and A2, with the
+  request held at 5.0 A the whole time. The PHY trace around it holds
+  nothing but the brick's GET_VBAT every 47 ms (no gap over 60 ms, no
+  error flag). So the step is the brick's own clock, not a reaction to
+  the over-ask: 0078 is conformance (stock publishes the class, and we
+  no longer ask 6.2 A of a 55 W adapter) and 0077's hold is the cure —
+  the deep-idle usage sum read 973376 at the enable and 973376 at every
+  later mark, no reset.
+- **+16:00: the second step, survived.** 11:54:52 (+660 s after the
+  first): bus 4.1 → 3.05 A (1.54 + 1.52 A), 8.65 V, pack 7.4 → 5.3 A.
+  D1 died here on the gauge-referenced window; this time the pump's VBAT
+  (4.214 V) and the gauge (4.23 V) agreed and the window held without
+  0084. +27:00: no third step; the brick's schedule is two steps, then
+  steady.
+- Handshake order (11:38:48.7–49.7): a vooc2-head FASTCHG, IDENTIFY ×2,
+  GET_CURRENT, NULL, GET_CURRENT, AP_STATUS, MODEL, VBUS_OK, FASTCHG,
+  BATTERY, VBUS_OK ×2, GET_CURRENT ×2, FASTCHG, AP_STATUS, VBUS_OK ×7,
+  GET_CURRENT (one duplicate read with TX_DONE only). After the grant:
+  GET_VBAT only — 8705 of them by +6:00, not one GET_CURRENT. The cell
+  stayed at 29–31 °C, so the thermal rows never engaged; the D3
+  baseline for 0079 is "no flapping at a cool cell". The one NULL frame
+  inside the handshake was tolerated by this build.
+- Thermals: the battery connector thermistor peaked at 48.6 °C just
+  before the first step (9.4 A into the pack) and eased to 39 °C after
+  the second; cell 29–32 °C throughout.
+
+**From +30:28 the window tripped four times.** 12:09:17 (75 %) the
+driver stopped the 5.0 A session with -ERANGE and restarted five
+seconds later at the 3 A entry (the charge level was above 56 %); that
+session stopped the same way at 12:17:17, 12:18:08 and 12:20:20,
+restarting each time with a clean handshake (adapter 24, 55 W, 3000 mA)
+that the brick granted. The pump ADC at 20 Hz tells the same story at
+every stop: the brick's output sags for about 100 ms — 8959 → 8782 →
+8651 mV in the three samples before the first stop, 8636 and 8614 mV
+before the next two — while the gauge reads 4.33–4.37 V and the pump's
+own VBAT 4.27–4.31 V. The gauge-referenced lower bound, 2 × 4.35 −
+0.1 = 8.60 V, sits 10–50 mV under the sag; against min(gauge, pump), as
+0084 has it, the bound is 8.44–8.52 V and all four moments pass with
+100–200 mV of margin. Same mechanism as D1's end at a higher cell
+voltage: the window narrows as the gauge rises, and at 4.4 V the
+brick's 8.8–9.1 V sits within 100–300 mV of it. D3 carries 0084 and
+must show these sags passing. The follower reported LEFT RUNNING at
+12:18:13 and the session was ended by `svooc-session.sh 0 end` at
+12:20:32 ("SuperVOOC finished", state idle, Fast [Standard], brick back
+at 4.98 V × 2.99 A, 80 %). A first attempt wrote "Standard" to the
+wrong attribute — the policy knob is charge_types, plural, on the
+sc8547-svooc supply, and an unmatched glob sent the write to /charge_type
+on the rootfs (removed) — a runbook line.
+
+**Then the third non-session silent reset.** At 12:20:41–42, ten seconds
+after "finished", the tablet reset with the brick still in as far as
+the firmware knew: its log's last flush (uptime 6131.94, the stream died
+mid-line right after it) shows the post-VOOC re-init — TCPC VbusPresent
+1, CC1 connected, ICL set 2000 then 2500, the buck's switching frequency
+chosen for 5 V in, S_ICM_NCP_STBY → S_ICM_SCP_SVS, collapse status 0.
+The journal's last line is 12:20:41.204 (a witness read of the debugfs
+status), the last status sample 12:20:42 (Standard, 4.94 V × 2.99 A,
+pumps idle, cell 31 °C). New boot up at ≈ 12:21:20, battery Good, 81 %,
+no kernel line, no watchdog, no reset reason — the known signature. The
+load at the time: the four host witnesses cost about 700 forks per
+second on the tablet (chg.sh every second plus the debugfs read plus the
+system line), two clusters at 3.6 GHz, the cpu-0-4-0 zone at 53.5 °C.
+The three non-session resets now read: 15:40 11-03 (desktop under the
+discharge load, no input), 10:36:20 11-04 (72 s into the discharge load,
+no input, right after D1's end), 12:20:41 11-04 (ten seconds after D2's
+end, on the brick in Standard, under the witness load). Common factor:
+a heavy, bursty CPU load around a power-path transition (a load step,
+an input removal, the buck's re-enable). Not the 46 W mechanism (pumps
+off, no frames). Working hypothesis: a rail collapsing below the kernel
+under load. Discriminators before D3, cheapest first: a backlight-only
+drain (today's thirty minutes survived that way); the session-end
+transition with the witnesses stopped first; a cpufreq ceiling under a
+stress load on battery. The witness scripts get lighter before D3
+regardless (the status stream every two seconds, fewer forks per line).
+After the reboot the tablet runs the shipped #46 modules again
+(/run/flight is tmpfs), policy Standard, no opt-in flag.
+
+Decisions and records: 0078 enters the series (kernel/patches/0078,
+README and upstreaming rows); the flight record is
+build/pps-work/d-series/flight-sheet-D2.md. Also today, the owner's
+decision on the audio DSP: the full sensor and SpeakerBoost path is
+committed after the charging sprint (bringup-plan.md section SB, order
+of record P → CHECKPOINT → Q → S → SB → C6 → D; audio-plan.md §7 with
+rail A7; sensors-plan G3; firmware-manifest), on the strength of a
+single-agent research report (build/audio-work, never committed): stock's
+protection is two Goodix modules the ADSP loads dynamically into its
+audio PD through the FastRPC file server, registered from the OPLUS ACDB,
+with 74 calibration parameters per use-case variant and the per-unit
+Re25/F0 in persist — and an rx module without its sense (tx) graph runs
+open-loop while still applying its gains, which is the one rule the
+plan is built around.
