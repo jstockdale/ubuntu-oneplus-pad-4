@@ -4204,10 +4204,15 @@ wrong attribute — the policy knob is charge_types, plural, on the
 sc8547-svooc supply, and an unmatched glob sent the write to /charge_type
 on the rootfs (removed) — a runbook line.
 
-**Then the third non-session silent reset.** At 12:20:41–42, ten seconds
-after "finished", the tablet reset with the brick still in as far as
-the firmware knew: its log's last flush (uptime 6131.94, the stream died
-mid-line right after it) shows the post-VOOC re-init — TCPC VbusPresent
+**Then the third non-session silent reset.** At 12:20:42–47, ten seconds
+after "finished", the tablet reset at or within seconds of the unplug:
+the owner, across the room, recalls the reboot after the cable came out
+("not 100 percent sure"); the host record puts the death before the
+"unplug now" call was even sent (journal, status stream and firmware
+stream all stop at 12:20:42, the tablet's 5 s sync loop bounding the
+journal's loss), and the firmware's last flush (uptime 6131.94, the
+stream died mid-line right after it) still shows the cable present with
+the post-VOOC re-init under way — TCPC VbusPresent
 1, CC1 connected, ICL set 2000 then 2500, the buck's switching frequency
 chosen for 5 V in, S_ICM_NCP_STBY → S_ICM_SCP_SVS, collapse status 0.
 The journal's last line is 12:20:41.204 (a witness read of the debugfs
@@ -4219,10 +4224,11 @@ second on the tablet (chg.sh every second plus the debugfs read plus the
 system line), two clusters at 3.6 GHz, the cpu-0-4-0 zone at 53.5 °C.
 The three non-session resets now read: 15:40 11-03 (desktop under the
 discharge load, no input), 10:36:20 11-04 (72 s into the discharge load,
-no input, right after D1's end), 12:20:41 11-04 (ten seconds after D2's
-end, on the brick in Standard, under the witness load). Common factor:
-a heavy, bursty CPU load around a power-path transition (a load step,
-an input removal, the buck's re-enable). Not the 46 W mechanism (pumps
+no input, right after D1's end), 12:20:42 11-04 (ten seconds after D2's
+end, in Standard, at or within seconds of the unplug, under the witness
+load). Common factor: a heavy, bursty CPU load around a power-path
+transition (a load step, an input removal — the likelier reading of
+today's — or the buck's re-enable). Not the 46 W mechanism (pumps
 off, no frames). Working hypothesis: a rail collapsing below the kernel
 under load. Discriminators before D3, cheapest first: a backlight-only
 drain (today's thirty minutes survived that way); the session-end
