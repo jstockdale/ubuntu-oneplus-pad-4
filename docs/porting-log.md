@@ -3823,3 +3823,14 @@ would be visible and photographable):
 Logs: /var/log/iceland-pps/s3 and s3b on the tablet; the host streams
 and the first run's copies under the session scratchpad (witness-s3b,
 s3).
+
+Overnight, unattended (2026-11-03 23:46 → 2026-11-04 01:21): the 15:40
+shape reproduced as far as it can be without the owner's Chrome — the
+panel at full brightness and two CPU workers at 50 % under the cell
+thermostat, no charger, from 61 to 45 % — ran 95 minutes with the uptime
+continuous, the cell at 30–32 °C and the CPU dies to 60 °C: no reset.
+The no-charger reset does not follow from display-plus-CPU load alone;
+it stays a separate open item (its moment also carried a Wi-Fi rescan and
+Chrome at 155 % CPU). The host witness streams lost their ssh sessions
+partway through this long run (the tablet-side uptime poll every minute
+was the witness that held); they now reconnect by themselves.
