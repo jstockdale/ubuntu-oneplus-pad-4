@@ -4053,3 +4053,74 @@ svooc-flight-swap.sh (any subset of the four modules from /run/flight
 with a manifest) replaces d1-flight-swap.sh. One independent reviewer
 reads the seven patches against the ledger and the vendor code; its
 findings are folded in before D3.
+
+## 2026-11-04 — D1's end exposes the gauge-referenced VBUS window (0084); the review's blocker and majors folded into 0078–0083; a second no-charger reset
+
+D1 ran on past the +16:00 step: at 10:29:45 (+960 s) the brick stepped
+4.1 → 3.1 A, the second pump dropped out on the current dip, the bus
+fell to 8.415 V, and the running window — VBUS held between twice the
+gauge's voltage less 100 mV and twice it plus 700 mV — ended the session
+with -ERANGE: the gauge still read 4.270 V from the 5 A charge (the
+pump's own sense 4.168 V), so the floor stood at 8.44 V. The brick
+re-attached at 5 V (the owner heard the beep), the driver started a
+3 A session (67 %), and that ended the same way within a second, the
+gauge sitting 45 mV above the pump's sense while it settled; four times
+over before Standard was written by hand at 10:33:27. Nothing unsafe;
+every stop was the driver refusing a window it had drawn too tight,
+and the deep-idle counter stayed flat to the end (D1's own result
+stands). Patch 0084 holds the bus against both readings — the floor
+follows the lower, the ceiling the higher — and refuses an adapter
+before the pumps take the input if the two readings disagree by more
+than 150 mV; KUnit pins the D1 moment on both sides of the new floor.
+
+The reviewer's findings (one agent over the seven patches, the ledger
+and the vendor code), all taken, each in the patch it belongs to (the
+scratch worktree rebuilt commit by commit from scripts under
+build/pps-work/d-series/fixes):
+
+- 0082 BLOCKER: sc8547_disable() unprepares the pump and turns its ADC
+  off, and the tick samples the second pump every 50 ms, so the
+  single-pump fallback and the release would have ended the session a
+  tick later with -EINVAL, not retried. Fix: sc8547_stop() in the pump
+  driver (switching off, the pump kept prepared, exported), used to see
+  the second pump off; a second pump that faults (-EIO from its sample)
+  is seen off and held for the session, no longer sampled.
+- 0078 MAJOR: "the factory host never asks above the class" is not in
+  the vendor code — stock publishes the class (sid power) and does not
+  bound its request by it (its curves ask 6.1/7.3 A of any adapter).
+  The message and the kernel-doc now say the cap is a ceiling motivated
+  by the traced steps and that 11 V is inferred from the ratings.
+- 0079 MAJOR: stock's little_cool rows are 4.0 A from 12 °C (not 16);
+  2.5 A is its 5–12 °C row. The cold row moves to 12 °C. And the
+  deadband was one-sided: a budget below the applied current lowered
+  it at once, so a 150 mV wander of the bus still moved the request.
+  The budget term now has 50 mA of slack on the lowering side (the
+  thermal cap still lowers at once); KUnit shows a 140 mV wander
+  around the budget's step moving nothing.
+- 0081: a frame that comes with a TX failure is now answered after the
+  re-arm, as stock answers it; late replies are counted only when a
+  frame carries no error flag.
+- 0083: the second pump's one-second watchdog is fed from the frame
+  path too (every eight frames), since the worker's tick can be held
+  up by the gauge's reads; REG_3A's value cited from the vendor header
+  (oplus_sc8547.h:760, 0x3A; REG_34 0x34 beside it); the flight note
+  says the two register changes are to be told apart.
+- 0077 and 0080 clean.
+
+State after the rebuild: 0078–0084 under build/pps-work/d-series,
+checkpatch 0/0/0 each, KUnit 23/23, four modules W=1 clean,
+kernel-doc silent, the 83-patch series applying in order on the pin and
+matching the worktree. Bundles: *-d2-class-v2-* (0077+0078) shipped to
+the tablet as /run/flight for D2; *-d4-0084-* (everything) staged.
+
+A second no-charger reset: at 10:36:20, 72 s after
+discharge-to-half.sh started the drain for D2 (backlight to maximum,
+two CPU workers under the cell thermostat), the tablet reset silently —
+the journal's last lines are the drain's own status reads, the last
+kernel line the Wi-Fi re-association of 10:22:28, no shutdown, no
+panic text. The 15:40 signature of 2026-11-03 exactly, and both under
+the discharge load (the overnight 95-minute run of the same load did
+not reset). It stays the separate open item. As the cheapest
+discriminator, a userspace hold of /dev/cpu_dma_latency at 0 (the same
+constraint 0077 places during a session) is kept across this drain
+(deep-idle usage sum flat); the drain restarted 10:44:24.
