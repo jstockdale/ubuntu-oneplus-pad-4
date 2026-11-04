@@ -3834,3 +3834,128 @@ it stays a separate open item (its moment also carried a Wi-Fi rescan and
 Chrome at 155 % CPU). The host witness streams lost their ssh sessions
 partway through this long run (the tablet-side uptime poll every minute
 was the witness that held); they now reconnect by themselves.
+
+## 2026-11-04 — The SuperVOOC resets root-caused: the brick steps its output at +5:00, the CPUs were free to power down, stock holds a latency QoS; patch 0077 written and staged
+
+Runs A and A2 of the experiment ladder, both with every cpuidle state
+above WFI disabled through sysfs and the stock frequency floors
+(runA-prep.sh), both on the OEM brick, the panel as a text console, the
+host witnesses streaming (fw, status, system; A2 also the new PHY
+stream):
+
+- Run A (08:05:08 → 08:31:50, ended by hand at 53 %): started at 32 %
+  with the cell at 21.0 °C. No reset in 26 min 42 s. The brick delivered
+  its 5.1 A ceiling from a 5.0 A request, then dropped to 4.1 A at
+  08:10:08 and to 3.07 A at 08:21:06 with the request unchanged at
+  6.2 A; it was ~80 °F to the touch when unplugged. The request ramp
+  restarted from 2.5 A three times (08:05:52, 08:06:52, 08:08:13):
+  the policy caps the current at 2.5 A below 21.0 °C and the gauge
+  reported 20.0 and 21.0 °C in turn — no hysteresis on the cold cap.
+  One `qcom-spmi-adc5-gen3 ... Invalid data:0x8000` at 08:16:50 (the
+  PMIC ADC behind the four charging thermistors; a sysfs reader's,
+  since the driver would have ended the session on a failed read; the
+  only occurrence in seven journaled boots). A Wi-Fi drop 08:15:28–46;
+  the tablet unaffected.
+- Run A2 (08:48:53 → 09:05:37, ended by hand at 68 %): started at 53 %
+  with the cell at 26 °C, the fatal runs' conditions: 6.2 A asked from
+  the first frame, the brick at 5.1–5.2 A and 8.8–9.0 V (46 W), the
+  battery at 9.4 A and 4.3 V, the battery connector to 46 °C. No reset
+  in 16 min 44 s. The brick stepped 5.1 → 4.1 A at 08:53:56.6 and
+  4.1 → 3.0 A at 09:04:56. A Wi-Fi drop 08:52:20–56; same boot.
+
+What the I2C-level trace of A2 shows (a private ftrace instance with
+the i2c events of bus 0 address 0x6a: every transfer with its bytes;
+decoded by phy-decode.py; 20,897 adapter frames, none with an error
+flag):
+
+- The adapter asks GET_VBAT every 47 ms, GET_CURRENT whenever we answer
+  a GET_VBAT with the change code, VBUS_OK only while adjusting its
+  voltage at the start (seven polls: low, high ×5, normal, then the
+  pump enable), and nothing else after the identification. Our
+  battery curve goes up in stock's wire order (4664 mV, 1.1 A, 4664 mV,
+  2.6 A, 3414 mV, 7.3 A).
+- The brick's first step comes 301 s after it granted fast charge
+  (pump enable 08:48:55.45, step 08:53:56.6) and the second 660 s
+  later; run A's came at +300 s and +16 min too. In the frames before
+  the step our GET_VBAT replies are steady (codes 0x45/0x46, 4.09–4.10
+  V); no command, no missed reply, no gap. The adapter steps on its own
+  clock. The bus falls 9.03 → 8.67 V within one frame, the battery
+  current 9.4 → 7.3 A.
+- The two fatal runs died at +5:00 and +4:46 after their starts, with
+  the brick at 5.1 A: the same event. Runs A and A2 crossed it at the
+  same power with the CPUs held out of deep idle and lived.
+
+Why the brick steps: in stock's adapter table (oplus_chg_vooc.c:492,
+`{ 0x24, 0x27, 30, 55, AC, SVOOC }`) model 0x24 — this brick — is a
+55 W-class adapter, 5 A. We ask 5.9–6.2 A (the policy's 55 W budget
+over the bus voltage); the brick sits in current limit at 5.1–5.2 A
+from the first second and lowers its output one level after five
+minutes of it, again at sixteen. Stock bounds its request by the class,
+so stock never sees the step. Not thermal (the brick at ~80 °F); not the
+uploaded curve.
+
+Why the tablet died: the vendor AP VOOC PHY driver holds
+`cpu_latency_qos` 0 for the whole fast-charge session — taken at the
+start and before every PHY register access (`oplus_voocphy_pm_qos_update
+(400)`, which on kernels since 5.10 becomes
+`cpu_latency_qos_add_request(&req, 0)`), released at the end — and
+floors the CPU frequencies (voocphy_req_freq 1785600/2438400) in 15 s
+windows around the start and every current change. Denial's driver has
+neither. The adapter's step is a VBUS transient under 9 A with the
+pumps' interrupts and I2C transfers behind it, into a cluster free to
+have powered down; Denial's lockup trace for the same freezes (I2C
+transfers to both pumps timing out, then the charger firmware, RPMh and
+two CPUs stopping within 8 s) is that cascade. The reset at 15:40 with
+no charger stays a separate item.
+
+Patch 0077 (sc8547-svooc: keep the CPUs out of deep idle during a
+session): `cpu_latency_qos_add_request(&sv->latency, 0)` when the
+session enters IDENTIFY, after the wakeup source; removed in
+svooc_restore() after the buck input is back and in the cleanup path.
+The frequency floors are left out: the reply took at most 1.8 ms from
+interrupt to TX write without them. checkpatch 0/0/0. Built as a
+module against the series state (the build tree's power-supply
+directory restored from a scratch worktree with 0001–0076 applied; the
+C1 revision-3 work-in-progress kept under pps-work/c-series/wip-rev3):
+out/bundles/sc8547_svooc-46-d1-cpuqos-ec1f3bae.ko with the policy
+library out/bundles/sc8547_direct_policy-46-b3-d7d5cb47.ko (new module
+since 0074; the tablet runs #46's monolithic driver). Both on the
+tablet under /run with a sha256 manifest and d1-flight-swap.sh. The
+PD PPS back-end that was to be 0077 takes the next free number when it
+enters.
+
+Protocol defects the trace exposed, ours, for the follow-up patches:
+
+- The request flaps 6.0 ↔ 6.1 A every 1–4 s (435 GET_CURRENT exchanges
+  in A2's 16.7 min): the running target's power term
+  `55 W / vbus − 0.1 A` rounds to 6.0 or 6.1 as the bus jitters around
+  8.87 V; no hysteresis. The fatal runs bounced 5.9–6.1 the same way.
+  The cold cap (2.5 A below 21.0 °C) has none either (run A's three
+  restarts). Stock derates with 1 °C hysteresis and changes current
+  only when its vote changes.
+- No adapter-class cap: stock's sid power (55 W here) bounds the
+  request; ours asks the ladder's 6.2 A of a 5 A adapter. The cap is
+  conformance, not a pullback: the fatal runs and A2 already ran at
+  this brick's maximum.
+- An unknown adapter command ends our session (-EOPNOTSUPP); stock
+  counts it (rcv_date_err_num) and replies. None arrived in these runs.
+- Equivalent to stock, checked: the GET_BATT_VOL formula (bus/2 −
+  (vout − gauge)/4 − 75 mΩ × both pumps' input current), the VBUS_OK
+  thresholds (100/200 mV; `vbus_adjust_new_method` is not set for
+  iceland), the AP_STATUS reply (empty), the curve.
+
+Next: the D1 flight — the module pair in, cpuidle back to the governor,
+the same 46 W session from ≤ 55 % through the +5:00 step; survival is
+the fix confirmed under its trigger. Then 0078 (adapter class cap),
+hysteresis, the unknown-command reply; then the staged validation
+resumes on the patched driver. The optional control (the shipped module,
+cpuidle normal, expecting a reset at +5:00) is the owner's call; stock's
+code and two survivals make it confirmatory rather than necessary.
+
+Tools added: /usr/local/sbin/phy-trace.sh (the private ftrace instance
+"phy"; regmap events do not carry the bytes of the driver's bulk frame
+transfers, the i2c events do), host-witness.sh's fourth stream phy.txt,
+phy-decode.py (frames → commands, replies, flags; --all adds the pump's
+ADC and STATUS reads), follow.sh (session follower with a boot census
+on a reset), d1-flight-swap.sh. A stale `cat trace_pipe` from a dropped
+ssh holds an instance busy (EBUSY) until killed by an fd scan.
