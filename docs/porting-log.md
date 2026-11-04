@@ -3657,3 +3657,72 @@ five-reviewer pass with adversarial verification runs over a frozen copy
 F5a (the lift and hold), F5b (the sweep to 9.5 V, 60 s) and F5c (cable
 pull) follow on the Anker as a three-module swap (the A-series battmgr
 module and the C1 pair), attended, never the first session unattended.
+
+## 2026-11-03 — SuperVOOC stage 3 ended by a silent reset of the tablet five minutes into a 46 W session: the second unexplained reset of the day
+
+The passive drain brought the battery from 90 to 55 % (17:48–19:39),
+a 15 min rest cooled the cell to 31 °C and the board to 32.7 °C, the
+owner plugged the brick at 20:25:2x with the cell at 25 °C, and the go
+script started the session at 20:25:28: "SuperVOOC adapter 24 at
+6200 mA" — the entry ladder's top level for ≤ 55 %.
+
+- The session, 20:25:28 → about 20:30:40: the regulation settled the
+  request at 5.9–6.0 A under the 55 W budget (applied 6.1 → 6.0 → 5.9 A
+  in the first minute); both pumps 2.60 and 2.53 A at the 8.9–9.1 V bus
+  (46 W from the brick), dies 41.5 / 42.5 °C; the battery +9.9–10.0 A
+  (gauge) at 4.29 → 4.35 V, 53 → 58 % in five minutes (the firmware's
+  own log: 13.8 Ah learned capacity, time-to-full 6064 s); thermistors
+  at the last on-disk sample (+268 s): connector 33.6, battery
+  connector 43.3 (the warmest, rising 0.5 °C per 40 s and slowing),
+  pump MOS 40.1, board 26.5 °C; the cell 23 °C by the gauge; health
+  Good; 0 frame errors; the firmware's buck idle (ICL 3000 set, final
+  0, usb_suspend 1); the firmware's log normal to its last line
+  (20:30:30: state 2, JEITA zone 0, FCC 2500 / FV 4480 configured for
+  the idle buck). Nothing within 17 °C of any limit.
+- The last live reading, 20:30:36 (the on-disk logs end 20:29:5x — the
+  reset took their last 40 s with the page cache): both pump inputs had
+  fallen to 2.08 and 2.03 A with the request unchanged at 6.0 A, the
+  battery current to +8.0 A, the dies to 38.5 °C, the battery connector
+  to 41.6 °C — the first and only anomaly, 20 % less current from the
+  brick within one 20 s interval. The tablet was gone by 20:30:50; the
+  next kernel started at 20:31:24.
+- Witnesses, as at 15:40: no kernel line for five minutes before (the
+  last was the session's own start line and a Wi-Fi reassociation 0.2 s
+  after it, "Connection to AP lost" on the channel-136 radio again), no
+  shutdown, no panic text, the user-space journal flowing to 20:30:24;
+  the APSS watchdog's boot status 0 (no bite); the PMIC PON bytes
+  unchanged across the reset (static, as the downstream driver says of
+  GEN3 — not a record). No reset-reason witness exists on this device.
+- After the reset: the 0.2.33 policy wrote Standard at 2.68 s, the brick
+  charges as a 5 V 3 A source (+1.6 A at 61 %), both pumps Good and off,
+  the battery Good — the layered safety case held (the pumps' 5 s
+  watchdog, the boot-time Standard). Wi-Fi joined only at 367 s with
+  three handshake failures on the channel-136 radio (the watch item,
+  now costing six minutes per boot).
+
+What the two resets share: kernel #46 (the first build with the pen
+charger's hBoost client alive — #45 ran 24 h without a reset, with the
+pen charger dead; the pen was docked and at 100 % at both moments), a
+long uptime under load (2.7 h, then 4.8 h), high battery current in
+opposite directions (3–5 A out at 15:40 with the stress helper paused,
+Chrome at 155 % and the panel at full brightness; 10 A in at 20:30), and
+the silent signature with the watchdog not involved — which points at the
+power path or the firmware side rather than at a kernel lockup (with
+kernel.panic 0 a panic hangs, it does not reboot, and the APSS watchdog
+was not armed). What differs: no charger at 15:40, the brick at 46 W at
+20:30. Undetermined.
+
+Decision (owner's call pending): no further 6.2 A session. Stages 1 and
+2 (2 A and 3 A adapter current, both ended by the driver at 90 %) stand;
+stage 3 is FAIL-by-reset, cause unknown. Fast does not ship as the
+default yet. The way to a shipped Fast, proposed: cap the entry ladder at
+3 A (a one-line, behaviour-changing patch to svooc_entry_ua, documented
+as such; 27 W proven for 18 min on this unit), re-fly one full session
+from ≤ 55 % at the cap, and ship Fast with the cap while the reset is
+chased — first by separating the variables: a long run at the 3 A level
+(no 6.2 A), a long run of the discharge load without any charger (the
+15:40 shape), and the pen undocked for one of each (the hBoost lead). The
+flight tooling records every session; the next reset, if any, gets the
+same census. Logs: /var/log/iceland-pps/s3 on the tablet (session.log
+and psy.log end at 20:29:5x; fwraw.txt at 20:30:30), copies under the
+session scratchpad.
