@@ -4252,3 +4252,83 @@ with 74 calibration parameters per use-case variant and the per-unit
 Re25/F0 in persist — and an rx module without its sense (tx) graph runs
 open-loop while still applying its gains, which is the one rule the
 plan is built around.
+
+## 2026-11-04 — Flight D3 PASS: 0079–0084 cross both steps and the sags at a 4.4 V cell, taper to the driver's own 90 % end, no reset through two discriminators
+
+The drain was the first discriminator: 86 minutes of backlight-only
+discharge (discharge-backlight.sh, no CPU load, no latency hold),
+81 → 54 % at 1.0–2.9 A with the owner using the tablet part of the
+time, cell 28 → 35 °C, no reset — uptime continuous from the 12:21 boot.
+The D3 module set (the whole *-d4-0084-* bundle: oplus_svooc cf3e7ea7,
+sc8547_direct_policy 6611e1e8, sc8547_svooc 6d67c18d and sc8547_charger
+0d89169b) was swapped in while on battery. 0082 exports sc8547_stop()
+from the pump driver and the session module needs it, so the pump
+driver had to be reloaded, which brings 0083's charger-side register
+changes along: D3 and D4 merged into one flight, the PHY trace telling
+0083's two register changes apart. The first swap hit a race — udev
+autoloads the shipped sc8547_svooc the moment the reloaded pump driver
+re-creates the vooc-phy device, so the flight copy failed with "File
+exists" and the script restored the shipped set, which came back up in
+Fast (a re-probed driver's default; Standard written at once). The swap
+script now unloads an autoloaded copy and retries; the second run went
+through, the debugfs status showing the new `class` and `strays/unknown/
+reasks/over` fields. The host witnesses sample every 2 s now (the 1 s
+version cost ≈ 700 forks/s on the tablet in D2).
+
+The flight, 14:04:39–15:15:55, 54 → 90 %, one unbroken session of
+91 316 frames, error 0, every counter zero:
+
+- Start: "SuperVOOC adapter 24 (55 W) at 5000 mA"; limit = applied =
+  taper 5.0 A; 9.3–9.5 A into the pack by +6 s (2.63 + 2.52 A, 8.73 V).
+- 0083 on the wire: at setup `0x3a ← 0x60` and no write to 0x34 at all;
+  at the enable `0x09 ← 0x13` and `0x07 ← 0x84` — the vendor HAL's
+  values. Not one frame of the session carried an error flag (the
+  decoder's single hit is the PHY's idle read before the first frame).
+- +5:00 (14:09:41–45) and +16:00 (14:20:42): the brick's two steps, 5.2 →
+  4.1 → 3.05 A on the bus, both crossed, nothing but GET_VBAT on the
+  wire, deep-idle sum flat (2324974 from the enable to the end).
+- **0084 confirmed by direct evidence.** 14:33–14:41 (75 → 79 %, gauge
+  4.34–4.42 V) the pump ADC saw the same sags that ended D2 four times:
+  VBUS minima 8625 mV twice (pump VBAT 4.306/4.330 V), 8655, 8659,
+  8662 mV. The old gauge-referenced bound (2 × 4.39 − 0.1 = 8.68 V) would
+  have tripped on every one; the two-reading bound (8.51 V) held them
+  with 110–150 mV to spare. No -ERANGE, no restart, one session.
+- The voltage taper engaged on its own: three GET_CURRENT pairs (the
+  ask and the TX_DONE-only confirm) at 14:33:46, 14:36:03 and 14:38:14
+  took the request 5 → 4 → 3 → 2 A (the brick, already at 3.05 A,
+  followed only the last), then 1.5 A from 14:53; `reasks 0`, `over 0`.
+  The second pump stayed on throughout (0.76 + 0.74 A at the end; the
+  total never fell below 0082's 1.1 A release).
+- Thermals: battcon peaked at 48.0 °C just before the first step and was
+  31 °C at the end; cell 27–31 °C all session.
+- The window script's normal end (14:57) only stops its logging — only
+  its aborts write Standard — so the session ran on to the driver's own
+  end: "SuperVOOC finished" at 90 %, 71 minutes after the enable; the
+  first 90 % end on the patched driver (the stage 1/2 ends of 2026-11-03
+  were the shipped module's).
+
+The ending as written for this flight: `svooc-session.sh 0 end`
+(Standard, flag cleared), the host witnesses stopped and the two
+leftover tablet-side trace readers killed (load 0.6), a quiet minute on
+the brick in Standard, then the owner's unplug — which came 21 minutes
+later (Standard charging had taken the cell to 95 %) and was followed by
+no reset: the second discriminator. The 12:20:42 reset's two remaining
+readings — an input-removal transient or the session-end transition,
+either under the witness load — both involve a heavy CPU load; a
+deliberate unplug under a controlled load, on a day with nothing else
+at stake, settles it.
+
+Verdict: D3 PASS. Exercised: 0078, 0083, 0084, the taper, the 90 % end,
+0077's hold, 0082's join. Flown without incident but not exercised
+(nothing triggered them): 0079's thermal rows and budget deadband (cool
+cell, 47 W), 0080's stray handling (no NULL frame this handshake), 0081's
+re-arm and re-ask (no TX_FAILED, no over-current), 0082's release and
+retry. All remain KUnit-pinned. 0079–0084 enter the series (kernel/
+patches, README and upstreaming rows). Notes for the runbook: chg.sh's
+field parser is off by the new debugfs line; the window script does not
+end a session; a re-probed session driver comes up Fast.
+
+Next: bundle #47 = 0001–0084 + the pogo keyboard set 0087–0090 (the PD
+PPS pair keeps 0085/0086), RAM boot, the staged validation on the
+flashed driver (2 A above 85 %, 3 A from 56 %, the class-capped stage at
+≤ 55 %), the 24 h soak, then Fast as the default.

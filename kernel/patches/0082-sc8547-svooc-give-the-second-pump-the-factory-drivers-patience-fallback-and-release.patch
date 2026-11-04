@@ -1,0 +1,485 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 10:44:34 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: give the second pump the
+ factory driver's patience, fallback and release
+
+The second pump is enabled once the main one carries 1.4 A, and had
+from 300 to 500 ms to share the current, or the session ended (-EIO,
+not retried); once sharing, it stayed on to the end, and a second pump
+that stopped switching ended the session the same way. The factory
+driver (oplus_ap_voocphy.c, the slave CP paths: slave_cp_enable_thr
+1400 mA and slave_cp_disable_thr_high 1100 mA in the board's DT) waits
+300 ms and then up to 3 s for the slave to carry 0.5 A within 1 A of
+the master, and when it does not, disables it and goes on with the
+master alone at 3.0 A (CURRENT_TROUBLE_LIMIT), trying the slave once
+more when the current calls for it; it also disables the slave after
+3 s below 1.1 A in total, at the taper, and brings it back if the
+current rises again.
+
+Do the same. The pump driver gains sc8547_stop(), which stops a pump's
+switching but keeps it prepared, its ADC on, so that a second pump seen
+off can still be sampled and enabled again (sc8547_disable() drops both,
+and a sample of an unprepared pump is -EINVAL, which would have ended
+the session a tick later). The policy library gains the release
+predicate (less than 1.1 A between the two) and the single-pump
+current; its running
+check no longer fails the session for a second pump that stopped
+while sharing, which is the driver's to see off, and holds the main
+pump alone to its maximum only while the second is not enabled, so a
+slow second pump is given its 3 s rather than the pair's current being
+read as the main's. The driver sees a second pump that would not share,
+or that stopped, off at once, caps the session at 3.0 A and asks for
+that current ahead of the regulator (above the main pump's own 3.3 A
+the session ends regardless, as it should), allows one more join, and
+after a second failure keeps to one pump for the session; sharing, it
+releases the second pump after 60 ticks below 1.1 A and lets it join
+again later. A second pump that faults (its sample returns -EIO: a
+latched protection, a watchdog bite) is seen off the same way and held
+for the session, its own stop having left it unprepared; it is no
+longer sampled, and the session goes on. The status shows a held second
+pump. KUnit covers the release predicate's boundary, the new
+running-check cases and the constants.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_charger.c            |   22 ++++
+ drivers/power/supply/sc8547_direct_policy.c      |   28 +++++-
+ drivers/power/supply/sc8547_direct_policy.h      |   10 ++
+ drivers/power/supply/sc8547_direct_policy_test.c |   47 ++++++++-
+ drivers/power/supply/sc8547_svooc.c              |  111 ++++++++++++++++++++--
+ include/linux/power/sc8547.h                     |    1 
+ 6 files changed, 195 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/power/supply/sc8547_charger.c b/drivers/power/supply/sc8547_charger.c
+index 4318274e0d32..6346303b2ded 100644
+--- a/drivers/power/supply/sc8547_charger.c
++++ b/drivers/power/supply/sc8547_charger.c
+@@ -387,6 +387,28 @@ int sc8547_disable(struct sc8547 *cp)
+ }
+ EXPORT_SYMBOL_GPL(sc8547_disable);
+ 
++/**
++ * sc8547_stop() - stop switching, keeping the pump prepared
++ * @cp: a pump
++ *
++ * The pump keeps its ADC and its limits, so it may be sampled and enabled
++ * again without a new sc8547_prepare(); a session uses this to see a second
++ * pump off and bring it back.
++ *
++ * Return: 0, or a negative error.
++ */
++int sc8547_stop(struct sc8547 *cp)
++{
++	int ret;
++
++	mutex_lock(&cp->lock);
++	ret = cp->enabled ? sc8547_stop_locked(cp) : 0;
++	mutex_unlock(&cp->lock);
++	power_supply_changed(cp->psy);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(sc8547_stop);
++
+ /**
+  * sc8547_sample() - check faults, service the watchdog and read the ADC
+  * @cp: a prepared pump
+diff --git a/drivers/power/supply/sc8547_direct_policy.c b/drivers/power/supply/sc8547_direct_policy.c
+index 62469376970e..2be337ca4412 100644
+--- a/drivers/power/supply/sc8547_direct_policy.c
++++ b/drivers/power/supply/sc8547_direct_policy.c
+@@ -280,9 +280,10 @@ EXPORT_SYMBOL_GPL(sc8547_direct_regulate_target_ua);
+  *	the caller and updated here
+  *
+  * VBUS is held against the gauge's voltage, not against the pump's own
+- * sense of the battery.
++ * sense of the battery. A second pump that stops is the caller's to see off,
++ * not a fault of the session.
+  *
+- * Return: 0, -EIO when a pump that should switch does not, -ERANGE when a
++ * Return: 0, -EIO when the main pump does not switch, -ERANGE when a
+  * voltage, a current or the power left its window.
+  */
+ int sc8547_direct_running_ok(const struct sc8547_sample *main,
+@@ -297,8 +298,12 @@ int sc8547_direct_running_ok(const struct sc8547_sample *main,
+ 		return -EIO;
+ 	if (main->vbus_uv < 2 * vbat_uv - 100000 || main->vbus_uv > 2 * vbat_uv + 700000)
+ 		return -ERANGE;
++	/*
++	 * Each pump within its own maximum; the main alone within it while
++	 * the second is not enabled, and the pair within the limit.
++	 */
+ 	if (ibus > limit_ua + 300000 || main->ibus_ua > SC8547_DIRECT_PUMP_MAX_UA ||
+-	    (!dual && ibus > SC8547_DIRECT_PUMP_MAX_UA) ||
++	    (!second_on && ibus > SC8547_DIRECT_PUMP_MAX_UA) ||
+ 	    power > SC8547_DIRECT_POWER_MAX_UW * 1000000)
+ 		return -ERANGE;
+ 	if (second_on && second->ibus_ua > SC8547_DIRECT_PUMP_MAX_UA)
+@@ -310,8 +315,6 @@ int sc8547_direct_running_ok(const struct sc8547_sample *main,
+ 	} else {
+ 		*disagree = 0;
+ 	}
+-	if (dual && !second->switching)
+-		return -EIO;
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(sc8547_direct_running_ok);
+@@ -349,5 +352,20 @@ bool sc8547_direct_second_shared(const struct sc8547_sample *main,
+ }
+ EXPORT_SYMBOL_GPL(sc8547_direct_second_shared);
+ 
++/**
++ * sc8547_direct_second_release() - the second pump is no longer needed
++ * @main: the main pump
++ * @second: the second pump
++ *
++ * Return: true when the two carry less than 1.1 A between them, as at the
++ * taper; the caller sees it off after this has held for three seconds.
++ */
++bool sc8547_direct_second_release(const struct sc8547_sample *main,
++				  const struct sc8547_sample *second)
++{
++	return main->ibus_ua + second->ibus_ua < SC8547_DIRECT_SECOND_OFF_UA;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_second_release);
++
+ MODULE_DESCRIPTION("Direct charging envelope for the SC8547D charge pumps");
+ MODULE_LICENSE("GPL");
+diff --git a/drivers/power/supply/sc8547_direct_policy.h b/drivers/power/supply/sc8547_direct_policy.h
+index e28fcdb33333..8e0720d10ce8 100644
+--- a/drivers/power/supply/sc8547_direct_policy.h
++++ b/drivers/power/supply/sc8547_direct_policy.h
+@@ -14,6 +14,14 @@
+ #define SC8547_DIRECT_POWER_MAX_UW	60000000LL
+ #define SC8547_DIRECT_VBAT_MAX_UV	4480000
+ #define SC8547_DIRECT_SECOND_UA		1400000
++/*
++ * The second pump leaves below this total input current, and a session goes
++ * on with the main pump alone at this current when the second will not
++ * share, as the factory host does (slave_cp_disable_thr_high 1100 mA,
++ * CURRENT_TROUBLE_LIMIT 3.0 A).
++ */
++#define SC8547_DIRECT_SECOND_OFF_UA	1100000
++#define SC8547_DIRECT_SINGLE_UA		3000000
+ /* Hard stops: the cell and the pump die, in tenths of a degree Celsius. */
+ #define SC8547_DIRECT_CELL_MAX_DC	440
+ #define SC8547_DIRECT_DIE_MAX_DC	700
+@@ -120,6 +128,8 @@ bool sc8547_direct_second_join(const struct sc8547_sample *main,
+ 			       const struct sc8547_sample *second);
+ bool sc8547_direct_second_shared(const struct sc8547_sample *main,
+ 				 const struct sc8547_sample *second);
++bool sc8547_direct_second_release(const struct sc8547_sample *main,
++				  const struct sc8547_sample *second);
+ 
+ /**
+  * sc8547_direct_vbat_uv() - the battery voltage the taper follows
+diff --git a/drivers/power/supply/sc8547_direct_policy_test.c b/drivers/power/supply/sc8547_direct_policy_test.c
+index 7a7959559995..30ab6f424962 100644
+--- a/drivers/power/supply/sc8547_direct_policy_test.c
++++ b/drivers/power/supply/sc8547_direct_policy_test.c
+@@ -48,6 +48,8 @@ static void sc8547_direct_test_constants(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_POWER_MAX_UW, 60000000LL);
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_VBAT_MAX_UV, 4480000);
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_SECOND_UA, 1400000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_SECOND_OFF_UA, 1100000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_SINGLE_UA, 3000000);
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_CELL_MAX_DC, 440);
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_DIE_MAX_DC, 700);
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_POWER_SETTLE_UW, 54500000LL);
+@@ -521,13 +523,24 @@ static void sc8547_direct_test_running_current(struct kunit *test)
+ 	m.ibus_ua = 3300001;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
+ 						       &disagree), -ERANGE);
+-	/* Until the second pump shares, the total is held to one pump's worth. */
++	/*
++	 * While the second pump is enabled but not yet sharing, each pump is
++	 * held to its own maximum and the pair to the limit, not the total to
++	 * one pump's worth: the factory driver gives the second pump 3 s.
++	 */
+ 	m.ibus_ua = 3000000;
+ 	s.ibus_ua = 400000;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
+-						       &disagree), -ERANGE);
++						       &disagree), 0);
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
+ 						       &disagree), 0);
++	/* With the second pump not enabled, the total is the main's alone. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), 0);
++	m.ibus_ua = 3300001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), -ERANGE);
++	m.ibus_ua = 3000000;
+ 	/* The second pump is held to 3.3 A as well. */
+ 	s.ibus_ua = 3300000;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
+@@ -551,12 +564,20 @@ static void sc8547_direct_test_running_current(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, true,
+ 						       &disagree), 0);
+ 
+-	/* A second pump that stopped while sharing. */
++	/*
++	 * A second pump that stopped while sharing is the driver's to see off,
++	 * not a fault here; one that stopped before sharing leaves the main
++	 * pump with more than it may carry.
++	 */
+ 	s.switching = false;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, true,
+-						       &disagree), -EIO);
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, false,
++						       &disagree), 0);
++	m.ibus_ua = 3300001;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, false,
+ 						       &disagree), -ERANGE);
++	m.ibus_ua = 3300000;
+ 
+ 	/* 60.000000 W, 6.25 A at 9.6 V, passes; one more microampere does not. */
+ 	s.switching = true;
+@@ -618,8 +639,8 @@ static void sc8547_direct_test_running_disagree(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, disagree, 0U);
+ 
+ 	/*
+-	 * The disagreement is counted before a stopped second pump is seen:
+-	 * the first such sample stops with -EIO, the second with -ERANGE.
++	 * The disagreement is counted whether or not the second pump switches:
++	 * the first such sample passes, the second stops with -ERANGE.
+ 	 */
+ 	s = main_running;
+ 	s.ibus_ua = 1500000;
+@@ -627,7 +648,7 @@ static void sc8547_direct_test_running_disagree(struct kunit *test)
+ 	s.vbus_uv = 8250001;
+ 	disagree = 0;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
+-						       &disagree), -EIO);
++						       &disagree), 0);
+ 	KUNIT_EXPECT_EQ(test, disagree, 1U);
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
+ 						       &disagree), -ERANGE);
+@@ -672,6 +693,18 @@ static void sc8547_direct_test_second(struct kunit *test)
+ 	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_shared(&m, &s));
+ 	s.switching = false;
+ 	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_shared(&m, &s));
++
++	/* The second pump leaves below 1.1 A between the two. */
++	m.ibus_ua = 550000;
++	s.ibus_ua = 550000;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_release(&m, &s));
++	s.ibus_ua = 549999;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_release(&m, &s));
++	m.ibus_ua = 1099999;
++	s.ibus_ua = 0;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_release(&m, &s));
++	m.ibus_ua = 1100000;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_release(&m, &s));
+ }
+ 
+ /* The buck is quiet at 25 mA or less, with VBUS in the adapter's window. */
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 22e067abec8b..151c31d7a210 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -70,6 +70,16 @@
+ #define SVOOC_OVER_TICKS	20
+ /* New sessions after protocol failures, until one runs or a replug. */
+ #define SVOOC_RETRIES		3
++/*
++ * The second pump: left alone this long after it is enabled, then given
++ * this long to share before it is seen off, and seen off after this many
++ * ticks below the release current, as the factory driver does (300 ms,
++ * up to 60 x 50 ms, 3 s).
++ */
++#define SVOOC_SECOND_SETTLE_MS	300
++#define SVOOC_SECOND_SHARE_MS	3000
++#define SVOOC_SECOND_OFF_TICKS	60
++#define SVOOC_SECOND_TRIES	2
+ 
+ #define SVOOC_TICK_MS		50
+ #define SVOOC_BUCK_TICK_MS	20
+@@ -219,6 +229,10 @@ struct sc8547_svooc {
+ 	unsigned int reasks;
+ 	unsigned int over;
+ 	bool over_asked;
++	/* The second pump's failures to share, ticks it is not needed, given up. */
++	unsigned int second_fails;
++	unsigned int second_low;
++	bool second_held;
+ 	unsigned int retries;
+ 	bool stopping;
+ 	/* No session starts while the system is suspended; under the lock. */
+@@ -811,6 +825,9 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 	sv->state = SVOOC_IDENTIFY;
+ 	sv->error = 0;
+ 	sv->class_w = 0;
++	sv->second_fails = 0;
++	sv->second_low = 0;
++	sv->second_held = false;
+ 	sv->ticks = 0;
+ 	sv->taper_ua = sv->limit_ua;
+ 	sv->target_ua = 0;
+@@ -861,28 +878,80 @@ static int svooc_check_running(struct sc8547_svooc *sv)
+ 	return 0;
+ }
+ 
+-/* Bring in the second pump once the main one carries enough to share. */
+-static int svooc_second(struct sc8547_svooc *sv, bool *enable)
++/*
++ * The second pump did not share, or stopped: the factory driver goes on
++ * with the main pump alone at 3.0 A and tries the second once more when the
++ * current calls for it. @change is set to see it off.
++ */
++static void svooc_second_failed(struct sc8547_svooc *sv, int *change)
++{
++	sv->dual = false;
++	sv->second_on = false;
++	sv->second_low = 0;
++	*change = -1;
++	sv->limit_ua = min(sv->limit_ua, SC8547_DIRECT_SINGLE_UA);
++	sv->taper_ua = min(sv->taper_ua, sv->limit_ua);
++	/*
++	 * Asked for at once, ahead of the regulator; the main pump's own
++	 * maximum ends the session if the current was beyond it already.
++	 */
++	if (sv->applied_ua > sv->limit_ua && !sv->pending_ua) {
++		sv->target_ua = sv->limit_ua;
++		sv->change = true;
++		sv->change_deadline = jiffies + msecs_to_jiffies(SVOOC_CHANGE_MS);
++	}
++	if (++sv->second_fails >= SVOOC_SECOND_TRIES)
++		sv->second_held = true;
++	dev_warn(sv->dev, "second pump did not share (%u): one pump at %d mA%s\n",
++		 sv->second_fails, sv->limit_ua / 1000,
++		 sv->second_held ? " for the session" : "");
++}
++
++/*
++ * Bring in the second pump once the main one carries enough to share, see
++ * it off when it will not or is no longer needed. @change is set to 1 to
++ * enable it and to -1 to disable it, outside the lock.
++ */
++static int svooc_second(struct sc8547_svooc *sv, int *change)
+ {
+ 	const struct sc8547_sample *m = &sv->sample[0], *s = &sv->sample[1];
+ 
+-	if (!sv->second || sv->dual || sv->state != SVOOC_RUNNING)
++	if (!sv->second || sv->state != SVOOC_RUNNING)
+ 		return 0;
+ 	if (!sv->second_on) {
+-		if (sc8547_direct_second_join(m, s)) {
++		if (!sv->second_held && sc8547_direct_second_join(m, s)) {
+ 			sv->second_on = true;
+ 			sv->second_at = jiffies;
+-			*enable = true;
++			*change = 1;
+ 		}
+ 		return 0;
+ 	}
+-	if (time_before(jiffies, sv->second_at + msecs_to_jiffies(300)))
++	if (sv->dual) {
++		if (!s->switching) {
++			svooc_second_failed(sv, change);
++			return 0;
++		}
++		if (!sc8547_direct_second_release(m, s)) {
++			sv->second_low = 0;
++		} else if (++sv->second_low >= SVOOC_SECOND_OFF_TICKS) {
++			sv->dual = false;
++			sv->second_on = false;
++			sv->second_low = 0;
++			*change = -1;
++		}
++		return 0;
++	}
++	if (time_before(jiffies, sv->second_at + msecs_to_jiffies(SVOOC_SECOND_SETTLE_MS)))
+ 		return 0;
+ 	if (sc8547_direct_second_shared(m, s)) {
+ 		sv->dual = true;
++		sv->second_low = 0;
+ 		return 0;
+ 	}
+-	return time_after(jiffies, sv->second_at + msecs_to_jiffies(500)) ? -EIO : 0;
++	if (time_after(jiffies, sv->second_at + msecs_to_jiffies(SVOOC_SECOND_SETTLE_MS +
++								 SVOOC_SECOND_SHARE_MS)))
++		svooc_second_failed(sv, change);
++	return 0;
+ }
+ 
+ /*
+@@ -980,7 +1049,9 @@ static void svooc_tick(struct sc8547_svooc *sv)
+ 	struct sc8547_sample sample[2] = {};
+ 	struct sc8547_direct_battery bat;
+ 	int therm[SC8547_DIRECT_THERMS], usb_ua = 0, usb_uv = 0, online = 0;
+-	bool read_main, read_bat, read_therm, read_usb, suspend = false, second = false, changed;
++	bool read_main, read_bat, read_therm, read_usb, suspend = false, changed;
++	bool second_fault = false;
++	int second = 0;
+ 	enum svooc_state state;
+ 	int ret;
+ 
+@@ -997,8 +1068,14 @@ static void svooc_tick(struct sc8547_svooc *sv)
+ 
+ 	/* Slow reads outside the lock: the PHY must answer within milliseconds. */
+ 	ret = read_main ? sc8547_sample(sv->main, &sample[0]) : 0;
+-	if (!ret && sv->second)
++	if (!ret && sv->second && (sv->second_on || !sv->second_held)) {
+ 		ret = sc8547_sample(sv->second, &sample[1]);
++		/* A fault on the second pump is its own: the session goes on. */
++		if (ret == -EIO) {
++			second_fault = true;
++			ret = 0;
++		}
++	}
+ 	if (!ret && read_bat)
+ 		ret = svooc_read_battery(sv, &bat);
+ 	if (!ret && read_therm)
+@@ -1022,6 +1099,12 @@ static void svooc_tick(struct sc8547_svooc *sv)
+ 		sv->sampled_at = jiffies;
+ 	}
+ 	sv->sample[1] = sample[1];
++	if (second_fault) {
++		if (sv->second_on)
++			svooc_second_failed(sv, &second);
++		sv->second_held = true;
++		sv->sample[1] = (struct sc8547_sample){};
++	}
+ 	if (read_bat)
+ 		sv->bat = bat;
+ 	if (read_therm)
+@@ -1059,8 +1142,11 @@ static void svooc_tick(struct sc8547_svooc *sv)
+ 
+ 	if (suspend)
+ 		ret = svooc_set_input(sv, true);
+-	if (!ret && second)
++	if (!ret && second > 0)
+ 		ret = sc8547_enable(sv->second);
++	else if (!ret && second < 0)
++		ret = sv->second_held ? sc8547_disable(sv->second) :
++		      sc8547_stop(sv->second);
+ 	mutex_lock(&sv->lock);
+ 	if (ret)
+ 		goto stop;
+@@ -1296,9 +1382,10 @@ static int svooc_status_show(struct seq_file *s, void *data)
+ 		   m->switching ? "on" : "off", m->vbus_uv, m->ibus_ua,
+ 		   m->vout_uv, m->vbat_uv, m->temp);
+ 	if (sv->second)
+-		seq_printf(s, "second %s%s vbus %d ibus %d die %d\n",
++		seq_printf(s, "second %s%s%s vbus %d ibus %d die %d\n",
+ 			   c->switching ? "on" : "off", sv->dual ? " shared" : "",
+-			   c->vbus_uv, c->ibus_ua, c->temp);
++			   sv->second_held ? " held" : "", c->vbus_uv, c->ibus_ua,
++			   c->temp);
+ 	seq_printf(s, "battery %d uV %d uA %d%% %d dC\n", sv->bat.uv, sv->bat.ua,
+ 		   sv->bat.capacity, sv->bat.temp);
+ 	seq_printf(s, "thermistors %d %d %d %d mC\n", sv->therm_mc[0],
+diff --git a/include/linux/power/sc8547.h b/include/linux/power/sc8547.h
+index b037b1b67778..5480f9271d39 100644
+--- a/include/linux/power/sc8547.h
++++ b/include/linux/power/sc8547.h
+@@ -36,6 +36,7 @@ struct regmap *sc8547_regmap(struct sc8547 *cp);
+ int sc8547_prepare(struct sc8547 *cp);
+ int sc8547_enable(struct sc8547 *cp);
+ int sc8547_disable(struct sc8547 *cp);
++int sc8547_stop(struct sc8547 *cp);
+ int sc8547_sample(struct sc8547 *cp, struct sc8547_sample *sample);
+ void sc8547_set_phy_handler(struct sc8547 *cp, void (*handler)(void *data),
+ 			    void *data);

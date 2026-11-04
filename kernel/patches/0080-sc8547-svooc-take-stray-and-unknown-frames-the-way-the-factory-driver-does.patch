@@ -1,0 +1,299 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 10:44:34 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: take stray and unknown frames
+ the way the factory driver does
+
+Once fast charging was granted, a frame the protocol library did not
+know ended the session: a command it had no case for returned
+-EOPNOTSUPP, which the session driver does not retry, so one such frame
+cost fast charge until the adapter was replugged; a frame with no
+command in it (NULL, 0x0e, 0x0f, or a head that is not SuperVOOC) did
+the same through -EPROTO, retried only after 10 s and a new handshake.
+The adapter sends about 21 frames a second; none of the 20,897 of a
+traced session was bad, but the driver had no tolerance for one that
+is.
+
+The factory driver (oplus_ap_voocphy.c) distinguishes the two. A
+command it does not know (it has no case for 0x06 to 0x08 or 0x0b,
+ASK_CUR_UPDN) is counted (rcv_date_err_num, a statistic) and answered
+with an empty frame, the head alone, and the session goes on. A frame
+with no command in it (oplus_voocphy_handle_null_cmd, and the
+unknown-head rule beside it) is left unanswered the first time, when
+the command before it was GET_BATT_VOL and no current change is in
+flight, so the adapter asks again; the second in a row ends the
+session with a new handshake. Any valid command resets the count.
+ASK_AP_STATUS is answered with an empty frame whether or not fast
+charging was granted.
+
+Do the same. The library answers an unknown command with an empty
+frame and counts it, answers AP_STATUS itself at any stage, and
+returns OPLUS_SVOOC_STRAY for a frame with no command in it, or a
+VOOC2 head, once granted; before the grant those stay protocol errors.
+The session driver leaves the first stray after a battery query
+unanswered and ends the session (-EPROTO, retried) on the second in a
+row or on one during a current change; a bad head after the first frame
+is a stray too, and every received frame now refreshes the silence
+timeout, since the adapter is evidently there. The counts show in the
+debugfs status. KUnit covers both sides of the grant for each frame
+kind, the empty reply, the counter and its reset.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/oplus_svooc.c      |   29 ++++++++++++++++----
+ drivers/power/supply/oplus_svooc_test.c |   46 +++++++++++++++++++++++++++++++
+ drivers/power/supply/sc8547_svooc.c     |   33 ++++++++++++++++++----
+ include/linux/power/oplus_svooc.h       |    9 ++++++
+ 4 files changed, 106 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/power/supply/oplus_svooc.c b/drivers/power/supply/oplus_svooc.c
+index 814f8d7ce302..a5e138a3d5d8 100644
+--- a/drivers/power/supply/oplus_svooc.c
++++ b/drivers/power/supply/oplus_svooc.c
+@@ -55,6 +55,7 @@ void oplus_svooc_reset(struct oplus_svooc *svooc)
+ 	svooc->exchange = OPLUS_SVOOC_COMMAND;
+ 	svooc->offered = false;
+ 	svooc->attempts = 0;
++	svooc->unknown = 0;
+ }
+ EXPORT_SYMBOL_GPL(oplus_svooc_reset);
+ 
+@@ -88,8 +89,10 @@ static u8 oplus_svooc_challenge(struct oplus_svooc *svooc, u16 random)
+  * @payload: the reply
+  *
+  * Return: 1 with @payload set when the frame was answered here; 0 for a
+- * power command (GET_VBAT, VBUS_OK, GET_CURRENT, AP_STATUS) the caller must
+- * answer; a negative error when the adapter broke the protocol.
++ * power command (GET_VBAT, VBUS_OK, GET_CURRENT) the caller must answer;
++ * OPLUS_SVOOC_STRAY for a frame with no command in it once fast charging
++ * was granted, which the caller may leave unanswered once, as the factory
++ * driver does; a negative error when the adapter broke the protocol.
+  */
+ int oplus_svooc_handle(struct oplus_svooc *svooc,
+ 		       const struct oplus_svooc_request *req, u16 random,
+@@ -100,7 +103,9 @@ int oplus_svooc_handle(struct oplus_svooc *svooc,
+ 
+ 	/* VOOC2 adapters open with a FASTCHG offer; answer it as SuperVOOC. */
+ 	if (req->vooc2) {
+-		if (cmd != OPLUS_SVOOC_FASTCHG || svooc->granted ||
++		if (svooc->granted)
++			return OPLUS_SVOOC_STRAY;
++		if (cmd != OPLUS_SVOOC_FASTCHG ||
+ 		    svooc->exchange != OPLUS_SVOOC_COMMAND)
+ 			return -EPROTO;
+ 		svooc->offered = true;
+@@ -183,12 +188,26 @@ int oplus_svooc_handle(struct oplus_svooc *svooc,
+ 	case OPLUS_SVOOC_GET_VBAT:
+ 	case OPLUS_SVOOC_VBUS_OK:
+ 	case OPLUS_SVOOC_GET_CURRENT:
+-	case OPLUS_SVOOC_AP_STATUS:
+ 		return svooc->granted ? 0 : -EACCES;
++	case OPLUS_SVOOC_AP_STATUS:
++		/* The factory driver answers an empty frame, granted or not. */
++		*payload = 0;
++		return 1;
+ 	case OPLUS_SVOOC_BAD_CABLE:
+ 		return -ENOLINK;
++	case OPLUS_SVOOC_NULL:
++	case OPLUS_SVOOC_DATA_0E:
++	case OPLUS_SVOOC_DATA_0F:
++		return svooc->granted ? OPLUS_SVOOC_STRAY : -EPROTO;
+ 	default:
+-		return -EOPNOTSUPP;
++		/*
++		 * A command the factory driver does not know either (it has
++		 * none for 0x06 to 0x08 and 0x0b): it counts it and answers an
++		 * empty frame.
++		 */
++		svooc->unknown++;
++		*payload = 0;
++		return 1;
+ 	}
+ }
+ EXPORT_SYMBOL_GPL(oplus_svooc_handle);
+diff --git a/drivers/power/supply/oplus_svooc_test.c b/drivers/power/supply/oplus_svooc_test.c
+index 5c61bff48988..5cfdedc1f5b8 100644
+--- a/drivers/power/supply/oplus_svooc_test.c
++++ b/drivers/power/supply/oplus_svooc_test.c
+@@ -176,12 +176,58 @@ static void oplus_svooc_test_adapter_power(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, oplus_svooc_adapter_power(0xff), 0);
+ }
+ 
++static void oplus_svooc_test_strays(struct kunit *test)
++{
++	struct oplus_svooc svooc = oplus_svooc_pad4;
++	struct oplus_svooc_request req;
++	u8 payload = 0xff;
++
++	/* Before the grant: AP_STATUS is answered, frames with no command are errors. */
++	oplus_svooc_reset(&svooc);
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_AP_STATUS), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), 1);
++	KUNIT_EXPECT_EQ(test, payload, 0);
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_DATA_0F), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), -EPROTO);
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_GET_VBAT), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), -EACCES);
++
++	/* Granted: frames with no command are strays, unknown commands get an empty frame. */
++	svooc.granted = true;
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_NULL), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), OPLUS_SVOOC_STRAY);
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_DATA_0E), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), OPLUS_SVOOC_STRAY);
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_DATA_0F), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), OPLUS_SVOOC_STRAY);
++	/* A VOOC2 head once granted is a stray too. */
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(0xa8, &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), OPLUS_SVOOC_STRAY);
++	payload = 0xff;
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(0xb), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), 1);
++	KUNIT_EXPECT_EQ(test, payload, 0);
++	KUNIT_EXPECT_EQ(test, svooc.unknown, 1);
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(0x6), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), 1);
++	KUNIT_EXPECT_EQ(test, svooc.unknown, 2);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_frame(payload, req.shifted), 0x200);
++	/* Power commands still go to the caller; a bad cable still ends it. */
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_GET_CURRENT), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), 0);
++	KUNIT_ASSERT_EQ(test, oplus_svooc_decode(oplus_svooc_rx(OPLUS_SVOOC_BAD_CABLE), &req), 0);
++	KUNIT_EXPECT_EQ(test, oplus_svooc_handle(&svooc, &req, 0, &payload), -ENOLINK);
++	oplus_svooc_reset(&svooc);
++	KUNIT_EXPECT_EQ(test, svooc.unknown, 0);
++}
++
+ static struct kunit_case oplus_svooc_test_cases[] = {
+ 	KUNIT_CASE(oplus_svooc_test_decode),
+ 	KUNIT_CASE(oplus_svooc_test_session),
+ 	KUNIT_CASE(oplus_svooc_test_rejects),
+ 	KUNIT_CASE(oplus_svooc_test_replies),
+ 	KUNIT_CASE(oplus_svooc_test_adapter_power),
++	KUNIT_CASE(oplus_svooc_test_strays),
+ 	{}
+ };
+ 
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 3a7d2d299f0a..a00a2ecb2aa4 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -200,6 +200,9 @@ struct sc8547_svooc {
+ 	bool dual;
+ 	bool change;
+ 	unsigned int skipped;
++	/* Frames with no command in a row, and the command before them. */
++	unsigned int strays;
++	u8 last_command;
+ 	unsigned int retries;
+ 	bool stopping;
+ 	/* No session starts while the system is suspended; under the lock. */
+@@ -427,14 +430,25 @@ static int svooc_power_command(struct sc8547_svooc *sv,
+ 			return -EPROTO;
+ 		*payload = svooc_vbat_reply(sv);
+ 		return 0;
+-	case OPLUS_SVOOC_AP_STATUS:
+-		*payload = 0;
+-		return 0;
+ 	default:
+ 		return -EPROTO;
+ 	}
+ }
+ 
++/*
++ * A frame with no command in it. The factory driver leaves the first one
++ * after a battery query unanswered, so the adapter asks again, and ends the
++ * session on the second in a row; while a current change is in flight it
++ * ends the session at once.
++ */
++static int svooc_stray(struct sc8547_svooc *sv)
++{
++	if (sv->last_command == OPLUS_SVOOC_GET_VBAT && !sv->pending_ua &&
++	    !sv->change && ++sv->strays < 2)
++		return 0;
++	return -EPROTO;
++}
++
+ static int svooc_receive(struct sc8547_svooc *sv, u8 rx, u8 flags)
+ {
+ 	struct oplus_svooc_request req;
+@@ -476,14 +490,18 @@ static int svooc_receive(struct sc8547_svooc *sv, u8 rx, u8 flags)
+ 		return 0;
+ 
+ 	sv->skipped = 0;
+-	ret = oplus_svooc_decode(rx, &req);
+-	if (ret)
+-		return ret;
+ 	sv->last_rx = jiffies;
+ 	sv->frames++;
++	ret = oplus_svooc_decode(rx, &req);
++	if (ret)
++		return svooc_stray(sv);
+ 	ret = oplus_svooc_handle(&sv->proto, &req, get_random_u16(), &payload);
++	if (ret == OPLUS_SVOOC_STRAY)
++		return svooc_stray(sv);
+ 	if (ret < 0)
+ 		return ret;
++	sv->strays = 0;
++	sv->last_command = req.command;
+ 	/* Suspend the buck while the adapter reports its model and curve. */
+ 	if (sv->state == SVOOC_IDENTIFY && sv->proto.identified)
+ 		mod_delayed_work(system_highpri_wq, &sv->work, 0);
+@@ -590,6 +608,8 @@ static int svooc_vooc_start(struct sc8547_svooc *sv)
+ 	sv->rx = 0;
+ 	sv->flags = 0;
+ 	sv->skipped = 0;
++	sv->strays = 0;
++	sv->last_command = 0;
+ 	sv->last_rx = jiffies;
+ 	sv->phy_on = true;
+ 	/* The handshake starts the adapter talking: be ready first. */
+@@ -1203,6 +1223,7 @@ static int svooc_status_show(struct seq_file *s, void *data)
+ 		   svooc_state_names[sv->state], sv->error, sv->frames, sv->irqs,
+ 		   sv->rx, sv->flags, sv->proto.model, sv->class_w);
+ 	seq_printf(s, "worst reply %u us\n", sv->worst_us);
++	seq_printf(s, "strays %u unknown %u\n", sv->strays, sv->proto.unknown);
+ 	seq_printf(s, "limit %d target %d applied %d pending %d taper %d uA\n",
+ 		   sv->limit_ua, sv->change ? sv->target_ua : 0, sv->applied_ua,
+ 		   sv->pending_ua, sv->taper_ua);
+diff --git a/include/linux/power/oplus_svooc.h b/include/linux/power/oplus_svooc.h
+index fcdf2f61d0dd..1e87ee537e5d 100644
+--- a/include/linux/power/oplus_svooc.h
++++ b/include/linux/power/oplus_svooc.h
+@@ -12,6 +12,7 @@
+ #define OPLUS_SVOOC_HEAD		4
+ #define OPLUS_VOOC2_HEAD		5
+ 
++#define OPLUS_SVOOC_NULL		0
+ #define OPLUS_SVOOC_GET_VBAT		1
+ #define OPLUS_SVOOC_VBUS_OK		2
+ #define OPLUS_SVOOC_GET_CURRENT		3
+@@ -21,6 +22,11 @@
+ #define OPLUS_SVOOC_AP_STATUS		10
+ #define OPLUS_SVOOC_IDENTIFY		12
+ #define OPLUS_SVOOC_BATTERY		13
++#define OPLUS_SVOOC_DATA_0E		14
++#define OPLUS_SVOOC_DATA_0F		15
++
++/* oplus_svooc_handle(): a frame with no command in it, for the caller to weigh. */
++#define OPLUS_SVOOC_STRAY		2
+ 
+ /* Replies to OPLUS_SVOOC_VBUS_OK, for VBUS against twice the battery. */
+ #define OPLUS_SVOOC_VBUS_LOW		0x10
+@@ -55,6 +61,8 @@ enum oplus_svooc_exchange {
+  * @curve_sent: the adapter has read the battery curve.
+  * @granted: a FASTCHG reply granted fast charging, once the adapter was
+  *	identified, had read the curve and @permit was set.
++ * @unknown: commands this library does not know, each answered with an
++ *	empty frame as the factory driver answers them.
+  */
+ struct oplus_svooc {
+ 	u8 circuit;
+@@ -64,6 +72,7 @@ struct oplus_svooc {
+ 	u8 model;
+ 	bool curve_sent;
+ 	bool granted;
++	unsigned int unknown;
+ 	/* private: */
+ 	enum oplus_svooc_exchange exchange;
+ 	bool offered;

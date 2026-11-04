@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 10:44:34 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: hold VBUS against both readings
+ of the battery
+
+The running check held the bus between twice the gauge's voltage less
+100 mV and twice it plus 700 mV. Under 9 A the gauge reads the cell
+plus the drop to it, some 100 mV above the main pump's own sense at its
+battery pins, and when the adapter steps its output the current falls
+within a frame while the gauge's reading follows later. At the second
+timed step of the factory adapter on the OnePlus Pad 4 (flight D1,
++16:00, 67 %) the bus fell to 8.415 V, the pump read 4.168 V and the
+gauge still 4.270 V: the floor, 8.44 V, ended the session (-ERANGE), the
+adapter dropped to 5 V and re-attached, and each session the driver
+then started at 3 A ended the same way within a second, the gauge
+sitting above the pump's sense while it settled, four times over.
+
+Hold the bus against both readings: the floor follows the lower, the
+ceiling the higher, so a step of the adapter or a gauge that lags does
+not end a session, while a bus below twice the lowest reading of the
+battery or above twice the highest plus 700 mV still does. KUnit pins
+the end of flight D1 on both sides of the new floor and the ceiling.
+
+Before the pumps take the input, when both readings are unloaded,
+require them to agree within 150 mV, else refuse the adapter (-EIO): a
+pump whose battery sense is loose must not be the one the adapter
+regulates against.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_direct_policy.c      |   11 +++++---
+ drivers/power/supply/sc8547_direct_policy_test.c |   30 ++++++++++++++++++++--
+ drivers/power/supply/sc8547_svooc.c              |   14 +++++++++-
+ 3 files changed, 46 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/power/supply/sc8547_direct_policy.c b/drivers/power/supply/sc8547_direct_policy.c
+index 2be337ca4412..255e062c2353 100644
+--- a/drivers/power/supply/sc8547_direct_policy.c
++++ b/drivers/power/supply/sc8547_direct_policy.c
+@@ -279,9 +279,11 @@ EXPORT_SYMBOL_GPL(sc8547_direct_regulate_target_ua);
+  * @disagree: how many samples in a row the pumps' VBUS disagreed, kept by
+  *	the caller and updated here
+  *
+- * VBUS is held against the gauge's voltage, not against the pump's own
+- * sense of the battery. A second pump that stops is the caller's to see off,
+- * not a fault of the session.
++ * VBUS is held against both readings of the battery: the gauge's, which
++ * carries the drop to the cell under current and lags a step of the
++ * adapter, and the main pump's own sense; the window's floor follows the
++ * lower reading and its ceiling the higher. A second pump that stops is the
++ * caller's to see off, not a fault of the session.
+  *
+  * Return: 0, -EIO when the main pump does not switch, -ERANGE when a
+  * voltage, a current or the power left its window.
+@@ -296,7 +298,8 @@ int sc8547_direct_running_ok(const struct sc8547_sample *main,
+ 
+ 	if (!main->switching)
+ 		return -EIO;
+-	if (main->vbus_uv < 2 * vbat_uv - 100000 || main->vbus_uv > 2 * vbat_uv + 700000)
++	if (main->vbus_uv < 2 * min(vbat_uv, main->vbat_uv) - 100000 ||
++	    main->vbus_uv > 2 * max(vbat_uv, main->vbat_uv) + 700000)
+ 		return -ERANGE;
+ 	/*
+ 	 * Each pump within its own maximum; the main alone within it while
+diff --git a/drivers/power/supply/sc8547_direct_policy_test.c b/drivers/power/supply/sc8547_direct_policy_test.c
+index 30ab6f424962..512e01dd4069 100644
+--- a/drivers/power/supply/sc8547_direct_policy_test.c
++++ b/drivers/power/supply/sc8547_direct_policy_test.c
+@@ -471,19 +471,43 @@ static void sc8547_direct_test_running_window(struct kunit *test)
+ 						       &disagree), -ERANGE);
+ 
+ 	/*
+-	 * The window is referenced to the gauge, not to the pump's sense of the
+-	 * battery: a low pump reading does not shift it, a low gauge reading does.
++	 * The window follows both readings of the battery: its floor the lower,
++	 * its ceiling the higher. A bus at 8.0 V passes a pump reading of 3.0 V
++	 * against a gauge at 4.0 V (floor 5.9 V) and the other way round
++	 * (ceiling 8.7 V); a gauge at 3.65 V and a pump at 4.0 V too.
+ 	 */
+ 	m = main_running;
+ 	m.vbat_uv = 3000000;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
+ 						       &disagree), 0);
+ 	m.vbat_uv = 4000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 3000000, 6200000, false, false,
++						       &disagree), 0);
++	m.vbus_uv = 8700001;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 3000000, 6200000, false, false,
+ 						       &disagree), -ERANGE);
+-	m.vbat_uv = 4000000;
++	m.vbus_uv = 8000000;
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 3650000, 6200000, false, false,
+ 						       &disagree), 0);
++	/*
++	 * The end of flight D1: the adapter stepped its output, the bus fell to
++	 * 8.415 V, the pump read 4.168 V and the gauge, still carrying the drop
++	 * of the current just removed, 4.270 V. The old floor, 8.44 V, ended the
++	 * session; the floor on the lower reading, 8.236 V, does not.
++	 */
++	m.vbat_uv = 4168000;
++	m.vbus_uv = 8415000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4270000, 6200000, false, false,
++						       &disagree), 0);
++	m.vbus_uv = 8235999;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4270000, 6200000, false, false,
++						       &disagree), -ERANGE);
++	m.vbus_uv = 9240000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4270000, 6200000, false, false,
++						       &disagree), 0);
++	m.vbus_uv = 9240001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4270000, 6200000, false, false,
++						       &disagree), -ERANGE);
+ 
+ 	/* A main pump that is not switching fails before anything else. */
+ 	m = main_running;
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 53cbc4c57828..66ff1556adb1 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -86,6 +86,11 @@
+  * this many frames (some 400 ms at the adapter's cadence).
+  */
+ #define SVOOC_SECOND_FEED_FRAMES	8
++/*
++ * Before the pumps take the input, the gauge's and the main pump's readings
++ * of the battery, both unloaded then, must agree to this.
++ */
++#define SVOOC_SENSE_AGREE_UV	150000
+ 
+ #define SVOOC_TICK_MS		50
+ #define SVOOC_BUCK_TICK_MS	20
+@@ -444,8 +449,13 @@ static int svooc_power_command(struct sc8547_svooc *sv,
+ 		if (sv->state != SVOOC_GRANTED && sv->state != SVOOC_STARTING &&
+ 		    sv->state != SVOOC_RUNNING)
+ 			return -EPROTO;
+-		/* Read after the last reply, as the factory driver does. */
+-		/* Against the pump's own battery sense, as the factory driver. */
++		/*
++		 * Read after the last reply, against the pump's own battery
++		 * sense, as the factory driver does; a pump whose sense and the
++		 * gauge disagree does not get the input.
++		 */
++		if (abs(sv->sample[0].vbat_uv - sv->bat.uv) > SVOOC_SENSE_AGREE_UV)
++			return -EIO;
+ 		*payload = oplus_svooc_vbus(sv->sample[0].vbus_uv, sv->sample[0].vbat_uv);
+ 		/* The pump switches on before the adapter hears "normal". */
+ 		if (*payload == OPLUS_SVOOC_VBUS_NORMAL && sv->state == SVOOC_GRANTED) {

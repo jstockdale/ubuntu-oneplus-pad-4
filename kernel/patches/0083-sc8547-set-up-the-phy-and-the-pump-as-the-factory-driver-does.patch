@@ -1,0 +1,204 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 10:46:49 -0800
+Subject: [PATCH] power: supply: sc8547: set up the PHY and the pump as the
+ factory driver does
+
+Four settings compared register by register against the vendor SC8547
+HAL that the factory kernel binds to these pumps (oplus_sc8547.c, the
+"oplus,sc8547d" compatible; the chip reads device id 0x49):
+
+The 800 us hold of bit 0 of a frame, which the vendor added "to avoid
+cmd of adjust current (0x01) return error", is bit 6 of SC8547_REG_3A
+(0x3A; oplus_sc8547.h:760, with SC8547_REG_34 0x34 defined beside it at
+:761), and the vendor writes 0x60 there in every PHY setup
+(sc8547_init_vooc, sc8547_svooc_hw_setting); REG_34 is never written.
+This driver wrote 0x60 and set bit 6 at 0x34, a transcription of the
+wrong register. It worked by luck: the idle pumps read 0xc0 at
+0x3a, bit 6 set by default, and 0x60 at 0x34 from our own writes.
+Write 0x3a as the vendor does and leave 0x34 alone.
+
+The vendor's pump control writes are 0x84 to enable and 0x04 to
+disable: bit 2 is set in both, and is not in the public register map.
+Keep it set the same way.
+
+The vendor arms the pump watchdog at one second (REG_09 0x13); this
+driver used five. Every I2C access feeds it. The main pump is sampled
+from the frame path twenty times a second; the second pump was sampled
+only by the worker's tick, which also makes the gauge's and the
+thermistors' reads and can be held up by them, so the frame path now
+samples the second pump every eight frames as well. A pump whose driver
+has stopped then switches for one second instead of five.
+
+The vendor calls the adapter gone after 200 ms of silence
+(VOOC_COMMU_EVENT_TIME); this driver allowed 1000 ms, and 3000 ms
+before the first frame. The adapter asks every 45 ms while charging and
+its longest pause in the traced sessions, 174 ms, came while it
+adjusted its voltage before the grant, so: 250 ms while charging, 500 ms
+up to the grant, and the 3000 ms before the first frame stays.
+
+To be flown on the factory adapter with the frame trace, after a pump
+register reset so that 0x34 is at its power-on value: the hold on 0x3a
+should leave no error flag on a current command. The flight changes
+0x3a from its 0xc0 default to 0x60 (bit 7 cleared, bit 5 set) and lets
+0x34 go: if a current command starts failing, the two are to be told
+apart.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_charger.c |   18 +++++++++++-------
+ drivers/power/supply/sc8547_svooc.c   |   30 ++++++++++++++++++++++++++----
+ 2 files changed, 37 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/power/supply/sc8547_charger.c b/drivers/power/supply/sc8547_charger.c
+index 6346303b2ded..0a8fed699368 100644
+--- a/drivers/power/supply/sc8547_charger.c
++++ b/drivers/power/supply/sc8547_charger.c
+@@ -39,8 +39,9 @@
+ #define SC8547_ADC_TDIE		0x1f
+ #define SC8547_VOOC_CTRL	0x2b
+ #define SC8547_DET_CTRL		0x33
+-#define SC8547_PHY_CTRL		0x34
+ #define SC8547_DEVICE_ID	0x36
++/* The VOOC PHY's timing: bit 6 holds bit 0 of a frame for 800 us. */
++#define SC8547_PHY_TIMING	0x3a
+ #define SC8547_OTG		0x3b
+ #define SC8547_MAX_REGISTER	0x3c
+ 
+@@ -55,11 +56,13 @@
+ #define SC8547_STATUS_PIN_DIAG		BIT(0)
+ #define SC8547_CONTROL_EN		BIT(7)
+ #define SC8547_CONTROL_RESET		BIT(6)
++/* Set in every control write of the factory driver; not in the public map. */
++#define SC8547_CONTROL_FACTORY		BIT(2)
+ #define SC8547_CONTROL_600KHZ		BIT(0)
+ #define SC8547_MODE_UCP_RISE_MASK	BIT(4)
+ #define SC8547_MODE_WD_TIMEOUT		BIT(3)
+ #define SC8547_MODE_WATCHDOG		GENMASK(2, 0)
+-#define SC8547_WATCHDOG_5S		4
++#define SC8547_WATCHDOG_1S		3
+ #define SC8547_PROTECTION_VOUT_OVP	BIT(7)
+ #define SC8547_PROTECTION_VBAT_OVP	BIT(6)
+ #define SC8547_PROTECTION_IBAT_OCP	BIT(5)
+@@ -104,7 +107,7 @@ static const struct reg_sequence sc8547_defaults[] = {
+ 	{ SC8547_VAC_OVP, 0x01 },
+ 	{ SC8547_VBAT_OCP, 0xbf },
+ 	{ SC8547_VOOC_CTRL, 0 },
+-	{ SC8547_PHY_CTRL, 0x60 },
++	{ SC8547_PHY_TIMING, 0x60 },
+ 	{ SC8547_IRQ_MASK, 0x02 },
+ 	{ SC8547_MODE, SC8547_MODE_UCP_RISE_MASK },
+ };
+@@ -306,7 +309,7 @@ int sc8547_prepare(struct sc8547 *cp)
+ 		{ SC8547_VAC_OVP, 0x01 },
+ 		{ SC8547_PMID2OUT, 0x70 },
+ 		{ SC8547_DET_CTRL, 0xd1 },
+-		{ SC8547_PHY_CTRL, 0x60 },
++		{ SC8547_PHY_TIMING, 0x60 },
+ 		{ SC8547_ADC_CTRL, SC8547_ADC_EN },
+ 	};
+ 	unsigned int vbat_ovp, ibus_ocp;
+@@ -337,7 +340,7 @@ int sc8547_prepare(struct sc8547 *cp)
+ EXPORT_SYMBOL_GPL(sc8547_prepare);
+ 
+ /**
+- * sc8547_enable() - start switching under a five second watchdog
++ * sc8547_enable() - start switching under a one second watchdog
+  * @cp: a prepared pump
+  *
+  * The caller must keep calling sc8547_sample() while the pump runs.
+@@ -350,7 +353,7 @@ int sc8547_enable(struct sc8547 *cp)
+ 	ret = cp->prepared ? sc8547_check_locked(cp, NULL) : -EINVAL;
+ 	if (!ret)
+ 		ret = regmap_update_bits(cp->regmap, SC8547_MODE,
+-					 SC8547_MODE_WATCHDOG, SC8547_WATCHDOG_5S);
++					 SC8547_MODE_WATCHDOG, SC8547_WATCHDOG_1S);
+ 	if (!ret) {
+ 		cp->enabled = true;
+ 		ret = regmap_write(cp->regmap, SC8547_CONTROL,
+@@ -576,7 +579,8 @@ static int sc8547_parse(struct sc8547 *cp)
+ 	if (frequency != 500000 && frequency != 600000)
+ 		return dev_err_probe(dev, -EINVAL, "Invalid switching frequency %u\n",
+ 				     frequency);
+-	cp->control = frequency == 600000 ? SC8547_CONTROL_600KHZ : 0;
++	cp->control = SC8547_CONTROL_FACTORY |
++		      (frequency == 600000 ? SC8547_CONTROL_600KHZ : 0);
+ 	cp->always_otg = device_property_read_bool(dev, "southchip,always-otg-en");
+ 	return 0;
+ }
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 151c31d7a210..53cbc4c57828 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -40,7 +40,7 @@
+ #define SC8547_PHY_IRQ_MASK	0x30
+ #define SC8547_PREDATA		0x31
+ #define SC8547_DET_CTRL		0x33
+-#define SC8547_PHY_CTRL		0x34
++#define SC8547_PHY_TIMING	0x3a
+ 
+ #define SC8547_PHY_TX_DONE	BIT(0)
+ #define SC8547_PHY_RX_DONE	BIT(1)
+@@ -80,14 +80,26 @@
+ #define SVOOC_SECOND_SHARE_MS	3000
+ #define SVOOC_SECOND_OFF_TICKS	60
+ #define SVOOC_SECOND_TRIES	2
++/*
++ * The second pump's one second watchdog is fed by its samples; the worker's
++ * tick may be held up by the gauge, so the frame path samples it too, every
++ * this many frames (some 400 ms at the adapter's cadence).
++ */
++#define SVOOC_SECOND_FEED_FRAMES	8
+ 
+ #define SVOOC_TICK_MS		50
+ #define SVOOC_BUCK_TICK_MS	20
+ /* The adapter's frames come some 45 ms apart; past this it is silent. */
+ #define SVOOC_SAMPLE_MS		100
+ #define SVOOC_RETRY_MS		10000
++/*
++ * The adapter asks every 45 ms while charging, with pauses of up to 200 ms
++ * while it identifies itself and adjusts its voltage; the factory driver
++ * calls it gone after 200 ms. Before its first frame it may take longer.
++ */
+ #define SVOOC_FIRST_FRAME_MS	3000
+-#define SVOOC_FRAME_MS		1000
++#define SVOOC_IDENTIFY_FRAME_MS	500
++#define SVOOC_FRAME_MS		250
+ #define SVOOC_IDENTIFY_MS	30000
+ #define SVOOC_START_MS		500
+ #define SVOOC_ACK_MS		1000
+@@ -341,7 +353,7 @@ static int svooc_phy_setup(struct sc8547_svooc *sv)
+ 	ret = regmap_bulk_write(sv->regmap, SC8547_PREDATA, data, sizeof(data));
+ 	/* Hold bit 0 for 800 us, or the adapter misreads current commands. */
+ 	if (!ret)
+-		ret = regmap_set_bits(sv->regmap, SC8547_PHY_CTRL, BIT(6));
++		ret = regmap_set_bits(sv->regmap, SC8547_PHY_TIMING, BIT(6));
+ 	if (!ret)
+ 		ret = svooc_write_verify(sv, SC8547_DPDM_CTRL, 0x21);
+ 	if (!ret)
+@@ -608,6 +620,14 @@ static int svooc_sample_main(struct sc8547_svooc *sv)
+ 		return ret;
+ 	sv->sample[0] = s;
+ 	sv->sampled_at = jiffies;
++	/* The second pump's faults are the worker's to see off, not errors here. */
++	if (sv->second_on && !(sv->frames % SVOOC_SECOND_FEED_FRAMES)) {
++		ret = sc8547_sample(sv->second, &s);
++		if (ret && ret != -EIO)
++			return ret;
++		if (!ret)
++			sv->sample[1] = s;
++	}
+ 	return 0;
+ }
+ 
+@@ -680,7 +700,9 @@ static int svooc_vooc_start(struct sc8547_svooc *sv)
+ /* The adapter keeps asking, and acknowledges each current in time. */
+ static int svooc_vooc_tick(struct sc8547_svooc *sv, unsigned long now)
+ {
+-	int frame_ms = sv->frames ? SVOOC_FRAME_MS : SVOOC_FIRST_FRAME_MS;
++	int frame_ms = !sv->frames ? SVOOC_FIRST_FRAME_MS :
++		       sv->state < SVOOC_STARTING ? SVOOC_IDENTIFY_FRAME_MS :
++		       SVOOC_FRAME_MS;
+ 
+ 	if (time_after(now, sv->last_rx + msecs_to_jiffies(frame_ms)))
+ 		return -ETIMEDOUT;

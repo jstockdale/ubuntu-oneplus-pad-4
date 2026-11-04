@@ -1,0 +1,234 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 10:44:34 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: ride through a missed current
+ change and a passing over-current as the factory driver does
+
+Four places where the session ended on a single bad moment, each
+checked against the factory driver (oplus_ap_voocphy.c):
+
+A current change is asked for by answering a GET_VBAT with the change
+code; the adapter then asks GET_CURRENT and the reply carries the new
+current. The driver waited for the PHY's TX_DONE interrupt as the
+acknowledgment and treated the adapter's next question arriving first
+as a protocol error, which ended the session. The factory driver takes
+the next frame without a TX failure as the success case. A session on
+the OnePlus Pad 4 asks a change every few seconds, so this was the one
+failure of the change path that the factory stack cannot have.
+
+When the PHY reported that the current reply did not go out
+(TX_FAILED), the driver ended the session; the factory driver re-arms
+the change and asks again, up to three times, inside the session, and
+answers the frame that came with the failure, which this now does too.
+
+Late replies after the battery curve ended the session on the fourth
+in a row; the factory driver counts them and tolerates any number,
+with its silence timeout behind them. Ten are tolerated now.
+
+The over-current check ended the session (-ERANGE, not retried) on a
+single 50 ms sample of the pumps' input 300 mA over the current asked
+for, three seconds after a change. The factory driver allows 400 mA,
+needs the excess for ten consecutive one-second readings of the gauge,
+asks for the current again at the seventh, and gives up only when it
+persists. Allow 400 mA, require twenty consecutive ticks (one second
+of the pumps' samples), ask the current again once, and give up on a
+second such second; the factory adapter's own timed step moves the
+input by 1 A within a frame, which is exactly the transient this
+check must not trip on.
+
+Also read the battery voltage behind the GET_VBAT reply and the VBUS_OK
+verdict from the pump's own battery sense rather than the gauge: the
+factory driver on this board, which has no external gauge support set,
+does (its gauge_vbatt is oplus_voocphy_get_cp_vbat()). The taper keeps
+the higher of the two sense points. The counts show in the debugfs
+status.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_svooc.c |  109 ++++++++++++++++++++++++++++-------
+ 1 file changed, 87 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index a00a2ecb2aa4..22e067abec8b 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -54,8 +54,20 @@
+ #define SVOOC_CIRCUIT		0x30
+ /* Noise frames tolerated before the adapter's first one. */
+ #define SVOOC_IGNORE_MAX	6
+-/* Late replies in a row tolerated after the battery curve. */
+-#define SVOOC_SKIP_MAX		3
++/*
++ * Late replies in a row tolerated after the battery curve: the factory
++ * driver tolerates any number, with the silence timeout behind them.
++ */
++#define SVOOC_SKIP_MAX		10
++/* A current reply the PHY could not send is asked for again this often. */
++#define SVOOC_REASK_MAX		3
++/*
++ * The adapter may run over the current asked for by this much, for this
++ * many ticks, before it is asked again, once; the factory driver allows
++ * 400 mA for ten seconds on the gauge, which it reads once a second.
++ */
++#define SVOOC_OVER_UA		400000
++#define SVOOC_OVER_TICKS	20
+ /* New sessions after protocol failures, until one runs or a replug. */
+ #define SVOOC_RETRIES		3
+ 
+@@ -203,6 +215,10 @@ struct sc8547_svooc {
+ 	/* Frames with no command in a row, and the command before them. */
+ 	unsigned int strays;
+ 	u8 last_command;
++	/* Current replies asked for again, ticks over the current, asked once. */
++	unsigned int reasks;
++	unsigned int over;
++	bool over_asked;
+ 	unsigned int retries;
+ 	bool stopping;
+ 	/* No session starts while the system is suspended; under the lock. */
+@@ -382,8 +398,12 @@ static u8 svooc_vbat_reply(struct sc8547_svooc *sv)
+ 
+ 	if (sv->change)
+ 		return OPLUS_SVOOC_CHANGE_CURRENT;
+-	/* Half the input, less the drop to the battery under load. */
+-	uv = s->vbus_uv / 2 - (s->vout_uv - sv->bat.uv) / 4 -
++	/*
++	 * Half the input, less the drop from the pump's output to its battery
++	 * sense under load; the factory driver on this board reads both from
++	 * the pump.
++	 */
++	uv = s->vbus_uv / 2 - (s->vout_uv - s->vbat_uv) / 4 -
+ 	     div_s64((s64)svooc_ibus(sv) * 75, 1000);
+ 	return oplus_svooc_vbat(uv);
+ }
+@@ -399,7 +419,8 @@ static int svooc_power_command(struct sc8547_svooc *sv,
+ 		    sv->state != SVOOC_RUNNING)
+ 			return -EPROTO;
+ 		/* Read after the last reply, as the factory driver does. */
+-		*payload = oplus_svooc_vbus(sv->sample[0].vbus_uv, sv->bat.uv);
++		/* Against the pump's own battery sense, as the factory driver. */
++		*payload = oplus_svooc_vbus(sv->sample[0].vbus_uv, sv->sample[0].vbat_uv);
+ 		/* The pump switches on before the adapter hears "normal". */
+ 		if (*payload == OPLUS_SVOOC_VBUS_NORMAL && sv->state == SVOOC_GRANTED) {
+ 			ret = sc8547_enable(sv->main);
+@@ -464,32 +485,55 @@ static int svooc_receive(struct sc8547_svooc *sv, u8 rx, u8 flags)
+ 		return (flags & SC8547_PHY_RX_DONE) && ++sv->ignored > SVOOC_IGNORE_MAX ?
+ 		       -EPROTO : 0;
+ 	if (flags & SC8547_PHY_ERRORS) {
++		if ((flags & SC8547_PHY_ERRORS) != SC8547_PHY_TX_FAILED ||
++		    !sv->proto.curve_sent)
++			return -EPROTO;
++		if (sv->pending_ua) {
++			/*
++			 * The current reply did not go out. The factory driver
++			 * asks the adapter for the current again, up to three
++			 * times, inside the session, and answers the frame that
++			 * came with the failure, as this does below.
++			 */
++			if (++sv->reasks > SVOOC_REASK_MAX)
++				return -EPROTO;
++			sv->target_ua = sv->pending_ua;
++			sv->pending_ua = 0;
++			sv->change = true;
++			sv->change_deadline = jiffies + msecs_to_jiffies(SVOOC_CHANGE_MS);
++			ret = regmap_write(sv->regmap, SC8547_PHY_IRQ_MASK,
++					   SC8547_PHY_MASK_RX);
++			if (ret)
++				return ret;
++		} else if (++sv->skipped > SVOOC_SKIP_MAX) {
++			/*
++			 * After the battery curve the factory driver lets a late
++			 * reply pass and the adapter asks again; during
++			 * identification it is fatal, above.
++			 */
++			return -EPROTO;
++		}
++	}
++	if (sv->pending_ua && (flags & (SC8547_PHY_TX_DONE | SC8547_PHY_RX_DONE))) {
+ 		/*
+-		 * After the battery curve the factory driver lets a late reply
+-		 * pass and the adapter asks again. A lost current reply, or one
+-		 * during identification, is fatal.
++		 * The reply went out, or the adapter has already asked its
++		 * next question, which is the acknowledgment the factory
++		 * driver takes.
+ 		 */
+-		if ((flags & SC8547_PHY_ERRORS) == SC8547_PHY_TX_FAILED &&
+-		    sv->proto.curve_sent && !sv->pending_ua &&
+-		    ++sv->skipped <= SVOOC_SKIP_MAX)
+-			return 0;
+-		return -EPROTO;
+-	}
+-	if (sv->pending_ua && (flags & SC8547_PHY_TX_DONE)) {
+ 		sv->applied_ua = sv->pending_ua;
+ 		sv->pending_ua = 0;
+ 		sv->change = false;
++		sv->reasks = 0;
+ 		sv->ramp_after = jiffies + msecs_to_jiffies(SVOOC_RAMP_MS);
+ 		ret = regmap_write(sv->regmap, SC8547_PHY_IRQ_MASK, SC8547_PHY_MASK_RX);
+ 		if (ret)
+ 			return ret;
+-	} else if (sv->pending_ua && (flags & SC8547_PHY_RX_DONE)) {
+-		return -EPROTO;
+ 	}
+ 	if (!(flags & SC8547_PHY_RX_DONE))
+ 		return 0;
+ 
+-	sv->skipped = 0;
++	if (!(flags & SC8547_PHY_ERRORS))
++		sv->skipped = 0;
+ 	sv->last_rx = jiffies;
+ 	sv->frames++;
+ 	ret = oplus_svooc_decode(rx, &req);
+@@ -610,6 +654,9 @@ static int svooc_vooc_start(struct sc8547_svooc *sv)
+ 	sv->skipped = 0;
+ 	sv->strays = 0;
+ 	sv->last_command = 0;
++	sv->reasks = 0;
++	sv->over = 0;
++	sv->over_asked = false;
+ 	sv->last_rx = jiffies;
+ 	sv->phy_on = true;
+ 	/* The handshake starts the adapter talking: be ready first. */
+@@ -790,11 +837,27 @@ static int svooc_check_running(struct sc8547_svooc *sv)
+ 				       &sv->disagree);
+ 	if (ret)
+ 		return ret;
+-	/* The adapter must settle on what it was asked for. */
++	/*
++	 * The adapter must settle on what it was asked for. The factory driver
++	 * counts the excess for ten seconds, asks for the current again once,
++	 * and gives up only when it persists; the pumps are sampled every
++	 * 50 ms here, so a second of excess is twenty ticks.
++	 */
+ 	if (sv->state == SVOOC_RUNNING && !sv->pending_ua && !sv->change &&
+ 	    time_after_eq(jiffies, sv->ramp_after) &&
+-	    svooc_ibus(sv) > sv->applied_ua + 300000)
+-		return -ERANGE;
++	    svooc_ibus(sv) > sv->applied_ua + SVOOC_OVER_UA) {
++		if (++sv->over < SVOOC_OVER_TICKS)
++			return 0;
++		sv->over = 0;
++		if (sv->over_asked)
++			return -ERANGE;
++		sv->over_asked = true;
++		sv->target_ua = sv->applied_ua;
++		sv->change = true;
++		sv->change_deadline = jiffies + msecs_to_jiffies(SVOOC_CHANGE_MS);
++		return 0;
++	}
++	sv->over = 0;
+ 	return 0;
+ }
+ 
+@@ -1223,7 +1286,9 @@ static int svooc_status_show(struct seq_file *s, void *data)
+ 		   svooc_state_names[sv->state], sv->error, sv->frames, sv->irqs,
+ 		   sv->rx, sv->flags, sv->proto.model, sv->class_w);
+ 	seq_printf(s, "worst reply %u us\n", sv->worst_us);
+-	seq_printf(s, "strays %u unknown %u\n", sv->strays, sv->proto.unknown);
++	seq_printf(s, "strays %u unknown %u reasks %u over %u%s\n", sv->strays,
++		   sv->proto.unknown, sv->reasks, sv->over,
++		   sv->over_asked ? " (asked again)" : "");
+ 	seq_printf(s, "limit %d target %d applied %d pending %d taper %d uA\n",
+ 		   sv->limit_ua, sv->change ? sv->target_ua : 0, sv->applied_ua,
+ 		   sv->pending_ua, sv->taper_ua);

@@ -1,0 +1,589 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 10:44:34 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: hysteresis on the readings
+ that cap the current
+
+Two of the policy's caps are computed from readings and had no
+hysteresis, so a reading that wandered across a step moved the request
+with it, and every move is a current change on the wire (a GET_VBAT
+answered with the change code, a GET_CURRENT exchange, a 3 s settle).
+
+The running regulator's power budget, 55 W over the bus voltage less
+100 mA, floored to 100 mA, crosses a step at 8.87 V on a bus that
+jitters 50 mV from frame to frame: a 16 min session on the OnePlus
+Pad 4 made 435 current changes between 6.0 and 6.1 A. The factory
+host derives its request from latched state (its battery curve rows,
+a temperature ladder with 1 °C of hysteresis, votes) and nothing
+analog; it changes current a handful of times per session.
+
+The cold cap, 2.5 A below 21.0 °C, flipped with a gauge that reported
+20.0 and 21.0 °C in turn: a session that started at 21 °C restarted
+its ramp from 2.5 A three times in four minutes. The factory host's
+temperature ranges carry hysteresis, and between 36 and 55 % it
+charges a cell at 12 to 21 °C with 4.0 A (its little_cool and
+little_cool_high ranges) and one at 5 to 12 °C with 2.5 A (its cool
+range); at a lower charge level it allows more, which this driver does
+not.
+
+Give the readings' caps a deadband: where the thermal allowance or the
+budget binds below the limit and the taper, it raises the request only
+once it clears the applied current by 150 mA. The thermal cap lowers it
+at once; the budget, a target with the 60 W and the over-power stops
+behind it, only once it is 50 mA below, so a bus wandering 140 mV
+around the budget's step moves nothing. The limit and the taper, which
+are not readings, are not held back, so a ramp still reaches them.
+Replace the flat cold cap with two rows the caller carries across
+readings, entered half a degree below their boundary and left half a
+degree above: 4.0 A below 21 °C and 2.5 A below 12 °C; the entry gate
+stays at 15 °C. KUnit pins the deadband at the voltages of the trace
+and across a 140 mV wander, the row transitions in both directions
+including the jumps past a row, and the rows' reach into the thermal
+allowance and the entry current.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_direct_policy.c      |   86 ++++++++-
+ drivers/power/supply/sc8547_direct_policy.h      |   37 ++++
+ drivers/power/supply/sc8547_direct_policy_test.c |  207 +++++++++++++++++-----
+ drivers/power/supply/sc8547_svooc.c              |    9 +
+ 4 files changed, 274 insertions(+), 65 deletions(-)
+
+diff --git a/drivers/power/supply/sc8547_direct_policy.c b/drivers/power/supply/sc8547_direct_policy.c
+index 133c328bde3e..62469376970e 100644
+--- a/drivers/power/supply/sc8547_direct_policy.c
++++ b/drivers/power/supply/sc8547_direct_policy.c
+@@ -42,17 +42,70 @@ int sc8547_direct_scale(int value, int soft, int hard)
+ }
+ EXPORT_SYMBOL_GPL(sc8547_direct_scale);
+ 
++/**
++ * sc8547_direct_cold_ua() - the current a cool cell allows
++ * @bat_temp: the cell, in tenths of a degree Celsius
++ * @cold: the rows the cell was in at the last reading; updated
++ *
++ * The cell enters a colder row half a degree below its boundary and leaves
++ * it half a degree above, so a reading that alternates across the boundary
++ * does not move the current with it.
++ *
++ * Return: 2.5 A in the cold row, 4.0 A in the cool one, the full current
++ * above.
++ */
++int sc8547_direct_cold_ua(int bat_temp, enum sc8547_direct_cold *cold)
++{
++	const int cold_on = SC8547_DIRECT_COLD_DC - SC8547_DIRECT_COLD_HYST_DC;
++	const int cold_off = SC8547_DIRECT_COLD_DC + SC8547_DIRECT_COLD_HYST_DC;
++	const int cool_on = SC8547_DIRECT_COOL_DC - SC8547_DIRECT_COLD_HYST_DC;
++	const int cool_off = SC8547_DIRECT_COOL_DC + SC8547_DIRECT_COLD_HYST_DC;
++
++	switch (*cold) {
++	case SC8547_DIRECT_WARM:
++		if (bat_temp < cold_on)
++			*cold = SC8547_DIRECT_COLD;
++		else if (bat_temp < cool_on)
++			*cold = SC8547_DIRECT_COOL;
++		break;
++	case SC8547_DIRECT_COOL:
++		if (bat_temp < cold_on)
++			*cold = SC8547_DIRECT_COLD;
++		else if (bat_temp >= cool_off)
++			*cold = SC8547_DIRECT_WARM;
++		break;
++	case SC8547_DIRECT_COLD:
++		if (bat_temp >= cool_off)
++			*cold = SC8547_DIRECT_WARM;
++		else if (bat_temp >= cold_off)
++			*cold = SC8547_DIRECT_COOL;
++		break;
++	}
++	switch (*cold) {
++	case SC8547_DIRECT_COLD:
++		return SC8547_DIRECT_COLD_UA;
++	case SC8547_DIRECT_COOL:
++		return SC8547_DIRECT_COOL_UA;
++	default:
++		return SC8547_DIRECT_MAX_UA;
++	}
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_cold_ua);
++
+ /**
+  * sc8547_direct_thermal_ua() - the current the temperatures allow
+  * @die: the hotter pump die, in tenths of a degree Celsius
+  * @therm_mc: the thermistors, in m°C, in enum sc8547_direct_therm order
+  * @bat_temp: the cell, in tenths of a degree Celsius
++ * @cold: the cell's cold rows, see sc8547_direct_cold_ua(); updated
+  *
+- * The battery keeps 1.5 A up to 44 °C and is held to 2.5 A below 21 °C.
++ * The battery keeps 1.5 A up to 44 °C and is held to the cold rows below
++ * 21 °C.
+  *
+  * Return: the current allowed, in uA.
+  */
+-int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp)
++int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp,
++			     enum sc8547_direct_cold *cold)
+ {
+ 	int ua, i;
+ 
+@@ -66,9 +119,7 @@ int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp)
+ 				 SC8547_DIRECT_MIN_UA));
+ 	else
+ 		ua = 0;
+-	if (bat_temp < 210)
+-		ua = min(ua, 2500000);
+-	return ua;
++	return min(ua, sc8547_direct_cold_ua(bat_temp, cold));
+ }
+ EXPORT_SYMBOL_GPL(sc8547_direct_thermal_ua);
+ 
+@@ -145,18 +196,20 @@ EXPORT_SYMBOL_GPL(sc8547_direct_admissible);
+  * @bat: the battery
+  * @therm_mc: the thermistors
+  * @die: the hotter pump die, in tenths of a degree Celsius
++ * @cold: the cell's cold rows, see sc8547_direct_cold_ua(); updated
+  *
+  * Return: the current in whole 100 mA steps, which may be below the minimum;
+  * 0 for a gauge reading at or below -0.35 V, where the top of the VBUS window
+  * would not be positive.
+  */
+ int sc8547_direct_entry_ua(const struct sc8547_direct_battery *bat,
+-			   const int *therm_mc, int die)
++			   const int *therm_mc, int die,
++			   enum sc8547_direct_cold *cold)
+ {
+ 	int ua = bat->capacity <= 55 ? SC8547_DIRECT_MAX_UA :
+ 		 bat->capacity < 85 ? 3000000 : 2000000;
+ 
+-	ua = min(ua, sc8547_direct_thermal_ua(die, therm_mc, bat->temp));
++	ua = min(ua, sc8547_direct_thermal_ua(die, therm_mc, bat->temp, cold));
+ 	ua = min(ua, sc8547_direct_taper_ua(bat->uv));
+ 	/* Within the power budget at the top of the VBUS window. */
+ 	if (2 * bat->uv + 700000 <= 0)
+@@ -186,14 +239,27 @@ int sc8547_direct_regulate_target_ua(int limit_ua, int *taper_ua, int vbat_uv,
+ 				     int applied_ua)
+ {
+ 	s64 power = (s64)vbus_uv * ibus_ua;
+-	int ua;
++	int ua, cap, budget;
+ 
+ 	if (vbus_uv <= 0)
+ 		return 0;
+ 	*taper_ua = min(*taper_ua, sc8547_direct_taper_ua(vbat_uv));
+ 	ua = min(limit_ua, *taper_ua);
+-	ua = min(ua, thermal_ua);
+-	ua = min_t(int, ua, div_s64(SC8547_DIRECT_POWER_UW * 1000000, vbus_uv) - 100000);
++	/*
++	 * The temperatures and the bus voltage are readings: where their caps
++	 * bind, they raise the request only past the deadband. The thermal
++	 * cap lowers it at once; the budget, a target with the 60 W and the
++	 * over-power stops behind it, only once it is a little below.
++	 */
++	budget = div_s64(SC8547_DIRECT_POWER_UW * 1000000, vbus_uv) - 100000;
++	if (budget < ua && budget >= applied_ua - SC8547_DIRECT_BUDGET_SLACK_UA &&
++	    budget < applied_ua + SC8547_DIRECT_DEADBAND_UA)
++		budget = applied_ua;
++	cap = thermal_ua;
++	if (cap < ua && cap > applied_ua &&
++	    cap < applied_ua + SC8547_DIRECT_DEADBAND_UA)
++		cap = applied_ua;
++	ua = min(ua, min(cap, budget));
+ 	if (power > SC8547_DIRECT_POWER_UW * 1000000)
+ 		ua = min_t(int, ua, applied_ua - 100000 -
+ 			   div_s64(power - SC8547_DIRECT_POWER_SETTLE_UW * 1000000,
+diff --git a/drivers/power/supply/sc8547_direct_policy.h b/drivers/power/supply/sc8547_direct_policy.h
+index 24a4f8adfd76..e28fcdb33333 100644
+--- a/drivers/power/supply/sc8547_direct_policy.h
++++ b/drivers/power/supply/sc8547_direct_policy.h
+@@ -23,6 +23,36 @@
+ #define SC8547_DIRECT_CAPACITY_END	90
+ /* A SuperVOOC adapter's power rating is at this output voltage. */
+ #define SC8547_DIRECT_CLASS_UV		11000000
++/*
++ * The cold rows: 4.0 A below 21 °C and 2.5 A below 12 °C, the currents the
++ * factory host charges a cell between 36 and 55 % with in its little_cool
++ * ranges (12 to 21 °C) and its cool range (5 to 12 °C); it allows more at a
++ * lower charge level, which this driver does not. Each boundary carries half
++ * a degree of hysteresis on either side, in tenths of a degree Celsius; the
++ * entry gate at 15 °C stays.
++ */
++#define SC8547_DIRECT_COLD_DC		120
++#define SC8547_DIRECT_COOL_DC		210
++#define SC8547_DIRECT_COLD_HYST_DC	5
++#define SC8547_DIRECT_COLD_UA		2500000
++#define SC8547_DIRECT_COOL_UA		4000000
++/*
++ * A cap derived from an analog reading raises the request only once it
++ * clears the applied current by the deadband, so a reading that jitters
++ * across a 100 mA step does not ask the adapter for a new current every few
++ * seconds. A thermal cap lowers the request at once; the power budget,
++ * which is a target with the hard stops elsewhere, lowers it only once it
++ * is this far below.
++ */
++#define SC8547_DIRECT_DEADBAND_UA	150000
++#define SC8547_DIRECT_BUDGET_SLACK_UA	50000
++
++/* The cold rows the cell is in, kept by the caller across readings. */
++enum sc8547_direct_cold {
++	SC8547_DIRECT_WARM,
++	SC8547_DIRECT_COOL,
++	SC8547_DIRECT_COLD,
++};
+ /* The buck has let go of the input when it draws no more than this. */
+ #define SC8547_DIRECT_QUIET_UA		25000
+ /*
+@@ -69,13 +99,16 @@ struct sc8547_direct_battery {
+ };
+ 
+ int sc8547_direct_scale(int value, int soft, int hard);
+-int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp);
++int sc8547_direct_cold_ua(int bat_temp, enum sc8547_direct_cold *cold);
++int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp,
++			     enum sc8547_direct_cold *cold);
+ int sc8547_direct_taper_ua(int uv);
+ int sc8547_direct_class_ua(int watts);
+ bool sc8547_direct_admissible(const struct sc8547_direct_battery *bat,
+ 			      const int *therm_mc);
+ int sc8547_direct_entry_ua(const struct sc8547_direct_battery *bat,
+-			   const int *therm_mc, int die);
++			   const int *therm_mc, int die,
++			   enum sc8547_direct_cold *cold);
+ int sc8547_direct_regulate_target_ua(int limit_ua, int *taper_ua, int vbat_uv,
+ 				     int thermal_ua, int vbus_uv, int ibus_ua,
+ 				     int applied_ua);
+diff --git a/drivers/power/supply/sc8547_direct_policy_test.c b/drivers/power/supply/sc8547_direct_policy_test.c
+index b48903629b9d..7a7959559995 100644
+--- a/drivers/power/supply/sc8547_direct_policy_test.c
++++ b/drivers/power/supply/sc8547_direct_policy_test.c
+@@ -21,6 +21,22 @@ static const struct sc8547_direct_battery good_battery = {
+ 	.health = POWER_SUPPLY_HEALTH_GOOD,
+ };
+ 
++/* The thermal allowance and the entry current as a fresh session, warm, sees them. */
++static int thermal(int die, const int *therm_mc, int bat_temp)
++{
++	enum sc8547_direct_cold cold = SC8547_DIRECT_WARM;
++
++	return sc8547_direct_thermal_ua(die, therm_mc, bat_temp, &cold);
++}
++
++static int entry(const struct sc8547_direct_battery *bat, const int *therm_mc,
++		 int die)
++{
++	enum sc8547_direct_cold cold = SC8547_DIRECT_WARM;
++
++	return sc8547_direct_entry_ua(bat, therm_mc, die, &cold);
++}
++
+ static void sc8547_direct_test_constants(struct kunit *test)
+ {
+ 	const struct sc8547_direct_limit *l;
+@@ -76,13 +92,13 @@ static void sc8547_direct_test_scale(struct kunit *test)
+ /* The hotter die derates from 60 °C to nothing at 70 °C. */
+ static void sc8547_direct_test_thermal_die(struct kunit *test)
+ {
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 250), 6200000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(599, cool_mc, 250), 6200000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(600, cool_mc, 250), 6200000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(650, cool_mc, 250), 3100000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(699, cool_mc, 250), 62000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(700, cool_mc, 250), 0);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(0, cool_mc, 250), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 250), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(599, cool_mc, 250), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(600, cool_mc, 250), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(650, cool_mc, 250), 3100000);
++	KUNIT_EXPECT_EQ(test, thermal(699, cool_mc, 250), 62000);
++	KUNIT_EXPECT_EQ(test, thermal(700, cool_mc, 250), 0);
++	KUNIT_EXPECT_EQ(test, thermal(0, cool_mc, 250), 6200000);
+ }
+ 
+ /* Each thermistor derates from its soft limit to nothing at its hard one. */
+@@ -96,21 +112,21 @@ static void sc8547_direct_test_thermal_thermistors(struct kunit *test)
+ 
+ 		memcpy(mc, cool_mc, sizeof(mc));
+ 		mc[i] = l->soft;
+-		KUNIT_EXPECT_EQ_MSG(test, sc8547_direct_thermal_ua(250, mc, 250), 6200000,
++		KUNIT_EXPECT_EQ_MSG(test, thermal(250, mc, 250), 6200000,
+ 				    "thermistor %d at its soft limit", i);
+ 		mc[i] = (l->soft + l->hard) / 2;
+-		KUNIT_EXPECT_EQ_MSG(test, sc8547_direct_thermal_ua(250, mc, 250), 3100000,
++		KUNIT_EXPECT_EQ_MSG(test, thermal(250, mc, 250), 3100000,
+ 				    "thermistor %d half way", i);
+ 		mc[i] = l->hard;
+-		KUNIT_EXPECT_EQ_MSG(test, sc8547_direct_thermal_ua(250, mc, 250), 0,
++		KUNIT_EXPECT_EQ_MSG(test, thermal(250, mc, 250), 0,
+ 				    "thermistor %d at its hard limit", i);
+ 	}
+ 	/* The lowest of them rules. */
+ 	memcpy(mc, cool_mc, sizeof(mc));
+ 	mc[SC8547_DIRECT_BOARD] = 50000;
+ 	mc[SC8547_DIRECT_MOS] = 69000;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, mc, 250), 620000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(650, mc, 250), 620000);
++	KUNIT_EXPECT_EQ(test, thermal(250, mc, 250), 620000);
++	KUNIT_EXPECT_EQ(test, thermal(650, mc, 250), 620000);
+ }
+ 
+ /*
+@@ -119,24 +135,108 @@ static void sc8547_direct_test_thermal_thermistors(struct kunit *test)
+  */
+ static void sc8547_direct_test_thermal_cell(struct kunit *test)
+ {
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 379), 6200000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 380), 6200000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 410), 3100000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 420), 2066666);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 379), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 380), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 410), 3100000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 420), 2066666);
+ 	/* The line would give 0.52 A at 43.5 °C: the floor holds. */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 435), 1500000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 439), 1500000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 440), 0);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 500), 0);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 435), 1500000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 439), 1500000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 440), 0);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 500), 0);
+ 	/* The floor does not lift a hot die or board. */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(690, cool_mc, 435), 620000);
+-
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 210), 6200000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 209), 2500000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 150), 2500000);
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, -50), 2500000);
+-	/* A hot die under the cold cap. */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(680, cool_mc, 200), 1240000);
++	KUNIT_EXPECT_EQ(test, thermal(690, cool_mc, 435), 620000);
++
++	/* The cold rows, entered half a degree below their boundaries. */
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 210), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 205), 6200000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 204), 4000000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 154), 4000000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 115), 4000000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, 114), 2500000);
++	KUNIT_EXPECT_EQ(test, thermal(250, cool_mc, -50), 2500000);
++	/* A hot die under the cool row. */
++	KUNIT_EXPECT_EQ(test, thermal(680, cool_mc, 200), 1240000);
++}
++
++static void sc8547_direct_test_cold(struct kunit *test)
++{
++	enum sc8547_direct_cold cold = SC8547_DIRECT_WARM;
++	int taper = 6200000;
++
++	/* From a warm cell, a row is entered half a degree below its boundary. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(210, &cold), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(205, &cold), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(204, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, cold, SC8547_DIRECT_COOL);
++	/* Readings at the boundary no longer move it; it is left half a degree above. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(209, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(210, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(214, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(215, &cold), 6200000);
++	KUNIT_EXPECT_EQ(test, cold, SC8547_DIRECT_WARM);
++	/* Down into the cold row and back up through the cool one. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(115, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(114, &cold), 2500000);
++	KUNIT_EXPECT_EQ(test, cold, SC8547_DIRECT_COLD);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(124, &cold), 2500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(125, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, cold, SC8547_DIRECT_COOL);
++	/* Straight from cold to warm, and from warm to cold. */
++	cold = SC8547_DIRECT_COLD;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(215, &cold), 6200000);
++	KUNIT_EXPECT_EQ(test, cold, SC8547_DIRECT_WARM);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_cold_ua(100, &cold), 2500000);
++	KUNIT_EXPECT_EQ(test, cold, SC8547_DIRECT_COLD);
++	/* The rows reach the thermal allowance with the state carried along. */
++	cold = SC8547_DIRECT_WARM;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 200, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 212, &cold), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 215, &cold), 6200000);
++
++	/*
++	 * The deadband on the readings' caps: 55 W at 8.86 V is 6.21 A, 6.1 A
++	 * after the offset, within 150 mA of the applied 6.0 A, so 6.0 A stays;
++	 * at 8.70 V the budget clears the deadband and 6.2 A is asked for; at
++	 * 8.88 V it is 6.09 A, within 50 mA below the applied 6.1 A, which
++	 * stays; at 8.95 V it is 6.04 A, which lowers it to 6.0 A.
++	 */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8860000, 5000000, 6000000), 6000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8700000, 5000000, 6000000), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8880000, 5000000, 6100000), 6100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8950000, 5000000, 6100000), 6000000);
++	/*
++	 * A 140 mV wander of the bus around 8.88 V no longer moves a 6.0 A
++	 * request: 8.81 V (6.14 A) and 8.95 V (6.04 A) both leave it; 8.80 V
++	 * (6.15 A) is the edge of the deadband and raises it.
++	 */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8810000, 5000000, 6000000), 6000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8800000, 5000000, 6000000), 6100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8950000, 5000000, 6000000), 6000000);
++	/*
++	 * The thermal allowance lowers at once: 3.1 A over 3.0 A stays, 3.15 A
++	 * moves, 2.9 A lowers.
++	 */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 3100000,
++							       8000000, 3000000, 3000000), 3000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 3150000,
++							       8000000, 3000000, 3000000), 3100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 2900000,
++							       8000000, 3000000, 3000000), 2900000);
++	/* A cap that does not bind below the limit leaves the ramp its last step. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8000000, 6000000, 6100000), 6200000);
++	/* And the limit itself, a class or the ladder, is never held back. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(5000000, &taper, 4000000, 6200000,
++							       8000000, 4900000, 4900000), 5000000);
++	KUNIT_EXPECT_EQ(test, taper, 6200000);
+ }
+ 
+ /* 4.0 / 3.0 / 2.0 / 1.5 A from 4.40 / 4.42 / 4.44 / 4.46 V. */
+@@ -223,53 +323,56 @@ static void sc8547_direct_test_entry(struct kunit *test)
+ 	struct sc8547_direct_battery bat = good_battery;
+ 
+ 	bat.capacity = 0;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 6200000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 6200000);
+ 	bat.capacity = 55;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 6200000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 6200000);
+ 	bat.capacity = 56;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 3000000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 3000000);
+ 	bat.capacity = 84;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 3000000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 3000000);
+ 	bat.capacity = 85;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 2000000);
+ 	bat.capacity = 89;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 2000000);
+ 
+ 	/* The budget at the top of the window, 2 x VBAT + 0.7 V. */
+ 	bat = good_battery;
+ 	bat.capacity = 55;
+ 	bat.uv = 4000000;	/* 55 W / 8.7 V = 6.32 A: the ladder binds */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 6200000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 6200000);
+ 	bat.uv = 4300000;	/* 55 W / 9.3 V = 5.91 A */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 5900000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 5900000);
+ 	bat.uv = 4350000;	/* 55 W / 9.4 V = 5.85 A */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 5800000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 5800000);
+ 	bat.uv = 4440000;	/* the taper, 2 A, below the budget's 5.7 A */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 2000000);
+ 
+ 	/* The thermal derate, rounded down to 100 mA. */
+ 	bat = good_battery;
+ 	bat.capacity = 56;
+ 	bat.temp = 420;		/* 2.07 A from the cell line */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 2000000);
+ 	bat.temp = 250;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 650), 3000000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 650), 3000000);
+ 	bat.capacity = 55;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 650), 3100000);
+-	bat.temp = 200;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2500000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 650), 3100000);
++	bat.temp = 200;		/* the cool row, from a warm start */
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 4000000);
++	bat.temp = 114;		/* the cold row */
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 2500000);
++	bat.temp = 250;
+ 	/* Below the minimum is reported as such: the caller refuses. */
+ 	bat.temp = 437;		/* 0.31 A from the line; the floor gives 1.5 A */
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 1500000);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 1500000);
+ 	bat.temp = 440;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 0);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 0);
+ 
+ 	/* A reading that puts the top of the window at or below 0 V is refused. */
+ 	bat = good_battery;
+ 	bat.uv = -350000;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 0);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 0);
+ 	bat.uv = -1000000;
+-	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 0);
++	KUNIT_EXPECT_EQ(test, entry(&bat, cool_mc, 0), 0);
+ }
+ 
+ /* min(limit, taper, thermal, 55 W / VBUS - 0.1 A), the over-power step, 100 mA steps. */
+@@ -296,12 +399,13 @@ static void sc8547_direct_test_regulate(struct kunit *test)
+ 							       9000000, 6200000, 6200000), 5900000);
+ 	/*
+ 	 * The step is taken above 55 W, not at it: 6.25 A at 8.8 V is
+-	 * 55.000000 W and leaves the budget's 6.15 A, rounded to 6.1 A; one
+-	 * more microampere (8.8 uW over) steps down from the applied 6.2 A by
+-	 * 0.1 A plus the 0.5 W over 54.5 W at 8.8 V, to 6.0 A.
++	 * 55.000000 W and leaves the budget's 6.15 A, within the 50 mA slack
++	 * below the applied 6.2 A, which stays; one more microampere (8.8 uW
++	 * over) steps down from the applied 6.2 A by 0.1 A plus the 0.5 W over
++	 * 54.5 W at 8.8 V, to 6.0 A.
+ 	 */
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
+-							       8800000, 6250000, 6200000), 6100000);
++							       8800000, 6250000, 6200000), 6200000);
+ 	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
+ 							       8800000, 6250001, 6200000), 6000000);
+ 
+@@ -652,6 +756,7 @@ static struct kunit_case sc8547_direct_test_cases[] = {
+ 	KUNIT_CASE(sc8547_direct_test_thermal_die),
+ 	KUNIT_CASE(sc8547_direct_test_thermal_thermistors),
+ 	KUNIT_CASE(sc8547_direct_test_thermal_cell),
++	KUNIT_CASE(sc8547_direct_test_cold),
+ 	KUNIT_CASE(sc8547_direct_test_taper),
+ 	KUNIT_CASE(sc8547_direct_test_class),
+ 	KUNIT_CASE(sc8547_direct_test_admissible),
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 21a9208108bc..3a7d2d299f0a 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -182,6 +182,8 @@ struct sc8547_svooc {
+ 	unsigned int disagree;
+ 	/* The adapter's power class, from its model, once it is granted. */
+ 	int class_w;
++	/* The cell's cold rows, with their hysteresis. */
++	enum sc8547_direct_cold cold;
+ 	int limit_ua;
+ 	int taper_ua;
+ 	int target_ua;
+@@ -261,7 +263,8 @@ static int svooc_die(struct sc8547_svooc *sv)
+ 
+ static int svooc_thermal_ua(struct sc8547_svooc *sv)
+ {
+-	return sc8547_direct_thermal_ua(svooc_die(sv), sv->therm_mc, sv->bat.temp);
++	return sc8547_direct_thermal_ua(svooc_die(sv), sv->therm_mc, sv->bat.temp,
++					&sv->cold);
+ }
+ 
+ static int svooc_vbat(struct sc8547_svooc *sv)
+@@ -694,7 +697,9 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 	sv->bat = bat;
+ 	memcpy(sv->therm_mc, therm, sizeof(therm));
+ 	memset(sv->sample, 0, sizeof(sv->sample));
+-	sv->limit_ua = sc8547_direct_entry_ua(&sv->bat, sv->therm_mc, svooc_die(sv));
++	sv->cold = SC8547_DIRECT_WARM;
++	sv->limit_ua = sc8547_direct_entry_ua(&sv->bat, sv->therm_mc, svooc_die(sv),
++					      &sv->cold);
+ 	if (!sv->second)
+ 		sv->limit_ua = min(sv->limit_ua, SC8547_DIRECT_PUMP_MAX_UA);
+ 	mutex_unlock(&sv->lock);
