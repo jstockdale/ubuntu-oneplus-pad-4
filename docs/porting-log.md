@@ -3214,3 +3214,137 @@ offered: one capabilities line per change instead of per work run; the
 2.5 s per-request timeout the plan allows is not needed (acks were fast).
 The hardware is untouched: both pumps stayed off throughout, the
 sc8547_svooc driver in Standard.
+
+## 2026-11-03 — S0 hard-reset drill PASS: the power key held, slot and rootfs and journal intact, unattended boot in 76 s
+
+The drill the C6 and Q plans both wanted before any flight that can
+freeze the system: the owner unplugged the Anker and held the power key
+on the idle desktop at 15:23. The previous boot's journal ends on
+logind's "Power key pressed long." (its long-press action is "ignore", so
+the OS did nothing; the PMIC's long-press reset did the rest) and is
+intact to that line — journald is persistent. The tablet answered on
+Wi-Fi 76 s later:
+
+- same slot (_b active, boot_b = #46 boot-46-23711786), rootfs clean, no
+  failed unit (systemd-networkd-wait-online fails on every boot of this
+  image; pre-existing and cosmetic, NetworkManager owns the link);
+- the charging policy wrote Standard at 2.79 s; the pen charger charging
+  ("pen asks to stop at 100 %" at 357 s); the audio sink present;
+- the A-series module loaded from /run was gone and the shipped #46
+  qcom_battmgr back — the swap vehicle does not survive a reset, as the
+  rails intend;
+- Wi-Fi joined at 100 s with one handshake failure — not the 11d scan
+  (enable_11d N, module 5419efdc, 0 regulatory timeouts); see the watch
+  item entry below.
+
+S0 is the predecessor of C2's F6 (the deliberate watchdog trip) and of
+C6's F1; both are now unblocked on that count.
+
+## 2026-11-03 — An unexplained reset at 15:40 under the discharge load: no log, no watchdog bite, no crash record
+
+The post-S0 boot ran for 1043 s and died without a word. Context: the
+discharge helper (backlight 4095, two stress-ng workers at 50 %, paused
+by the cell thermostat since 15:27 at 36 °C), the owner's Chrome at
+155 % CPU, load average 6.2, cell 35–36 °C, battery 97 → 90 %. The
+timeline of that boot, monotonic seconds:
+
+- 222–758: twelve "platform 3d37000.gmu: delay in fenced register write
+  (0x8c1)"; 418: "[drm] Loaded GMU firmware v5.3.33" (a GPU restart
+  mid-session); 651 and 779: two dpu "vblank timeout: 400000" / "wait
+  for commit done returned -110" pairs. Nothing from the kernel after
+  779.1 s.
+- 1030.5: an ssh session from the host ran `nmcli dev wifi list --rescan
+  yes` (the BSSID lookup for the Wi-Fi probe below; the same rescan had
+  run twice earlier in the boot without incident). The command never
+  returned.
+- 1041.8: the last journal line (a pen notification; they come every
+  2–3 s). No shutdown sequence, no panic text. The next kernel started
+  at 15:41:40 by itself — a reset, not a power-off (a PMIC power-off
+  needs a power-on trigger).
+
+What was checked and what each witness can say on this device:
+
+- pstore: CONFIG_PSTORE_RAM is on but the tree reserves no ramoops
+  region, and the 10-30 finding stands (PS_HOLD re-initializes DDR):
+  /sys/fs/pstore empty.
+- kernel.panic is 0 (no `panic=` on the cmdline, which is only
+  `rdinit=/rescue/mainline-init loglevel=7 log_buf_len=2M bootconfig`;
+  ABL appends no androidboot words): a panic hangs this kernel, it does
+  not reboot it.
+- the APSS watchdog (qcom_wdt on watchdog@17600000, "qcom,apss-wdt-
+  kaanapali"; no "sram" phandle, so its boot status is the WDT_STS
+  expired bit): WDIOC_GETBOOTSTATUS = 0x0, no bite recorded. Read by
+  opening /dev/watchdog0 with the magic close written first (an open
+  starts the 30 s timer; a close without "V" would have let it bite).
+  RuntimeWatchdogSec is 0 and nobody holds the device; after the read
+  the watchdog core shows no keepalive timer (`watchdog_timer_expired`),
+  so the dog is off for this boot — whether the bootloader had left it
+  running before the read is not known. Trap: the eight
+  `watchdog_timer_fn` hrtimers in /proc/timer_list are the soft-lockup
+  detector's, one per CPU, not the dog's.
+- the PMIC PON block (qcom,pmk8350-pon: PBS at 0x800 subtype 0x08, HLOS
+  at 0x1300 subtype 0x09, read through the pmic-spmi regmap debugfs): a
+  GEN3 PON, which Qualcomm's downstream driver documents as having no
+  PON/POFF reason registers — the PBS bytes that would be reasons on
+  GEN2 (0x8c6 = 0x7f, 0x8c8 = 0x40) are not. The stock DT's
+  "restart_reason" is SDAM 0x7100 byte 0x48, a reboot mode the OS
+  writes, not a cause record.
+- the stock bootloader log (bootloader_log_mem, 64 KiB at 0x81ce4000,
+  inside our aop-tme-uefi-merged reservation): a /dev/mem read of its
+  first page fails with EFAULT; no further poking at firmware-owned
+  memory on a Gunyah system.
+
+So the boot has no reset-reason witness. Candidates, none proven: a
+PMIC- or TrustZone-level reset (invisible to the OS here); a GPU/DPU
+hang turning into a secure-side reset (the distress lines are the only
+kernel-side abnormality of that boot); the Wi-Fi rescan 11 s before (the
+only timing correlation; the identical rescans at 15:35 and 15:39 were
+harmless). Measures: the stress discharge helper and the active Wi-Fi
+probe stay off until the reset recurs or is explained; the boot census
+reads the watchdog boot status and the previous boot's tail; the
+kernel.panic choice (0 = hang for inspection, 10 = unattended reboot) is
+an open decision for the C6 row. The discharge continues passively
+(panel dimmed, no load); the Anker stays out while the battery sits in
+the stage-1 window, and the brick goes in at 86–89 % — below that, the
+Anker tops up to 87 % first.
+
+## 2026-11-03 — Wi-Fi watch item sharpened: the losses belong to the mesh's 5680 MHz (channel 136, DFS) radio; probe written, on hold
+
+With the 11d scan off and the regulatory series in, the post-S0 boot
+still showed the two shapes of the watch item, and both on the same
+radio. The mesh has three radios on this SSID: 2462 MHz (channel 11),
+5240 MHz (channel 48) and 5680 MHz (channel 136, a DFS channel; its AP
+config is "downgraded" by regulatory at every association). Timeline of
+that boot, monotonic seconds:
+
+- 10.30 associate with the 5680 MHz radio → 16.95 CTRL-EVENT-BEACON-LOSS
+  → 17.58 disconnect (reason 4, locally generated) → "4-Way Handshake
+  failed", WRONG_KEY, 10 s temp-disable; NetworkManager's retry only at
+  84.4 s.
+- 84.6 associate with the same radio → 84.69 CONNECTED (handshake fine
+  this time) → 91.29 BEACON-LOSS → 96.70 "Connection to AP lost" (12 s
+  after CONNECTED, the known shape).
+- 97.3 associate with the 2462 MHz radio → 97.44 CONNECTED, clean; 107.6
+  roam to the 5240 MHz radio, clean.
+- The 15:41 boot associated with the 5240 MHz radio first: CONNECTED at
+  11.03 s, no handshake failure, no regulatory timeout.
+
+The firmware owns connection monitoring (ath12k sets CONNECTION_MONITOR),
+so the BEACON-LOSS 6.6 s after association is its beacon-miss verdict:
+on that radio the station hears no beacons from the moment it associates,
+while unicast auth/assoc frames (and once the EAPOL frames) get through.
+Candidates: the downgraded channel definition (the AP's 80 MHz block
+132–144 against the self-managed US regd) leaving the firmware tuned
+where the beacons are not; a firmware channel-list update after
+association on a DFS channel; the mesh's own behaviour on that radio.
+The probe is written (wifi-ch136-probe.sh, scratchpad): the connection
+profile pinned to that radio's BSSID for one re-activation, ath12k debug
+0x312 (WMI, MAC, MGMT, REG) on for the 75 s window, journal and `iw`
+sampled every 2 s, the pin and the mask removed by a trap whatever
+happens. Two launches failed before the probe ran (a BSSID grep without
+the SSID caught a neighbour's 5680 MHz network; then the scan cache had
+aged out), and the rescan of the third attempt coincided with the reset
+above — the probe never started and the profile was never pinned
+(verified on the new boot). It stays on hold until the reset is
+understood; it costs one 15 s Wi-Fi drop when it runs, and the join must
+not be attempted with the tablet unattended.
