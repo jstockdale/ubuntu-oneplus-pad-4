@@ -3348,3 +3348,66 @@ above — the probe never started and the profile was never pinned
 (verified on the new boot). It stays on hold until the reset is
 understood; it costs one 15 s Wi-Fi drop when it runs, and the join must
 not be attempted with the tablet unattended.
+
+## 2026-11-03 — SuperVOOC stage 1 PASS: the OnePlus 80 W brick runs a 2 A pump session from 87 % to the driver's own 90 % end
+
+The first SuperVOOC session of this port, on the shipped #46 kernel and
+module (no flight module), package 0.2.33 (Standard at boot, the opt-in
+flag). The Anker brought the battery from 85 to 87 % (16:08–16:11,
+8.8 V × 1.5 A); the owner swapped to the brick (VCB8OAEH on its own
+USB-A cable) at 16:13:30; the bench recorder ran in watch mode from
+16:10 (firmware log, one line per second of the supplies, pumps and
+thermistors); svooc-session.sh sampled every 2 s with its abort criteria,
+detached as root; the end was the driver's.
+
+- The firmware types the brick "BrickID" (POWER_SUPPLY_USB_TYPE_
+  APPLE_BRICK_ID; its charger detection calls the partner
+  SSDEV_PARTNER_SNK_USB_OCP) at 4.96 V and gives the buck an ICL of
+  3 A: 4.96 V × 2.99 A = 14.8 W into the system, the battery at +1.5 A
+  at 87 %. That is the "DCP with the brick" item of the standard-charging
+  regression: without a session the brick is a 15 W 5 V source and the
+  firmware charges from it. Type-C power_operation_mode read "default"
+  at the plug and "1.5A" during the session.
+- Two tooling faults before the session, both fixed in place: the
+  preflight compared the sysfs type text with "APPLE_BRICK_ID" while
+  sysfs prints "BrickID" (the driver's own gate uses the enum and was
+  right); and the detached session's log redirect ran as the login user
+  against the root-owned log directory, so the first start never
+  happened. The go script (s1-go.sh: wait for a non-PD source, 3 s for
+  the driver's gate, preflight, start) and svooc-session.sh carry the
+  fixes.
+- Fast written at 2028 s with the flag set. The policy unit fired on the
+  supply's change events at 2029.2 s, 2030.2 s and again at the end
+  (2578.5 s) and left Fast alone each time — the 0.2.33 design in anger.
+  Kernel: "SuperVOOC adapter 24 at 2000 mA" at 2030.2 s — this brick
+  reports model 0x24 (Denial's table lists 0x4B for 80 W); the entry
+  ladder picked 2 A at 87 %.
+- Session, 2030.2 → 2578.2 s ("SuperVOOC finished"), 548 s: VBUS
+  8.91–9.04 V (twice the cell plus 0.1–0.2 V); the buck input 0.00 A
+  throughout (the firmware's ICL stayed 3000 while its log shows
+  icl_final 0 — the input suspended on the session's vote); both pumps
+  on, the second "shared"; the main pump's input ADC 0.73–1.04 A;
+  battery 4.391 → 4.456 V at 1.33–2.58 A (gauge, mean 2.37 A); 88 % at
+  +54 s, 89 % at +276 s, 90 % at the end; the taper took `applied` from
+  2.0 to 1.5 A when the gauge reached 4.44 V (about +400 s); 11 791
+  frames at 22.7 per second, 0 errors, worst reply 3.2 ms, rx 0x82,
+  flags 0x07.
+- Thermal: everything cooled during the session — connector 33.6 → 29.8,
+  battery connector 34.2 → 30.4, pump MOS 34.2 → 30.2, board 31.8 →
+  29.2 °C, cell 30 → 27 °C, pump dies 31.5 / 29.5 °C at +3 min. The
+  Anker's 13 W buck phase before it had warmed the board to 34–35 °C: at
+  2 A the pumps run cooler than the buck.
+- Firmware log during the session: "oplus_get_vooc_online" once a
+  second (the firmware asks the AP whether VOOC is on, which stock's AP
+  driver tells it and Perpetua does not — harmless), the aggregator
+  votes, "USB charger cable is connected"; no fault, no health change.
+- After the end: pumps off, state idle, taper 1.5 A remembered, the buck
+  back at 4.96 V × 2.99 A, the battery +1.6 A at 90 %; `svooc-session.sh
+  0 end` wrote Standard and cleared the flag; the brick stays a 15 W
+  source until the owner unplugs it.
+
+Stage 2 (3 A, both pumps by the join rule) at 60–84 % and stage 3 (up to
+6.2 A at ≤ 55 %, Denial's 50–55 W) follow with the same tooling, each
+attended, the bench recording; then the Standard policy is dropped and
+Fast ships. Logs: /var/log/iceland-pps/s1 on the tablet (session.log,
+psy.log, fwraw.txt).
