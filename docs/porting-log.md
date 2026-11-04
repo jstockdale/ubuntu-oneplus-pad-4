@@ -3651,9 +3651,30 @@ F2–F4 numbers without citing their record; message claims about which
 worker does what), plus 23 minors (I2C under the lock at the landing,
 the keep-alive re-opening the settle window, the H24 reset only in
 Fast, -EOPNOTSUPP retained as a refusal, the flight script without a
-trap, and others). Revision 2 took every one. A second, independent
-five-reviewer pass with adversarial verification runs over a frozen copy
-(the lesson of the B-series) before 0077 enters the series; the flights
+trap, and others). Revision 2 took every one. The second, independent five-reviewer pass
+with adversarial verification over a frozen copy (52 agents, 52 minutes)
+found the rails intact — every write to the usb supply bounded, the
+release only through the predicate, sc8547_enable unreachable, the
+Kconfig and mask defaults as specified — and confirmed 44 of 47
+findings: five majors, all in the flight tooling rather than the driver
+(the preflight compared the bracketed sysfs type list with a bare word
+and would always have refused — the same trap as the SuperVOOC script's
+"BrickID"; the journal-witness abort scanned a window the sampler had
+just consumed; the F5c replug census ran with Fast and the mask still in
+force, so a replug would have started a second, unattended lift; the
+held-vote recovery order in the sheet), 28 minors (among them the
+`held` flag spent on transient retries so the stuck-pump crit could be
+suppressed, -ENOTCONN unreachable in the hold, the slow worker's re-arm
+delaying an immediate request by up to 500 ms, -EREMOTEIO from a read
+retained as a refusal, the sweep floor following the live gauge, the
+status's pps lines outliving the mask, four rail predicates living only
+in the driver and unpinned, the landing's register reads bypassing the
+pump driver's fault latch, message overstatements) and 11 nits.
+Revision 3 takes them all, splits the back-end into its own file under
+the bool (the ~980-line #ifdef block was the maintainers' objection)
+and adds a small preceding patch giving the pump driver an accessor for
+its latched status registers, so the series becomes 0077 (the accessor)
+and 0078 (the back-end). The flights
 F5a (the lift and hold), F5b (the sweep to 9.5 V, 60 s) and F5c (cable
 pull) follow on the Anker as a three-module swap (the A-series battmgr
 module and the C1 pair), attended, never the first session unattended.
