@@ -3733,17 +3733,93 @@ kernel.panic 0 a panic hangs, it does not reboot, and the APSS watchdog
 was not armed). What differs: no charger at 15:40, the brick at 46 W at
 20:30. Undetermined.
 
-Decision (owner's call pending): no further 6.2 A session. Stages 1 and
-2 (2 A and 3 A adapter current, both ended by the driver at 90 %) stand;
-stage 3 is FAIL-by-reset, cause unknown. Fast does not ship as the
-default yet. The way to a shipped Fast, proposed: cap the entry ladder at
-3 A (a one-line, behaviour-changing patch to svooc_entry_ua, documented
-as such; 27 W proven for 18 min on this unit), re-fly one full session
-from ≤ 55 % at the cap, and ship Fast with the cap while the reset is
-chased — first by separating the variables: a long run at the 3 A level
-(no 6.2 A), a long run of the discharge load without any charger (the
-15:40 shape), and the pen undocked for one of each (the hBoost lead). The
-flight tooling records every session; the next reset, if any, gets the
-same census. Logs: /var/log/iceland-pps/s3 on the tablet (session.log
-and psy.log end at 20:29:5x; fwraw.txt at 20:30:30), copies under the
-session scratchpad.
+The owner's decision (20:48): the production level stays at 6.2 A; the
+reset is to be root-caused, not charged around, as long as the battery
+shows no damage — health Good, learned capacity 13 789 mAh unchanged,
+both pumps Good, the firmware's JEITA zone 0 and HealthStatus 0, no
+fault, protection or over-current line anywhere in its log.
+
+Retry, 21:26:3x–21:31:17, with host-side witnesses (the firmware log and
+the driver's status streamed to the host at one line per second, a sync
+loop on the tablet, the pen off the magnet): the same entry ("adapter 24
+at 6200 mA"), the same regulation (5.9–6.0 A under the 55 W budget, 2.60
++ 2.55 A into the pumps at 8.9–9.1 V, +8.6–10.0 A into the cell), the
+same thermal picture (dies 44.5 / 45.5 °C, battery connector 45.3 °C and
+flattening, MOS 43 °C, cell 28 °C), zero errors — and the same silent
+reset at +4 min 45 s (the first run died at +5 min 10 s). This time the
+streams run to the last second: every quantity steady, the firmware's
+routine lines ("ncp_stby_db_log: chgr_stat=7", the heartbeat, the QBG
+fifo) to within a second of death, nothing new in the last 30 s of either
+run; the first run's 20 % input-current drop has no counterpart. The
+tablet was back in the bootloader within about 5 s of the last line.
+
+What is now established about the mechanism:
+
+- Not the APSS watchdog: a fresh boot read before anything opened
+  /dev/watchdog shows no keepalive in the watchdog core — the bootloader
+  does not leave the APSS dog running here — and during both 46 W runs
+  the dog was in any case stopped (my boot-status reads stop it). A
+  kernel lockup on this unit freezes; it cannot reboot. Nor the PMIC's
+  own watchdog: its S1/S2 timers and control bytes read zero.
+- Not a kernel panic (kernel.panic 0 hangs), not a PMIC die
+  over-temperature (none of the seven temp-alarm interrupts ever fired;
+  the PMIC thermal zones report only the 37 °C "below stage 1" value and
+  carry no ADC, so the PMIC die is otherwise invisible).
+- Denial saw it first: Perpetua commit f4a65f20c7ab (2026-10-31) — "The
+  OnePlus Pad 4 froze twice while charging over SuperVOOC: display and
+  network stopped at once and the watchdog rebooted it minutes later,
+  with nothing in the log" — and c617cde5d95a (2026-11-03, in our pin):
+  three more freezes after multi-byte I2C transfers to the pumps, where
+  "the lockup detector caught the I2C transfers to both pumps timing
+  out, then the charger firmware, RPMh and two CPUs stopping within 8
+  seconds"; single-register reads cured those. The cascade — the pumps'
+  I2C controllers, then the SOCCP charger firmware, then RPMh, then the
+  CPUs — is the SoC's power-management fabric failing together. On
+  Denial's unit it ended in a freeze and a slow watchdog reboot; on this
+  unit, with both HLOS-visible watchdogs off, the reset arrives within
+  seconds, which fits the fabric's own reaction (an AOP/RPMh watchdog or
+  a PMIC fault sequence) rather than anything the kernel does. Perpetua
+  has no commit after our pin: upstream has not fixed it.
+- Refuted along the way: the fuel gauge's ESR-pulse FIFO (its index sits
+  at 7 with a 15-sample FIFO in every run, passing or failing); the pen
+  charger's boost rail (the pen was off the magnet in the second run);
+  the firmware timing out on its once-a-second "oplus_get_vooc_online"
+  query alone (stages 1 and 2 ran 9 and 18 min with the same line).
+- What the stock host does for the firmware during an AP-VOOC session
+  that our driver does not (vendor oplus_ap_voocphy.c via chglib → the
+  ADSP backend): it disables the charger (CHG_EN 0, property 70) as well
+  as suspending the input, and it forces the input OVP setting
+  (OPLUS_USB_SET_OVP_FORCED, 132, "is VOOC! call ovp forced on") for the
+  session; it also pins CPU frequencies (voocphy_req_freq 1.78 / 2.44
+  GHz). Our driver votes ICL 0 only; battmgr's charging work re-asserts
+  CHG_EN 1 on every change event, so the firmware runs its charger state
+  machine enabled with the input suspended for the whole session
+  ("usb_suspend: 1, chg_enable: 1" in its log). The Pad 4's stock DT:
+  AP_DUAL_CP_VOOCPHY, soccp_support, voocphy_current_default 6.1 A,
+  voocphy_cp_max_ibus 5.3 A, voocphy_ibat_over_current 13.6 A.
+
+Experiment ladder (one variable each, the production level kept at 6.2 A,
+the host witnesses plus the panel as a text console so a lockup backtrace
+would be visible and photographable):
+
+- A: deep cpuidle states off and the stock frequency floors for the
+  session (runA-prep.sh, runtime only) — tests the RPMh/PSCI cluster
+  power-down path of the cascade. Survival past 10 min implicates it and
+  points at a PM QoS hold in the driver as the production fix.
+- B: the stock host's two writes mirrored by hand through a flight battmgr
+  module with a bench knob (debugfs oplus_set "<property> <value>";
+  out/bundles/qcom_battmgr-46-a1a2a3v2-oplusset-0ca0a4a0.ko; the PPS,
+  PDO and input-limit properties refused there): CHG_EN 0 after the
+  pumps start, OVP_FORCED 1, both undone at the end — tests the
+  firmware-behaviour hypothesis.
+- C: 4.5 A (36 W) to 10 min — power/time scaling of the trigger.
+- D: a ramoops region in our dtb (candidate node saved) and a
+  survivability test with sysrq-c under kernel.panic=10, so any kernel
+  witness survives a warm reset; if DDR is kept, hardlockup_panic=1 and
+  the CSD debug write their backtraces into it.
+- Each run with the pump interrupt counters, CPU frequencies and the
+  thermal zones streamed too (host-witness.sh, three streams).
+
+Logs: /var/log/iceland-pps/s3 and s3b on the tablet; the host streams
+and the first run's copies under the session scratchpad (witness-s3b,
+s3).
