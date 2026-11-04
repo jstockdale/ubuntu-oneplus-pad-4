@@ -55,7 +55,7 @@ earn a ✅ here.
 | Speakers (6× TFA9865) | ✅ | stock loudness behind a PipeWire protection chain |
 | Microphones | ✅ | the capture fix is upstream at the pin (Perpetua `9ba37ef1db70`; our 0028 now carries only the WRITE_DONE half, see [Upstreaming](#upstreaming)); the processed "voice processing" input with stock's recorder gain has been the default since device package 0.2.26, the raw source stays selectable |
 | Wired headphones (USB-C analog) | ❓ | untestable without a USB-C analog headset — with no jack detected the HPH endpoint stays off and playback starves, which is what the earlier "starts then stops" was, not a bug |
-| Battery telemetry, charging | 🟡 | telemetry ✅; 9 V PD contract (13.1 W measured at 84 %, the firmware's PD cap; kernel #46 flashed 2026-11-03); SuperVOOC with the OnePlus 80 W brick: stage 1 (2 A, 87 → 90 %, both pumps) PASS 2026-11-03, the 3 A and 6.2 A stages pending; the driver stays in Standard by policy until they pass |
+| Battery telemetry, charging | 🟡 | telemetry ✅; 9 V PD contract (13.1 W measured at 84 %, the firmware's PD cap; kernel #46 flashed 2026-11-03); SuperVOOC with the OnePlus 80 W brick: stages 1 (2 A) and 2 (3 A, 27.6 W) PASS 2026-11-03, both ended by the driver at 90 %; the 6.2 A stage pending; the driver stays in Standard by policy until it passes |
 | Thermal | 🟡 | zones registered; no policy daemon yet |
 | Sensors / IMU | ❓ | planned ([docs/sensors-plan.md](docs/sensors-plan.md)); no auto-rotation until then |
 | Suspend / resume | ❓ | deliberately untested so far |

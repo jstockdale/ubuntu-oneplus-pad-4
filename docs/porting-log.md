@@ -3417,6 +3417,12 @@ detached as root; the end was the driver's.
   during the brick session — a PD-attach code Perpetua does not name yet
   (A-series polish list).
 
+Stage 2 (3 A, both pumps by the join rule) at 60–84 % and stage 3 (up to
+6.2 A at ≤ 55 %, Denial's 50–55 W) follow with the same tooling, each
+attended, the bench recording; then the Standard policy is dropped and
+Fast ships. Logs: /var/log/iceland-pps/s1 on the tablet (session.log,
+psy.log, fwraw.txt).
+
 ## 2026-11-03 — PD PPS B-series written and reviewed: the policy library with KUnit (0074), the adapter seam (0075), the suspend refusal (0076)
 
 The implementation workflow (one implementer, three adversarial
@@ -3507,10 +3513,55 @@ CONFIG_MODVERSIONS is off) re-flies a 3 A session as the B-gate before any
 bundle carries it. Config: CONFIG_SC8547_DIRECT_POLICY comes from the
 driver's select (the build config already shows =m; neither it nor
 OPLUS_SVOOC is listed in devices/iceland/kernel.config), so no fragment
-change.
+change. Entered as 0074–0076 at 17:40 (commit e292799) after the
+75-patch series applied in order on the pin and reproduced the
+implementer's tree byte for byte; KUnit 19 of 19 on the final tree; the
+renamed PM callbacks present in the built module.
 
-Stage 2 (3 A, both pumps by the join rule) at 60–84 % and stage 3 (up to
-6.2 A at ≤ 55 %, Denial's 50–55 W) follow with the same tooling, each
-attended, the bench recording; then the Standard policy is dropped and
-Fast ships. Logs: /var/log/iceland-pps/s1 on the tablet (session.log,
-psy.log, fwraw.txt).
+## 2026-11-03 — SuperVOOC stage 2 PASS: 3 A adapter current from 84 % to the driver's 90 % end, both pumps, every stop criterion quiet
+
+Same vehicle as stage 1 (shipped #46 module, 0.2.33, the brick on its
+own cable, the bench recorder in watch mode, svooc-session.sh detached as
+root through the go script, which waited for the source and ran the
+preflight). The battery had been brought from 94 to 84 % by the passive
+drain (panel at full brightness, GNOME idle dim and blank off, no CPU
+load — 1 % per 5 min), so the board started warm (34–35 °C) and the cell
+at 33 °C.
+
+- Plug at 17:27:3x; the firmware typed the brick BrickID at 4.96 V / ICL
+  3 A; the go script found the gate open at 17:27:52 and wrote Fast with
+  the flag; the policy unit left the session alone at every change event
+  (6372.5, 6373.5, 7482.4, 7482.7 s). Kernel: "SuperVOOC adapter 24 at
+  3000 mA" at 6373.5 s — the entry ladder's 3 A for 56–85 %.
+- Session 6373.5 → 7482.4 s ("SuperVOOC finished"), 1109 s: VBUS
+  8.70–9.09 V, the buck input 0.00 A throughout; both pumps on and
+  shared, 1.54 and 1.51 A at the 9.05 V bus mid-session (27.6 W from the
+  brick), dies 37.5 and 36.0 °C; battery 4.301 → 4.465 V at 1.0–4.38 A
+  (gauge, mean 2.98 A); 85 % at +54 s, 86 % +296 s, 87 % +462 s, 88 %
+  +640 s, 89 % +850 s, 90 % at the end. The taper did the stepping, not
+  the thermal derate: `applied` 3.0 → 2.0 A at +118 s (the pump-side
+  VBAT, higher than the gauge's 4.378 V under 4 A, crossed the 4.44 V
+  line) and → 1.5 A at +574 s (gauge 4.433 V); 23 817 frames at 22.7
+  per second, 0 errors, worst reply 1.9 ms.
+- Thermal, running: connector 28.6–36.9, battery connector 29.5–38.8,
+  pump MOS 29.2–38.3, board 27.8–34.5 °C, cell 33 → 25 °C — the peaks in
+  the first two minutes while the pumps carried 3 A, then everything
+  cooled through the taper; the hottest point (the battery connector at
+  38.8 °C) sits 21 °C under its 60 °C soft limit. No derate, no abort
+  criterion of the script approached (connector/MOS 65, board 50, cell
+  42 °C), health Good throughout.
+- End: the brick's one-second VBUS drop and re-attach (the owner heard
+  the charger sound), then 4.93 V × 2.99 A again; `end` wrote Standard
+  and cleared the flag at 17:47:37; unplugged at 17:47:5x; the passive
+  drain toward 55 % started itself at 17:47:59.
+- Firmware log (bench s2): the same picture as stage 1 plus
+  "vbus_collapse_status_rt_icl_status" lines (the collapse-flag property
+  Perpetua polls, answered with an error-level log line) and
+  "charger_detection_process_plugin CC attached" at the plug.
+
+Two stages down, both ended by the driver at 90 %, both with every
+thermistor far from its limit. Stage 3 (the 6.2 A entry at ≤ 55 %,
+Denial's 50–55 W, the only stage where the 55 W budget and the pump dies
+matter) follows at ≤ 55 % with a cool cell, attended, same tooling; then
+the Standard policy is dropped so Fast ships on #46. Logs:
+/var/log/iceland-pps/s2 on the tablet.
