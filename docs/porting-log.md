@@ -3401,10 +3401,18 @@ detached as root; the end was the driver's.
   second (the firmware asks the AP whether VOOC is on, which stock's AP
   driver tells it and Perpetua does not — harmless), the aggregator
   votes, "USB charger cable is connected"; no fault, no health change.
-- After the end: pumps off, state idle, taper 1.5 A remembered, the buck
-  back at 4.96 V × 2.99 A, the battery +1.6 A at 90 %; `svooc-session.sh
-  0 end` wrote Standard and cleared the flag; the brick stays a 15 W
-  source until the owner unplugs it.
+- After the end: the brick dropped VBUS for one second (the bench's
+  per-second log: usb offline, 0.23 V, the battery discharging for that
+  sample, then BrickID again at 5.12 V with the ICL ramping 2.5 → 3 A) —
+  a VOOC adapter renegotiates by cutting the bus once the replies stop;
+  pumps off, state idle, taper 1.5 A remembered, the buck back at 4.96 V ×
+  2.99 A, the battery +1.6 A at 90 %; `svooc-session.sh 0 end` wrote
+  Standard and cleared the flag; the brick stays a 15 W source until the
+  owner unplugs it (it took the battery to 94 % by 16:49).
+- Bench s1 (16:10–16:55, 21 579 firmware log lines): one "unknown
+  notification: 0x7b" from battmgr, at the Anker's plug (1585 s), not
+  during the brick session — a PD-attach code Perpetua does not name yet
+  (A-series polish list).
 
 Stage 2 (3 A, both pumps by the join rule) at 60–84 % and stage 3 (up to
 6.2 A at ≤ 55 %, Denial's 50–55 W) follow with the same tooling, each
