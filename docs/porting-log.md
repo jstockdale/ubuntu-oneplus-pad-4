@@ -3564,4 +3564,96 @@ thermistor far from its limit. Stage 3 (the 6.2 A entry at ≤ 55 %,
 Denial's 50–55 W, the only stage where the 55 W budget and the pump dies
 matter) follows at ≤ 55 % with a cool cell, attended, same tooling; then
 the Standard policy is dropped so Fast ships on #46. Logs:
-/var/log/iceland-pps/s2 on the tablet.
+/var/log/iceland-pps/s2 on the tablet. The passive drain took the
+battery from 90 to 55 % between 17:48 and 19:39 (panel at full
+brightness; it also warmed the board and cell to 37 °C, so a 15 min rest
+preceded the stage-3 call: cell 31 °C, board 32.7 °C at 19:45).
+
+## 2026-11-03 — PD PPS C1 written and reviewed twice: the PD PPS back-end that lifts VBUS with the pumps off (0077, pending the series)
+
+The implementation workflow (one implementer, four adversarial
+reviewers — safety rails, kernel correctness, VOOC preservation,
+style — and one revision; the first revision agent died on an API rate
+limit and the step was resumed) produced commit C1 of the plan under
+/srv/ubuntu-iceland/build/pps-work/c-series: one patch, 0077, "power:
+supply: sc8547_svooc: add a PD PPS back-end that lifts VBUS with the
+pumps off" (1733 lines changed across the six files of the B-series),
+the notes (decisions D1–D20, the state machine with its workers and
+lock holders, the debugfs table, the exit step by step, the KUnit table,
+the VOOC preservation table, open points, the review log), the
+device-local flight script pps-session.sh (BSD-3-Clause) and the
+F5a/F5b/F5c flight sheet.
+
+What it implements, against plan §4.3–§4.7 and §5.3:
+
+- Kconfig CHARGER_SC8547_PPS, default n; the back-end is an #ifdef block
+  with inert stubs, so the module built without it carries no PPS
+  symbol or string (verified with llvm-nm and llvm-strings). The seam
+  grew where the plan's five operations could not express the PPS exit:
+  a release operation (the VOOC release is the moved shared code,
+  statement for statement; the PPS one returns success only through the
+  verified predicate, never on a timeout), a retry operation, the two
+  protocol failure strings as fields, a "slow" flag telling the tick the
+  back-end reads the supplies in its own worker.
+- The IDLE gate reads the APDO through VOLTAGE_MIN/MAX/CURRENT_MAX
+  (usable: min ≤ 5.5 V, max ≥ 9.2 V, current ≥ 1.5 A), with the shared
+  admissibility, the 2 s plug rule, Fast, the protocols mask (debugfs,
+  default vooc), no retained refusal and fewer than three attempts;
+  SUSPEND through the shared handoff with the PPS quiet window (4.5–9.5
+  V); ONLINE = 2 and the APDO re-read as an assertion; PPS_LIFT: RDO
+  1 A, the request stepped by the library's lift function (2 V / 1 V /
+  500 / 200 / 100 mV by distance, the negative step above the 100 mV
+  window), target 2·VBAT_gauge + 150 mV (450 mV selectable), cap
+  min(APDO max, 9.5 V), three overshoots or 10 s → -ETIMEDOUT; at the
+  landing the pump's STATUS, PROTECTION and IBUS_OCP registers are read
+  by the slow worker and logged; PPS_HOLD (C1's stand-in for the enable
+  until C2): a bounded hold (default 60 s, at most 600 s), the keep-alive
+  rewrite every 5 s, and the F5b sweep — a debugfs target the hold
+  tracks in 200 mV steps every 5 s, bounded by the library's
+  sweep-target function with the cap applied last.
+- Every firmware round trip of a held contract runs in a slow worker:
+  the request write first in its own lock section, then the supply
+  reads (usb every 1 s, battery every 500 ms); the 50 ms tick does pump
+  I2C and the thermistors only and applies the staleness rule (battery
+  > 2 s, a write outstanding > 1.5 s → -ESTALE).
+- Stop causes: the contract moved (> 300 mV under a settled request),
+  lost (pump VBUS below 2·VBAT − 100 mV, below 4.5 V, the usb supply's
+  online leaving 2), offline with a low bus, a failed write, staleness,
+  the pre-grant form (pump VBUS ≤ request + 200 mV with the voltage
+  being written included in the ceiling), the 10.2 V measured maximum
+  on VAC or VBUS, the shared checks. The exit of §4.5 with its failure
+  branch: pumps verified off, ONLINE 1, 100 ms polls for VBUS ≤ 5.5 V
+  over 3 s, ONLINE 1 again and 3 s more, the release only through the
+  predicate (online 0 or 1, VBUS ≤ 9.2 V, pumps not switching), battmgr's
+  -EBUSY handled, otherwise the vote held with one error line and 5 V
+  re-requested every 5 s; a pump that cannot be verified off gets the
+  5 V request first and the vote is never released. The attempt counter
+  and the retained refusal (H24) with the 2 s offline reset, independent
+  of the mode.
+- debugfs: protocols, delta_lift_uv, hold_ms, sweep_uv (writes above
+  min(APDO max, 9.5 V) refused) and six "pps" status lines printed only
+  when pps is in the mask or a PPS session runs — so a SuperVOOC status
+  with the default mask is byte for byte the B-series'. MODEL_NAME reads
+  "PD PPS" during a PPS session. Nothing new in sysfs.
+- KUnit: 25 of 25 on the host (21 in the policy suite — six new cases:
+  the APDO gate, the lift steps, the contract window, the staleness
+  rule, the release predicate, the sweep target with the cap last; 305
+  expectation lines). Both Kconfig builds for arm64 W=1 clean;
+  checkpatch --strict 0/0/0; git am reproduces the snapshot byte for
+  byte; the 76-patch series applies in order on the pin.
+
+The first revision's four reviews found one blocker — the sweep target
+was clamp(sweep, lift target, cap), and the kernel's clamp returns the
+low bound when it exceeds the high one, so a lift target above the cap
+would have asked for more than 9.5 V — and three majors (the pre-grant
+ceiling excluded the voltage being written; the message asserted the
+F2–F4 numbers without citing their record; message claims about which
+worker does what), plus 23 minors (I2C under the lock at the landing,
+the keep-alive re-opening the settle window, the H24 reset only in
+Fast, -EOPNOTSUPP retained as a refusal, the flight script without a
+trap, and others). Revision 2 took every one. A second, independent
+five-reviewer pass with adversarial verification runs over a frozen copy
+(the lesson of the B-series) before 0077 enters the series; the flights
+F5a (the lift and hold), F5b (the sweep to 9.5 V, 60 s) and F5c (cable
+pull) follow on the Anker as a three-module swap (the A-series battmgr
+module and the C1 pair), attended, never the first session unattended.
