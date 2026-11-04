@@ -1,0 +1,2125 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 11:21:24 +0300
+Subject: [PATCH] Input: add a driver for the OnePlus pogo-pin keyboard dock
+
+The "Smart Keyboard" dock of the OnePlus Pad 4 (and, by the vendor
+device tree, of the OnePlus Pad 3 Pro and the OPPO Pad 5 Pro) talks to
+the tablet over a single data line with a private framed protocol at
+921600 baud: eight sync bytes, start byte, source and destination
+address, command, length, data, a CRC16 (polynomial 0x8005, initial
+value 0xc596) and an end sequence. The dock sends a sync frame every
+100 ms while it is awake, HID boot keyboard reports, 16 bit codes for
+its media keys and touchpad reports with up to five contacts.
+
+Add a serdev driver for it:
+
+- attach detection on the data line read as a GPIO, with the vendor
+  driver's timing: line low for 120 ms switches the dock's supply on,
+  the first sync frame registers the input devices, 0.5 s without a
+  frame switches the supply off again; a line that stays low without
+  a dock answering is given up after 20 tries
+- the UART is only open while a dock is powered
+- frames are sent through the transmit gate; the host hears its own
+  frame on the shared line and takes a missing echo as "not sent"
+- a keyboard input device (HID usages through the HID core's key
+  table, the media key codes, capital lock and mute LEDs, a key map
+  that user space can change) and a touchpad input device (multi-touch
+  button pad with the size and resolution from the vendor device
+  tree, palm reports as MT_TOOL_PALM)
+- the keyboard backlight as an LED class device
+- system sleep: the dock is told to sleep, a key press or taking the
+  dock off wakes the tablet through the data line
+- debugfs: status and counters, a trace of the frames (the dock's
+  Bluetooth address and serial number masked), a self-test that sends
+  one frame through the gate and listens for its echo with an empty
+  connector, and a file to send single commands for bring-up
+
+The dock's firmware update is not implemented.
+
+Tested on the OnePlus Pad 4 without a dock (kernel q60, area-combo-52;
+first version area-combo-49): the UART runs at 921600 baud, the empty
+connector reads high (absent), the dock supply stays off, a 23 byte
+frame sent through the transmit gate is heard back on the data line,
+the detect edges replayed after the self-test are judged stale,
+and the detect line is armed in suspend without ever waking the system.
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/input/keyboard/Kconfig                |   15 +
+ drivers/input/keyboard/Makefile               |    1 +
+ .../input/keyboard/oneplus-pogo-keyboard.c    | 2023 +++++++++++++++++
+ 3 files changed, 2039 insertions(+)
+ create mode 100644 drivers/input/keyboard/oneplus-pogo-keyboard.c
+
+diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
+index d8c64f333462..31dbe2446fcd 100644
+--- a/drivers/input/keyboard/Kconfig
++++ b/drivers/input/keyboard/Kconfig
+@@ -476,6 +476,21 @@ config KEYBOARD_TEGRA
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called tegra-kbc.
+ 
++config KEYBOARD_ONEPLUS_POGO
++	tristate "OnePlus / OPPO pogo-pin keyboard dock"
++	depends on SERIAL_DEV_BUS && GPIOLIB && LEDS_CLASS
++	depends on OF
++	help
++	  Say Y here if you want to use the keyboard dock with touchpad
++	  ("Smart Keyboard") that attaches to the pogo pins of tablets such
++	  as the OnePlus Pad 4. The dock talks to the tablet over a single
++	  data line with a private framed UART protocol; this driver detects
++	  the dock, powers it and turns its reports into a keyboard and a
++	  touchpad input device.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called oneplus-pogo-keyboard.
++
+ config KEYBOARD_OPENCORES
+ 	tristate "OpenCores Keyboard Controller"
+ 	depends on HAS_IOMEM
+diff --git a/drivers/input/keyboard/Makefile b/drivers/input/keyboard/Makefile
+index 60bb7baf802f..c976a670ad81 100644
+--- a/drivers/input/keyboard/Makefile
++++ b/drivers/input/keyboard/Makefile
+@@ -50,6 +50,7 @@ obj-$(CONFIG_KEYBOARD_NEWTON)		+= newtonkbd.o
+ obj-$(CONFIG_KEYBOARD_NSPIRE)		+= nspire-keypad.o
+ obj-$(CONFIG_KEYBOARD_OMAP)		+= omap-keypad.o
+ obj-$(CONFIG_KEYBOARD_OMAP4)		+= omap4-keypad.o
++obj-$(CONFIG_KEYBOARD_ONEPLUS_POGO)	+= oneplus-pogo-keyboard.o
+ obj-$(CONFIG_KEYBOARD_OPENCORES)	+= opencores-kbd.o
+ obj-$(CONFIG_KEYBOARD_PINEPHONE)	+= pinephone-keyboard.o
+ obj-$(CONFIG_KEYBOARD_PMIC8XXX)		+= pmic8xxx-keypad.o
+diff --git a/drivers/input/keyboard/oneplus-pogo-keyboard.c b/drivers/input/keyboard/oneplus-pogo-keyboard.c
+new file mode 100644
+index 000000000000..b5fdbebf9636
+--- /dev/null
++++ b/drivers/input/keyboard/oneplus-pogo-keyboard.c
+@@ -0,0 +1,2023 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * OnePlus / OPPO pogo-pin keyboard dock with touchpad ("Smart Keyboard")
++ *
++ * The dock hangs on three pogo pins: supply, ground and ONE data line. The
++ * tablet's UART receiver listens on that line all the time; the UART
++ * transmitter reaches it through a gate that the host opens for the length
++ * of a frame (tx-enable GPIO). The host therefore hears its own frames,
++ * which is used to check that a frame went out undamaged. An unpowered or
++ * sleeping dock holds the line low, an empty connector lets it float high:
++ * the same line, read as a GPIO, is the attach detection and the wake-up
++ * source.
++ *
++ * Frames (921600 baud, 8N1):
++ *
++ *   8 x 0x55, 0xf1, source, destination, command, length, data[length],
++ *   CRC16 high, CRC16 low, 0xfe, 4 x 0xaa
++ *
++ * with the CRC (polynomial 0x8005, initial value 0xc596, MSB first) over
++ * everything from 0xf1 to the end of the data. The dock sends a "sync"
++ * frame every 100 ms while it is awake, HID boot keyboard reports, 16 bit
++ * codes for the media keys and touchpad reports that look like those of a
++ * precision touchpad (confidence, tip, contact id, x, y per finger, then
++ * the contact count and the button state).
++ *
++ * The protocol, the timing and the attach / detach handling follow the
++ * vendor driver (oplus_bsp_pogo_keyboard); firmware update is not
++ * implemented.
++ */
++
++#include <linux/atomic.h>
++#include <linux/completion.h>
++#include <linux/debugfs.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/interrupt.h>
++#include <linux/jiffies.h>
++#include <linux/kernel.h>
++#include <linux/ktime.h>
++#include <linux/leds.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/pm_wakeup.h>
++#include <linux/property.h>
++#include <linux/regulator/consumer.h>
++#include <linux/sched/clock.h>
++#include <linux/seq_file.h>
++#include <linux/serdev.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/string.h>
++#include <linux/uaccess.h>
++#include <linux/unaligned.h>
++#include <linux/workqueue.h>
++
++/* PROTO-BEGIN: the wire format, free of kernel services (also built by the self-test on the PC) */
++
++#define POGO_HEAD_SYNC		0x55
++#define POGO_TAIL_SYNC		0xaa
++#define POGO_START		0xf1
++#define POGO_START_REPEAT	0xf2
++#define POGO_END		0xfe
++#define POGO_ADDR_KEYBOARD	0xa1
++#define POGO_ADDR_HOST		0xa2
++
++#define POGO_HEAD_SYNC_LEN	8
++#define POGO_HEAD_SYNC_MIN	4	/* a receiver wants at least four of them */
++#define POGO_TAIL_SYNC_LEN	4
++#define POGO_FRAME_MAX		256
++#define POGO_OVERHEAD		20	/* everything in a frame except the data */
++#define POGO_DATA_MAX		(POGO_FRAME_MAX - POGO_OVERHEAD)
++
++#define POGO_CRC_POLY		0x8005
++#define POGO_CRC_INIT		0xc596
++
++/* commands; a reply carries the command + 1 */
++#define POGO_CMD_KEYS		0x01
++#define POGO_CMD_MEDIA_KEYS	0x02
++#define POGO_CMD_TOUCHPAD	0x03
++#define POGO_CMD_PARAM_SET	0x20
++#define POGO_CMD_SYNC		0x2f	/* dock -> host: hello / heartbeat */
++#define POGO_CMD_PASSTHROUGH	0x38
++#define POGO_CMD_GENERAL	0x3a
++
++/* sub-commands (first data byte) */
++#define POGO_PARAM_LEDS		0x0d
++#define POGO_PASS_VERSION	0x08
++#define POGO_GEN_SLEEP		0x02
++#define POGO_GEN_SERIAL		0x0b
++#define POGO_GEN_TP_STATUS	0x0c
++#define POGO_GEN_BATTERY	0x0e
++#define POGO_GEN_BRIGHTNESS	0x1c
++
++/* first data byte of a sync frame */
++#define POGO_SYNC_HELLO		0x01
++#define POGO_SYNC_HEARTBEAT	0x05
++
++#define POGO_MAX_CONTACTS	5
++
++enum { POGO_RX_NONE, POGO_RX_FRAME, POGO_RX_NOISE };
++enum { POGO_FRAME_OK, POGO_FRAME_SHORT, POGO_FRAME_ADDRESS, POGO_FRAME_CRC };
++
++struct pogo_rx {
++	u8 buf[POGO_FRAME_MAX];	/* from the start byte to the first two tail bytes */
++	unsigned int len;
++	unsigned int sync;
++	bool active;
++};
++
++struct pogo_contact {
++	u8 id;
++	bool tip;
++	bool confidence;
++	u16 x;
++	u16 y;
++};
++
++struct pogo_touch {
++	unsigned int count;
++	struct pogo_contact contact[POGO_MAX_CONTACTS];
++	bool left;
++	bool right;
++	bool has_force;
++	u16 force;
++};
++
++static u16 pogo_crc16(const u8 *buf, unsigned int len)
++{
++	u16 crc = POGO_CRC_INIT;
++	unsigned int i;
++	u8 data;
++
++	while (len--) {
++		data = *buf++;
++		for (i = 0; i < 8; i++) {
++			if (((crc & 0x8000) >> 8) ^ (data & 0x80))
++				crc = (crc << 1) ^ POGO_CRC_POLY;
++			else
++				crc <<= 1;
++			data <<= 1;
++		}
++	}
++
++	return crc;
++}
++
++/* A host frame for @cmd with @n data bytes; returns its length or -1. */
++static int pogo_build_frame(u8 *out, u8 cmd, const u8 *data, unsigned int n)
++{
++	unsigned int i, pos = 0;
++	u16 crc;
++
++	if (n > POGO_DATA_MAX)
++		return -1;
++
++	for (i = 0; i < POGO_HEAD_SYNC_LEN; i++)
++		out[pos++] = POGO_HEAD_SYNC;
++	out[pos++] = POGO_START;
++	out[pos++] = POGO_ADDR_HOST;
++	out[pos++] = POGO_ADDR_KEYBOARD;
++	out[pos++] = cmd;
++	out[pos++] = n;
++	for (i = 0; i < n; i++)
++		out[pos++] = data[i];
++	crc = pogo_crc16(&out[POGO_HEAD_SYNC_LEN], n + 5);
++	out[pos++] = crc >> 8;
++	out[pos++] = crc & 0xff;
++	out[pos++] = POGO_END;
++	for (i = 0; i < POGO_TAIL_SYNC_LEN; i++)
++		out[pos++] = POGO_TAIL_SYNC;
++
++	return pos;
++}
++
++/*
++ * Feed one received byte. POGO_RX_FRAME: rx->buf[0 .. rx->len) holds a
++ * frame from its start byte to the first two tail bytes; the caller has to
++ * use it before the next byte goes in.
++ */
++static int pogo_rx_byte(struct pogo_rx *rx, u8 c)
++{
++	if (c == POGO_HEAD_SYNC) {
++		rx->sync++;
++	} else if (c == POGO_START || c == POGO_START_REPEAT) {
++		if (rx->sync >= POGO_HEAD_SYNC_MIN) {
++			rx->len = 0;
++			rx->active = true;
++		}
++		rx->sync = 0;
++	} else {
++		rx->sync = 0;
++	}
++
++	if (!rx->active)
++		return (c == POGO_HEAD_SYNC || c == POGO_TAIL_SYNC) ? POGO_RX_NONE : POGO_RX_NOISE;
++
++	rx->buf[rx->len++] = c;
++	if (rx->len >= 3 && rx->buf[rx->len - 1] == POGO_TAIL_SYNC &&
++	    rx->buf[rx->len - 2] == POGO_TAIL_SYNC && rx->buf[rx->len - 3] == POGO_END) {
++		rx->active = false;
++		return POGO_RX_FRAME;
++	}
++	if (rx->len >= POGO_FRAME_MAX) {
++		rx->active = false;
++		rx->len = 0;
++	}
++
++	return POGO_RX_NONE;
++}
++
++/* @f: start, source, destination, command, length, data, CRC, end, 2 x tail */
++static int pogo_frame_check(const u8 *f, unsigned int len)
++{
++	u16 crc;
++
++	if (len < 10)
++		return POGO_FRAME_SHORT;
++	if (f[2] != POGO_ADDR_KEYBOARD && f[2] != POGO_ADDR_HOST)
++		return POGO_FRAME_ADDRESS;
++	crc = f[len - 5] << 8 | f[len - 4];
++	if (crc != pogo_crc16(f, len - 5))
++		return POGO_FRAME_CRC;
++
++	return POGO_FRAME_OK;
++}
++
++/*
++ * Touchpad data: five bytes per contact (flags, x low, x high, y low,
++ * y high; flags: bit 0 confidence, bit 1 tip, bits 4-7 contact id), an
++ * optional force value (two bytes), the contact count, the buttons.
++ */
++static int pogo_parse_touch(const u8 *data, unsigned int n, struct pogo_touch *t)
++{
++	unsigned int i, count;
++	const u8 *p;
++
++	if (n < 2)
++		return -1;
++	count = data[n - 2];
++	if (count > POGO_MAX_CONTACTS || 5 * count + 2 > n)
++		return -1;
++
++	t->count = count;
++	t->left = data[n - 1] & 0x01;
++	t->right = (data[n - 1] >> 1) & 0x01;
++	t->has_force = n == 5 * count + 4;
++	t->force = t->has_force ? data[n - 4] | data[n - 3] << 8 : 0;
++	for (i = 0; i < count; i++) {
++		p = data + 5 * i;
++		t->contact[i].id = p[0] >> 4;
++		t->contact[i].tip = (p[0] >> 1) & 0x01;
++		t->contact[i].confidence = p[0] & 0x01;
++		t->contact[i].x = p[1] | p[2] << 8;
++		t->contact[i].y = p[3] | p[4] << 8;
++	}
++
++	return 0;
++}
++
++/* PROTO-END */
++
++/* attach detection and heartbeat supervision, in the vendor driver's steps */
++#define POGO_DEBOUNCE_MS		20
++#define POGO_DEBOUNCE_PRESENT		6	/* line low for 6 x 20 ms: switch the supply on */
++#define POGO_DEBOUNCE_ABSENT		3
++#define POGO_HEARTBEAT_MS		50
++#define POGO_SILENT_MAX			10	/* 0.5 s without a frame: the dock is gone */
++#define POGO_GRACE_TICKS		40	/* but not in the first 2 s after power-on / attach */
++#define POGO_OFF_CHECK_MS		50
++#define POGO_OFF_PRESENT		12	/* off and line low for 0.6 s: power on again */
++#define POGO_OFF_ABSENT			20	/* off and line high for 1 s: connector empty */
++#define POGO_POWER_CYCLES_MAX		20
++#define POGO_POWER_ON_SETTLE_MS		10
++#define POGO_SLEEP_IRQ_DELAY_MS		30
++#define POGO_WAKE_HOLD_MS		500
++
++#define POGO_ECHO_TIMEOUT_MS		50
++#define POGO_REPLY_TIMEOUT_MS		100
++#define POGO_RETRY_DELAY_MS		50
++#define POGO_XFER_TRIES			3
++
++#define POGO_BRIGHTNESS_MAX		100
++#define POGO_VERSION_MAX		30
++
++#define POGO_TRACE_LEN			1024
++#define POGO_TRACE_DATA			46
++#define POGO_RAW_LEN			48
++
++static unsigned int tx_setup_us = 450;
++module_param(tx_setup_us, uint, 0644);
++MODULE_PARM_DESC(tx_setup_us, "Time between opening the transmit gate and the first bit (us)");
++
++static unsigned int tx_hold_us = 300;
++module_param(tx_hold_us, uint, 0644);
++MODULE_PARM_DESC(tx_hold_us, "Time the transmit gate stays open after the last bit (us)");
++
++static unsigned int tx_start_us = 200;
++module_param(tx_start_us, uint, 0644);
++MODULE_PARM_DESC(tx_start_us, "Allowance for the UART to start a frame (us)");
++
++static bool echo_check = true;
++module_param(echo_check, bool, 0644);
++MODULE_PARM_DESC(echo_check, "Treat a frame whose echo is not heard as not sent");
++
++enum pogo_state {
++	POGO_ABSENT,		/* supply off, waiting for the line to go low */
++	POGO_DEBOUNCE,		/* line went low: is it a dock? */
++	POGO_POWERED,		/* supply on, waiting for the first frame */
++	POGO_CONNECTED,		/* input devices registered */
++	POGO_OFF_CHECK,		/* supply off after silence: gone or only stuck? */
++};
++
++static const char * const pogo_state_names[] = {
++	[POGO_ABSENT] = "absent",
++	[POGO_DEBOUNCE] = "debounce",
++	[POGO_POWERED] = "powered",
++	[POGO_CONNECTED] = "connected",
++	[POGO_OFF_CHECK] = "off-check",
++};
++
++enum { POGO_TRACE_RX, POGO_TRACE_TX, POGO_TRACE_ECHO, POGO_TRACE_BAD };
++
++struct pogo_trace {
++	u64 ns;
++	u8 kind;
++	u8 len;
++	u8 data[POGO_TRACE_DATA];
++};
++
++struct pogo_stats {
++	unsigned long rx_bytes;
++	unsigned long rx_noise;
++	unsigned long rx_frames;
++	unsigned long rx_bad;
++	unsigned long rx_unknown;
++	unsigned long echo_ok;
++	unsigned long echo_foreign;
++	unsigned long echo_missing;
++	unsigned long tx_frames;
++	unsigned long tx_errors;
++	unsigned long reply_timeouts;
++	unsigned long key_reports;
++	unsigned long media_reports;
++	unsigned long touch_reports;
++	unsigned long touch_bad;
++	unsigned long touch_hb_release;
++	unsigned long sync_hello;
++	unsigned long sync_heartbeat;
++	unsigned long sync_other;
++	unsigned long unknown_keys;
++	unsigned long rollover;
++	unsigned long power_on;
++	unsigned long connects;
++	unsigned long irqs;
++	unsigned long irqs_stale;
++};
++
++struct pogo_variant {
++	unsigned int baud;
++	unsigned int tp_x_max;
++	unsigned int tp_y_max;
++	unsigned int tp_x_res;		/* units per mm */
++	unsigned int tp_y_res;
++	u16 id_vendor;
++	u16 id_product;
++	u16 id_version;
++	const char * const *names;	/* by the brand byte of the hello frame, 1 based */
++	unsigned int num_names;
++};
++
++#define POGO_KEYMAP_KBD		256
++#define POGO_KEYMAP_MEDIA	22
++#define POGO_KEYMAP_SIZE	(POGO_KEYMAP_KBD + POGO_KEYMAP_MEDIA)
++
++struct pogo {
++	struct device *dev;
++	struct serdev_device *serdev;
++	const struct pogo_variant *variant;
++	struct gpio_desc *detect_gpio;
++	struct gpio_desc *tx_en_gpio;
++	struct regulator *vcc;
++	int irq;
++
++	/* attach state machine */
++	struct mutex state_lock;
++	enum pogo_state state;
++	bool irq_on;
++	bool vcc_on;
++	bool suspended;
++	bool need_wake;
++	unsigned int present_cnt;
++	unsigned int absent_cnt;
++	unsigned int power_cycles;
++	unsigned int uptime_ticks;
++	atomic_t silent_ticks;
++	struct delayed_work poll_work;
++
++	/* transmit side: one exchange at a time */
++	struct mutex tx_lock;
++	bool port_open;
++	unsigned int baud;
++
++	/* shared with the receive path */
++	spinlock_t rx_lock;
++	bool tx_pending;
++	bool want_reply;
++	u8 tx_cmd;
++	u16 tx_crc;
++	u8 reply[POGO_FRAME_MAX];
++	unsigned int reply_len;
++	struct completion echo_done;
++	struct completion reply_done;
++	bool hello_seen;
++	u8 brand;
++	u8 tp_disabled;
++	u8 dock_leds;
++	u8 battery_level;
++	u8 battery_state;
++	bool battery_seen;
++	bool raw_on;
++	u8 raw[POGO_RAW_LEN];
++	unsigned int raw_len;
++
++	struct pogo_rx rx;
++	u8 last_sync[32];
++	unsigned int last_sync_len;
++
++	/* input devices; the receive path reports under this lock */
++	struct mutex input_lock;
++	struct input_dev *kbd;
++	struct input_dev *tp;
++	u16 keymap[POGO_KEYMAP_SIZE];
++	u8 old_keys[8];
++	u16 old_media[2];
++	unsigned long touch_active;
++	bool button_down;
++	struct work_struct led_work;
++	atomic_t resend_backlight;
++	unsigned long hello_jiffies;
++	unsigned long led_jiffies;
++
++	struct led_classdev backlight;
++	bool backlight_registered;
++	bool backlight_set;
++	u8 backlight_level;
++
++	char version[POGO_VERSION_MAX + 1];
++	char name[64];
++	char tp_name[80];
++
++	struct pogo_stats stats;
++	struct mutex trace_lock;
++	struct pogo_trace *trace;
++	unsigned int trace_head;
++	unsigned int trace_count;
++	struct dentry *debugfs;
++	char selftest[240];
++	char send_result[240];
++};
++
++/*
++ * HID keyboard page to Linux key codes: hid_keyboard[] of hid-input.c, which is
++ * also what the vendor driver uses.
++ */
++static const u8 pogo_usage_keycode[POGO_KEYMAP_KBD] = {
++	  0,  0,  0,  0, 30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38,
++	 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44,  2,  3,
++	  4,  5,  6,  7,  8,  9, 10, 11, 28,  1, 14, 15, 57, 12, 13, 26,
++	 27, 43, 43, 39, 40, 41, 51, 52, 53, 58, 59, 60, 61, 62, 63, 64,
++	 65, 66, 67, 68, 87, 88, 99, 70, 119, 110, 102, 104, 111, 107, 109, 106,
++	105, 108, 103, 69, 98, 55, 74, 78, 96, 79, 80, 81, 75, 76, 77, 71,
++	 72, 73, 82, 83, 86, 127, 116, 117, 183, 184, 185, 186, 187, 188, 189, 190,
++	191, 192, 193, 194, 134, 138, 130, 132, 128, 129, 131, 137, 133, 135, 136, 113,
++	115, 114, 240, 240, 240, 121, 240, 89, 93, 124, 92, 94, 95, 240, 240, 240,
++	122, 123, 90, 91, 85, 240, 240, 240, 240, 240, 240, 240, 111, 240, 240, 240,
++	240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240,
++	240, 240, 240, 240, 240, 240, 179, 180, 240, 240, 240, 240, 240, 240, 240, 240,
++	240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240,
++	240, 240, 240, 240, 240, 240, 240, 240, 111, 240, 240, 240, 240, 240, 240, 240,
++	 29, 42, 56, 125, 97, 54, 100, 126, 164, 166, 165, 163, 161, 115, 114, 113,
++	150, 158, 159, 128, 136, 177, 178, 176, 142, 152, 173, 140, 240, 240, 240, 240
++};
++
++/* the 16 bit codes of the "media key" frames */
++static const struct {
++	u16 code;
++	u16 key;
++} pogo_media_keys[POGO_KEYMAP_MEDIA] = {
++	{ 0x0070, KEY_BRIGHTNESSDOWN },
++	{ 0x006f, KEY_BRIGHTNESSUP },
++	{ 0x00e2, KEY_MUTE },
++	{ 0x00ea, KEY_VOLUMEDOWN },
++	{ 0x00e9, KEY_VOLUMEUP },
++	{ 0x0224, KEY_BACK },
++	{ 0x038e, KEY_SCREENLOCK },		/* vendor: lock the screen */
++	{ 0x0390, KEY_KBD_LAYOUT_NEXT },	/* vendor: switch the input language */
++	{ 0x0391, KEY_MICMUTE },		/* vendor: microphone off */
++	{ 0x0392, KEY_TOUCHPAD_TOGGLE },	/* vendor: touchpad off */
++	{ 0x0393, KEY_SEARCH },			/* vendor: global search */
++	{ 0x0394, KEY_FULL_SCREEN },		/* vendor: full screen */
++	{ 0x0395, KEY_PROG1 },			/* vendor: split screen */
++	{ 0x0397, KEY_PROG2 },			/* vendor: device interconnection */
++	{ 0x0398, KEY_PROG3 },			/* vendor: user defined 1 */
++	{ 0x0399, KEY_PROG4 },			/* vendor: user defined 2 */
++	{ 0x00cd, KEY_PLAYPAUSE },
++	{ 0x00b5, KEY_NEXTSONG },
++	{ 0x00b6, KEY_PREVIOUSSONG },
++	{ 0x0244, KEY_APPSELECT },
++	{ 0x02fa, KEY_ASSISTANT },		/* vendor: AI key */
++	{ 0x01d0, KEY_FN },
++};
++
++/* ------------------------------------------------------------------ trace */
++
++static void pogo_trace_add(struct pogo *pogo, u8 kind, const u8 *data, unsigned int len)
++{
++	struct pogo_trace *e;
++
++	mutex_lock(&pogo->trace_lock);
++	e = &pogo->trace[pogo->trace_head];
++	e->ns = local_clock();
++	e->kind = kind;
++	e->len = min_t(unsigned int, len, POGO_TRACE_DATA);
++	memcpy(e->data, data, e->len);
++	pogo->trace_head = (pogo->trace_head + 1) % POGO_TRACE_LEN;
++	if (pogo->trace_count < POGO_TRACE_LEN)
++		pogo->trace_count++;
++	mutex_unlock(&pogo->trace_lock);
++}
++
++/* ------------------------------------------------------------ input side */
++
++static void pogo_key(struct pogo *pogo, unsigned int scancode, int value)
++{
++	unsigned int code = pogo->keymap[scancode];
++
++	if (!code)
++		return;
++	if (code == KEY_UNKNOWN)
++		pogo->stats.unknown_keys++;
++	input_event(pogo->kbd, EV_MSC, MSC_SCAN, scancode);
++	input_report_key(pogo->kbd, code, value);
++}
++
++/* @rep: a HID boot keyboard report: modifiers, reserved, six usages */
++static void pogo_report_keys(struct pogo *pogo, const u8 *rep)
++{
++	unsigned int i;
++
++	if (!pogo->kbd)
++		return;
++
++	/* 0x01 in the slots: too many keys are down, the report says nothing */
++	if (rep[2] == 0x01) {
++		pogo->stats.rollover++;
++		return;
++	}
++
++	for (i = 0; i < 8; i++) {
++		if ((rep[0] ^ pogo->old_keys[0]) & BIT(i))
++			pogo_key(pogo, 224 + i, (rep[0] >> i) & 1);
++	}
++
++	for (i = 2; i < 8; i++) {
++		if (pogo->old_keys[i] > 3 && !memchr(rep + 2, pogo->old_keys[i], 6))
++			pogo_key(pogo, pogo->old_keys[i], 0);
++		if (rep[i] > 3 && !memchr(pogo->old_keys + 2, rep[i], 6))
++			pogo_key(pogo, rep[i], 1);
++	}
++
++	input_sync(pogo->kbd);
++	memcpy(pogo->old_keys, rep, 8);
++}
++
++static void pogo_media_key(struct pogo *pogo, u16 code, int value)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(pogo_media_keys); i++) {
++		if (pogo_media_keys[i].code == code) {
++			pogo_key(pogo, POGO_KEYMAP_KBD + i, value);
++			return;
++		}
++	}
++
++	pogo->stats.unknown_keys++;
++	dev_dbg(pogo->dev, "unknown media key code %#06x %s\n", code, value ? "down" : "up");
++}
++
++/* @data: up to two 16 bit codes, little endian, 0 = no key */
++static void pogo_report_media(struct pogo *pogo, const u8 *data, unsigned int n)
++{
++	u16 now[2] = { 0, 0 };
++	unsigned int i;
++	u16 old;
++
++	if (!pogo->kbd)
++		return;
++
++	if (n >= 2)
++		now[0] = get_unaligned_le16(data);
++	if (n >= 4)
++		now[1] = get_unaligned_le16(data + 2);
++
++	for (i = 0; i < 2; i++) {
++		old = pogo->old_media[i];
++		if (old && old != now[0] && old != now[1])
++			pogo_media_key(pogo, old, 0);
++	}
++	for (i = 0; i < 2; i++) {
++		if (now[i] && now[i] != pogo->old_media[0] && now[i] != pogo->old_media[1])
++			pogo_media_key(pogo, now[i], 1);
++	}
++
++	input_sync(pogo->kbd);
++	pogo->old_media[0] = now[0];
++	pogo->old_media[1] = now[1];
++}
++
++static void pogo_touch_release_all(struct pogo *pogo)
++{
++	unsigned int i;
++
++	if (!pogo->tp || (!pogo->touch_active && !pogo->button_down))
++		return;
++
++	for (i = 0; i < POGO_MAX_CONTACTS; i++) {
++		input_mt_slot(pogo->tp, i);
++		input_mt_report_slot_inactive(pogo->tp);
++	}
++	input_report_key(pogo->tp, BTN_LEFT, 0);
++	input_mt_sync_frame(pogo->tp);
++	input_sync(pogo->tp);
++	pogo->touch_active = 0;
++	pogo->button_down = false;
++}
++
++static void pogo_report_touch(struct pogo *pogo, const u8 *data, unsigned int n)
++{
++	const struct pogo_variant *v = pogo->variant;
++	const struct pogo_contact *c;
++	struct pogo_touch t;
++	unsigned int i;
++
++	if (!pogo->tp)
++		return;
++
++	if (pogo_parse_touch(data, n, &t)) {
++		pogo->stats.touch_bad++;
++		return;
++	}
++
++	for (i = 0; i < t.count; i++) {
++		c = &t.contact[i];
++		if (c->id >= POGO_MAX_CONTACTS)
++			continue;
++
++		input_mt_slot(pogo->tp, c->id);
++		if (c->tip) {
++			input_mt_report_slot_state(pogo->tp,
++						   c->confidence ? MT_TOOL_FINGER : MT_TOOL_PALM,
++						   true);
++			input_report_abs(pogo->tp, ABS_MT_POSITION_X,
++					 min_t(unsigned int, c->x, v->tp_x_max));
++			input_report_abs(pogo->tp, ABS_MT_POSITION_Y,
++					 min_t(unsigned int, c->y, v->tp_y_max));
++			__set_bit(c->id, &pogo->touch_active);
++		} else {
++			input_mt_report_slot_inactive(pogo->tp);
++			__clear_bit(c->id, &pogo->touch_active);
++		}
++	}
++
++	/*
++	 * The pad has no button of its own: the dock decides from the force
++	 * on the pad what is a click and says "left" or "right". For a
++	 * button pad both are a press; user space picks the button from the
++	 * fingers' position and number.
++	 */
++	pogo->button_down = t.left || t.right;
++	input_report_key(pogo->tp, BTN_LEFT, pogo->button_down);
++	input_mt_sync_frame(pogo->tp);
++	input_sync(pogo->tp);
++}
++
++static void pogo_release_inputs(struct pogo *pogo)
++{
++	static const u8 no_keys[8];
++
++	mutex_lock(&pogo->input_lock);
++	if (pogo->kbd) {
++		pogo_report_keys(pogo, no_keys);
++		pogo_report_media(pogo, no_keys, 4);
++	}
++	pogo_touch_release_all(pogo);
++	mutex_unlock(&pogo->input_lock);
++}
++
++static int pogo_kbd_event(struct input_dev *input, unsigned int type, unsigned int code, int value)
++{
++	struct pogo *pogo = input_get_drvdata(input);
++
++	if (type != EV_LED)
++		return -1;
++
++	schedule_work(&pogo->led_work);
++
++	return 0;
++}
++
++/* ------------------------------------------------------------- transmit */
++
++static int pogo_xfer_once(struct pogo *pogo, u8 cmd, const u8 *data, unsigned int n,
++			  bool need_echo, bool want_reply)
++{
++	u8 frame[POGO_FRAME_MAX];
++	unsigned long wire_us;
++	int len, ret;
++
++	lockdep_assert_held(&pogo->tx_lock);
++
++	if (!pogo->port_open)
++		return -ENODEV;
++
++	len = pogo_build_frame(frame, cmd, data, n);
++	if (len < 0)
++		return -EINVAL;
++
++	spin_lock_irq(&pogo->rx_lock);
++	pogo->tx_cmd = cmd;
++	pogo->tx_crc = frame[len - 7] << 8 | frame[len - 6];
++	pogo->tx_pending = true;
++	pogo->want_reply = want_reply;
++	pogo->reply_len = 0;
++	reinit_completion(&pogo->echo_done);
++	reinit_completion(&pogo->reply_done);
++	spin_unlock_irq(&pogo->rx_lock);
++
++	pogo_trace_add(pogo, POGO_TRACE_TX, &frame[POGO_HEAD_SYNC_LEN],
++		       len - POGO_HEAD_SYNC_LEN - POGO_TAIL_SYNC_LEN);
++
++	/* ten bit times per byte */
++	wire_us = DIV_ROUND_UP(len * 10 * 1000000UL, pogo->baud);
++
++	gpiod_set_value_cansleep(pogo->tx_en_gpio, 1);
++	usleep_range(tx_setup_us, tx_setup_us + 50);
++	ret = serdev_device_write_buf(pogo->serdev, frame, len);
++	if (ret == len)
++		usleep_range(wire_us + tx_start_us + tx_hold_us,
++			     wire_us + tx_start_us + tx_hold_us + 100);
++	gpiod_set_value_cansleep(pogo->tx_en_gpio, 0);
++
++	pogo->stats.tx_frames++;
++	if (ret != len) {
++		serdev_device_write_flush(pogo->serdev);
++		pogo->stats.tx_errors++;
++		ret = ret < 0 ? ret : -EIO;
++		goto out;
++	}
++
++	ret = 0;
++	if (!wait_for_completion_timeout(&pogo->echo_done,
++					 msecs_to_jiffies(POGO_ECHO_TIMEOUT_MS))) {
++		pogo->stats.echo_missing++;
++		if (need_echo) {
++			ret = -ECOMM;
++			goto out;
++		}
++	}
++
++	if (want_reply && !wait_for_completion_timeout(&pogo->reply_done,
++						       msecs_to_jiffies(POGO_REPLY_TIMEOUT_MS))) {
++		pogo->stats.reply_timeouts++;
++		ret = -ETIMEDOUT;
++	}
++
++out:
++	spin_lock_irq(&pogo->rx_lock);
++	pogo->tx_pending = false;
++	pogo->want_reply = false;
++	spin_unlock_irq(&pogo->rx_lock);
++
++	return ret;
++}
++
++/*
++ * Send a command, up to three times. With @reply the dock's answer (its
++ * command byte, length byte and data) is copied there; @reply_len takes
++ * its size.
++ */
++static int pogo_xfer(struct pogo *pogo, u8 cmd, const u8 *data, unsigned int n,
++		     u8 *reply, unsigned int *reply_len)
++{
++	int ret = -ENODEV, try;
++
++	mutex_lock(&pogo->tx_lock);
++	for (try = 0; try < POGO_XFER_TRIES; try++) {
++		ret = pogo_xfer_once(pogo, cmd, data, n, echo_check, reply != NULL);
++		if (!ret || ret == -ENODEV || ret == -EINVAL)
++			break;
++		msleep(POGO_RETRY_DELAY_MS);
++	}
++	if (!ret && reply) {
++		spin_lock_irq(&pogo->rx_lock);
++		memcpy(reply, pogo->reply, pogo->reply_len);
++		*reply_len = pogo->reply_len;
++		spin_unlock_irq(&pogo->rx_lock);
++	}
++	mutex_unlock(&pogo->tx_lock);
++
++	return ret;
++}
++
++static int pogo_send_leds(struct pogo *pogo, bool caps, bool mute)
++{
++	/* capital lock, unused, mute, microphone mute */
++	u8 data[] = { POGO_PARAM_LEDS, 0x04, caps, 0x00, mute, 0x00 };
++
++	return pogo_xfer(pogo, POGO_CMD_PARAM_SET, data, sizeof(data), NULL, NULL);
++}
++
++static int pogo_send_backlight(struct pogo *pogo)
++{
++	u8 data[] = { POGO_GEN_BRIGHTNESS, 0x01, pogo->backlight_level };
++	u8 reply[POGO_FRAME_MAX];
++	unsigned int len;
++	int ret;
++
++	ret = pogo_xfer(pogo, POGO_CMD_GENERAL, data, sizeof(data), reply, &len);
++	if (ret)
++		return ret;
++	if (len < 5 || reply[2] != POGO_GEN_BRIGHTNESS || reply[4] != data[2])
++		return -EPROTO;
++
++	return 0;
++}
++
++/* Tell the dock that the host goes to sleep (or is back). */
++static int pogo_send_sleep(struct pogo *pogo, bool sleep)
++{
++	u8 data[] = { POGO_GEN_SLEEP, 0x01, sleep };
++	u8 reply[POGO_FRAME_MAX];
++	unsigned int len;
++	int ret;
++
++	ret = pogo_xfer(pogo, POGO_CMD_GENERAL, data, sizeof(data), reply, &len);
++	if (ret)
++		return ret;
++	/* answer: sub-command, 2, state, 1 = done */
++	if (len < 6 || reply[2] != POGO_GEN_SLEEP || reply[4] != data[2] || reply[5] != 0x01)
++		return -EPROTO;
++
++	return 0;
++}
++
++static void pogo_read_version(struct pogo *pogo)
++{
++	static const u8 data[] = { POGO_PASS_VERSION, 0x01, 0x01 };
++	u8 reply[POGO_FRAME_MAX];
++	unsigned int len, n, i;
++	int ret;
++
++	ret = pogo_xfer(pogo, POGO_CMD_PASSTHROUGH, data, sizeof(data), reply, &len);
++	if (ret) {
++		dev_warn(pogo->dev, "no answer to the version question: %d\n", ret);
++		return;
++	}
++
++	/* answer: sub-command, length of the text + 1, text */
++	if (len < 5 || reply[2] != POGO_PASS_VERSION || reply[3] < 2)
++		return;
++	n = min3((unsigned int)reply[3] - 1, len - 4, (unsigned int)POGO_VERSION_MAX);
++	for (i = 0; i < n; i++)
++		pogo->version[i] = (reply[4 + i] >= 0x20 && reply[4 + i] < 0x7f) ? reply[4 + i] : '?';
++	pogo->version[n] = 0;
++}
++
++static void pogo_led_work(struct work_struct *work)
++{
++	struct pogo *pogo = container_of(work, struct pogo, led_work);
++	bool caps, mute;
++
++	mutex_lock(&pogo->input_lock);
++	if (!pogo->kbd) {
++		mutex_unlock(&pogo->input_lock);
++		return;
++	}
++	caps = test_bit(LED_CAPSL, pogo->kbd->led);
++	mute = test_bit(LED_MUTE, pogo->kbd->led);
++	mutex_unlock(&pogo->input_lock);
++
++	pogo_send_leds(pogo, caps, mute);
++
++	if (atomic_xchg(&pogo->resend_backlight, 0) && pogo->backlight_set)
++		pogo_send_backlight(pogo);
++}
++
++static int pogo_backlight_set(struct led_classdev *cdev, enum led_brightness value)
++{
++	struct pogo *pogo = container_of(cdev, struct pogo, backlight);
++
++	pogo->backlight_level = value;
++	pogo->backlight_set = true;
++
++	return pogo_send_backlight(pogo);
++}
++
++/* -------------------------------------------------------------- receive */
++
++static void pogo_handle_sync(struct pogo *pogo, const u8 *data, unsigned int n)
++{
++	bool hello = n >= 3 && data[0] == POGO_SYNC_HELLO && data[1] == 0x02;
++	bool beat = n >= 4 && data[0] == POGO_SYNC_HEARTBEAT && data[1] == 0x02;
++	bool resend = false;
++
++	spin_lock_irq(&pogo->rx_lock);
++	if (hello) {
++		pogo->stats.sync_hello++;
++		pogo->brand = data[2];
++		if (n > 9)
++			pogo->tp_disabled = data[9];
++	} else if (beat) {
++		pogo->stats.sync_heartbeat++;
++		pogo->dock_leds = data[2];
++		pogo->brand = data[3];
++		if (n > 10)
++			pogo->tp_disabled = data[10];
++	} else {
++		pogo->stats.sync_other++;
++	}
++	pogo->hello_seen = true;
++	spin_unlock_irq(&pogo->rx_lock);
++
++	if (READ_ONCE(pogo->state) == POGO_POWERED) {
++		/* the first frame after power-on: register the input devices */
++		mod_delayed_work(system_percpu_wq, &pogo->poll_work, 0);
++		return;
++	}
++
++	mutex_lock(&pogo->input_lock);
++	if (pogo->kbd) {
++		if (hello) {
++			/* the dock started again without the host noticing: tell it everything again */
++			if (time_after(jiffies, pogo->hello_jiffies + HZ)) {
++				pogo->hello_jiffies = jiffies;
++				atomic_set(&pogo->resend_backlight, 1);
++				resend = true;
++			}
++		} else if (beat) {
++			/* a heartbeat only comes from an idle dock: nothing touches the pad */
++			if (pogo->touch_active || pogo->button_down) {
++				pogo->stats.touch_hb_release++;
++				pogo_touch_release_all(pogo);
++			}
++			/* the dock shows another capital lock state than the host has: say it again, once a second */
++			if ((data[2] & 0x01) != test_bit(LED_CAPSL, pogo->kbd->led) &&
++			    time_after(jiffies, pogo->led_jiffies + HZ)) {
++				pogo->led_jiffies = jiffies;
++				resend = true;
++			}
++		}
++	}
++	mutex_unlock(&pogo->input_lock);
++
++	if (resend)
++		schedule_work(&pogo->led_work);
++}
++
++/* @f: a checked frame; f[1] source, f[3] command, f[4] length, f[5] data */
++static void pogo_handle_frame(struct pogo *pogo, const u8 *f, unsigned int len)
++{
++	unsigned int n = min_t(unsigned int, f[4], len - 10);
++	u16 crc = f[len - 5] << 8 | f[len - 4];
++	const u8 *data = &f[5];
++	bool is_reply = false;
++	u8 cmd = f[3];
++
++	if (f[1] == POGO_ADDR_HOST) {
++		/* the host's own frame, heard on the shared line */
++		spin_lock_irq(&pogo->rx_lock);
++		if (pogo->tx_pending && cmd == pogo->tx_cmd && crc == pogo->tx_crc) {
++			pogo->stats.echo_ok++;
++			complete(&pogo->echo_done);
++		} else {
++			pogo->stats.echo_foreign++;
++		}
++		spin_unlock_irq(&pogo->rx_lock);
++		pogo_trace_add(pogo, POGO_TRACE_ECHO, f, len - 2);
++		return;
++	}
++
++	atomic_set(&pogo->silent_ticks, 0);
++	pogo->stats.rx_frames++;
++
++	/* idle heartbeats would push everything else out of the trace */
++	if (cmd != POGO_CMD_SYNC || len - 2 != pogo->last_sync_len ||
++	    memcmp(pogo->last_sync, f, len - 2)) {
++		pogo_trace_add(pogo, POGO_TRACE_RX, f, len - 2);
++		if (cmd == POGO_CMD_SYNC && len - 2 <= sizeof(pogo->last_sync)) {
++			memcpy(pogo->last_sync, f, len - 2);
++			pogo->last_sync_len = len - 2;
++		}
++	}
++
++	spin_lock_irq(&pogo->rx_lock);
++	if (pogo->want_reply && cmd == pogo->tx_cmd + 1) {
++		memcpy(pogo->reply, &f[3], n + 2);
++		pogo->reply_len = n + 2;
++		pogo->want_reply = false;
++		complete(&pogo->reply_done);
++		is_reply = true;
++	}
++	spin_unlock_irq(&pogo->rx_lock);
++
++	switch (cmd) {
++	case POGO_CMD_KEYS:
++		if (n < 8)
++			break;
++		pogo->stats.key_reports++;
++		mutex_lock(&pogo->input_lock);
++		pogo_report_keys(pogo, data);
++		mutex_unlock(&pogo->input_lock);
++		break;
++	case POGO_CMD_MEDIA_KEYS:
++		pogo->stats.media_reports++;
++		mutex_lock(&pogo->input_lock);
++		pogo_report_media(pogo, data, n);
++		mutex_unlock(&pogo->input_lock);
++		break;
++	case POGO_CMD_TOUCHPAD:
++		pogo->stats.touch_reports++;
++		mutex_lock(&pogo->input_lock);
++		pogo_report_touch(pogo, data, n);
++		mutex_unlock(&pogo->input_lock);
++		break;
++	case POGO_CMD_SYNC:
++		pogo_handle_sync(pogo, data, n);
++		break;
++	case POGO_CMD_GENERAL + 1:
++		spin_lock_irq(&pogo->rx_lock);
++		if (n >= 4 && data[0] == POGO_GEN_BATTERY) {
++			pogo->battery_level = data[2];
++			pogo->battery_state = data[3];
++			pogo->battery_seen = true;
++		} else if (n >= 3 && data[0] == POGO_GEN_TP_STATUS) {
++			pogo->tp_disabled = data[2];
++		}
++		spin_unlock_irq(&pogo->rx_lock);
++		break;
++	default:
++		if (!is_reply)
++			pogo->stats.rx_unknown++;
++		break;
++	}
++}
++
++static size_t pogo_receive_buf(struct serdev_device *serdev, const u8 *buf, size_t count)
++{
++	struct pogo *pogo = serdev_device_get_drvdata(serdev);
++	size_t i;
++
++	pogo->stats.rx_bytes += count;
++
++	if (pogo->raw_on) {
++		spin_lock_irq(&pogo->rx_lock);
++		for (i = 0; i < count && pogo->raw_len < POGO_RAW_LEN; i++)
++			pogo->raw[pogo->raw_len++] = buf[i];
++		spin_unlock_irq(&pogo->rx_lock);
++	}
++
++	for (i = 0; i < count; i++) {
++		switch (pogo_rx_byte(&pogo->rx, buf[i])) {
++		case POGO_RX_FRAME:
++			if (pogo_frame_check(pogo->rx.buf, pogo->rx.len) == POGO_FRAME_OK) {
++				pogo_handle_frame(pogo, pogo->rx.buf, pogo->rx.len);
++			} else {
++				pogo->stats.rx_bad++;
++				pogo_trace_add(pogo, POGO_TRACE_BAD, pogo->rx.buf, pogo->rx.len);
++			}
++			pogo->rx.len = 0;
++			break;
++		case POGO_RX_NOISE:
++			pogo->stats.rx_noise++;
++			break;
++		default:
++			break;
++		}
++	}
++
++	return count;
++}
++
++static const struct serdev_device_ops pogo_serdev_ops = {
++	.receive_buf = pogo_receive_buf,
++	.write_wakeup = serdev_device_write_wakeup,
++};
++
++/* --------------------------------------------------------- input devices */
++
++static const char *pogo_brand_name(struct pogo *pogo)
++{
++	const struct pogo_variant *v = pogo->variant;
++	u8 brand;
++
++	spin_lock_irq(&pogo->rx_lock);
++	brand = pogo->brand;
++	spin_unlock_irq(&pogo->rx_lock);
++
++	if (brand >= 1 && brand <= v->num_names)
++		return v->names[brand - 1];
++
++	return "OnePlus pogo keyboard";
++}
++
++static int pogo_register_inputs(struct pogo *pogo)
++{
++	const struct pogo_variant *v = pogo->variant;
++	struct input_dev *kbd, *tp;
++	unsigned int i;
++	int ret;
++
++	strscpy(pogo->name, pogo_brand_name(pogo), sizeof(pogo->name));
++	snprintf(pogo->tp_name, sizeof(pogo->tp_name), "%s Touchpad", pogo->name);
++
++	kbd = input_allocate_device();
++	tp = input_allocate_device();
++	if (!kbd || !tp) {
++		ret = -ENOMEM;
++		goto err_free;
++	}
++
++	for (i = 0; i < POGO_KEYMAP_KBD; i++)
++		pogo->keymap[i] = pogo_usage_keycode[i];
++	for (i = 0; i < POGO_KEYMAP_MEDIA; i++)
++		pogo->keymap[POGO_KEYMAP_KBD + i] = pogo_media_keys[i].key;
++
++	kbd->name = pogo->name;
++	kbd->phys = "pogo/input0";
++	kbd->id.bustype = BUS_HOST;
++	kbd->id.vendor = v->id_vendor;
++	kbd->id.product = v->id_product;
++	kbd->id.version = v->id_version;
++	kbd->dev.parent = pogo->dev;
++	kbd->keycode = pogo->keymap;
++	kbd->keycodesize = sizeof(pogo->keymap[0]);
++	kbd->keycodemax = POGO_KEYMAP_SIZE;
++	kbd->event = pogo_kbd_event;
++	input_set_drvdata(kbd, pogo);
++	__set_bit(EV_REP, kbd->evbit);
++	input_set_capability(kbd, EV_MSC, MSC_SCAN);
++	input_set_capability(kbd, EV_LED, LED_CAPSL);
++	input_set_capability(kbd, EV_LED, LED_MUTE);
++	for (i = 0; i < POGO_KEYMAP_SIZE; i++) {
++		if (pogo->keymap[i])
++			input_set_capability(kbd, EV_KEY, pogo->keymap[i]);
++	}
++
++	tp->name = pogo->tp_name;
++	tp->phys = "pogo/input1";
++	tp->id = kbd->id;
++	tp->dev.parent = pogo->dev;
++	input_set_drvdata(tp, pogo);
++	input_set_capability(tp, EV_KEY, BTN_LEFT);
++	__set_bit(INPUT_PROP_BUTTONPAD, tp->propbit);
++	input_set_abs_params(tp, ABS_MT_POSITION_X, 0, v->tp_x_max, 0, 0);
++	input_set_abs_params(tp, ABS_MT_POSITION_Y, 0, v->tp_y_max, 0, 0);
++	input_abs_set_res(tp, ABS_MT_POSITION_X, v->tp_x_res);
++	input_abs_set_res(tp, ABS_MT_POSITION_Y, v->tp_y_res);
++	input_set_abs_params(tp, ABS_MT_TOOL_TYPE, 0, MT_TOOL_MAX, 0, 0);
++	ret = input_mt_init_slots(tp, POGO_MAX_CONTACTS, INPUT_MT_POINTER);
++	if (ret)
++		goto err_free;
++
++	memset(pogo->old_keys, 0, sizeof(pogo->old_keys));
++	memset(pogo->old_media, 0, sizeof(pogo->old_media));
++	pogo->touch_active = 0;
++	pogo->button_down = false;
++
++	ret = input_register_device(kbd);
++	if (ret)
++		goto err_free;
++
++	ret = input_register_device(tp);
++	if (ret) {
++		input_unregister_device(kbd);
++		input_free_device(tp);
++		return ret;
++	}
++
++	mutex_lock(&pogo->input_lock);
++	pogo->kbd = kbd;
++	pogo->tp = tp;
++	pogo->hello_jiffies = jiffies;
++	pogo->led_jiffies = jiffies;
++	mutex_unlock(&pogo->input_lock);
++
++	return 0;
++
++err_free:
++	input_free_device(kbd);
++	input_free_device(tp);
++	return ret;
++}
++
++static void pogo_unregister_inputs(struct pogo *pogo)
++{
++	struct input_dev *kbd, *tp;
++
++	mutex_lock(&pogo->input_lock);
++	kbd = pogo->kbd;
++	tp = pogo->tp;
++	pogo->kbd = NULL;
++	pogo->tp = NULL;
++	mutex_unlock(&pogo->input_lock);
++
++	if (tp)
++		input_unregister_device(tp);
++	if (kbd)
++		input_unregister_device(kbd);
++}
++
++/* -------------------------------------------------- attach state machine */
++
++static bool pogo_line_low(struct pogo *pogo)
++{
++	/* the detect GPIO is active low: 1 = the line is held low = a dock is there */
++	return gpiod_get_value_cansleep(pogo->detect_gpio) > 0;
++}
++
++static void pogo_irq_enable(struct pogo *pogo)
++{
++	if (!pogo->irq_on) {
++		enable_irq(pogo->irq);
++		pogo->irq_on = true;
++	}
++}
++
++static void pogo_irq_disable(struct pogo *pogo)
++{
++	if (pogo->irq_on) {
++		disable_irq(pogo->irq);
++		pogo->irq_on = false;
++	}
++}
++
++static int pogo_port_open(struct pogo *pogo)
++{
++	int ret;
++
++	ret = serdev_device_open(pogo->serdev);
++	if (ret)
++		return ret;
++
++	pogo->baud = serdev_device_set_baudrate(pogo->serdev, pogo->variant->baud);
++	serdev_device_set_flow_control(pogo->serdev, false);
++	serdev_device_set_parity(pogo->serdev, SERDEV_PARITY_NONE);
++	if (!pogo->baud)
++		pogo->baud = pogo->variant->baud;
++
++	memset(&pogo->rx, 0, sizeof(pogo->rx));
++	pogo->last_sync_len = 0;
++
++	mutex_lock(&pogo->tx_lock);
++	pogo->port_open = true;
++	mutex_unlock(&pogo->tx_lock);
++
++	return 0;
++}
++
++static void pogo_port_close(struct pogo *pogo)
++{
++	mutex_lock(&pogo->tx_lock);
++	if (!pogo->port_open) {
++		mutex_unlock(&pogo->tx_lock);
++		return;
++	}
++	pogo->port_open = false;
++	gpiod_set_value_cansleep(pogo->tx_en_gpio, 0);
++	mutex_unlock(&pogo->tx_lock);
++
++	serdev_device_close(pogo->serdev);
++}
++
++static void pogo_go_absent(struct pogo *pogo, bool recheck)
++{
++	pogo->state = POGO_ABSENT;
++	pogo_irq_enable(pogo);
++	/* an edge between the last sample and the enable would be lost */
++	if (recheck && pogo_line_low(pogo))
++		mod_delayed_work(system_percpu_wq, &pogo->poll_work, 0);
++}
++
++static int pogo_power_on(struct pogo *pogo)
++{
++	int ret;
++
++	ret = pogo_port_open(pogo);
++	if (ret) {
++		dev_err(pogo->dev, "cannot open the UART: %d\n", ret);
++		return ret;
++	}
++
++	spin_lock_irq(&pogo->rx_lock);
++	pogo->hello_seen = false;
++	spin_unlock_irq(&pogo->rx_lock);
++
++	msleep(POGO_POWER_ON_SETTLE_MS);
++
++	ret = regulator_enable(pogo->vcc);
++	if (ret) {
++		dev_err(pogo->dev, "cannot switch the dock's supply on: %d\n", ret);
++		pogo_port_close(pogo);
++		return ret;
++	}
++
++	pogo->vcc_on = true;
++	pogo->uptime_ticks = 0;
++	atomic_set(&pogo->silent_ticks, 0);
++	pogo->state = POGO_POWERED;
++	pogo->stats.power_on++;
++	dev_dbg(pogo->dev, "line low: supply on, waiting for the dock\n");
++
++	return 0;
++}
++
++/* Supply off; the next state is left to the caller. */
++static void pogo_power_off(struct pogo *pogo)
++{
++	if (pogo->backlight_registered) {
++		led_classdev_unregister(&pogo->backlight);
++		pogo->backlight_registered = false;
++	}
++	if (pogo->kbd) {
++		pogo_unregister_inputs(pogo);
++		dev_info(pogo->dev, "keyboard detached\n");
++	}
++	if (pogo->vcc_on) {
++		regulator_disable(pogo->vcc);
++		pogo->vcc_on = false;
++	}
++	pogo_port_close(pogo);
++}
++
++static void pogo_connect(struct pogo *pogo)
++{
++	int ret;
++
++	ret = pogo_register_inputs(pogo);
++	if (ret) {
++		dev_err_ratelimited(pogo->dev, "cannot register the input devices: %d\n", ret);
++		return;
++	}
++
++	pogo->state = POGO_CONNECTED;
++	pogo->power_cycles = 0;
++	pogo->uptime_ticks = 0;
++	pogo->stats.connects++;
++
++	pogo->version[0] = 0;
++	pogo_read_version(pogo);
++	dev_info(pogo->dev, "keyboard attached: %s, firmware %s\n", pogo->name,
++		 pogo->version[0] ? pogo->version : "unknown");
++
++	memset(&pogo->backlight, 0, sizeof(pogo->backlight));
++	pogo->backlight.name = "oneplus_pogo::kbd_backlight";
++	pogo->backlight.max_brightness = POGO_BRIGHTNESS_MAX;
++	pogo->backlight.brightness = pogo->backlight_level;
++	pogo->backlight.brightness_set_blocking = pogo_backlight_set;
++	pogo->backlight.flags = LED_RETAIN_AT_SHUTDOWN;
++	if (!led_classdev_register(pogo->dev, &pogo->backlight))
++		pogo->backlight_registered = true;
++
++	/* what the user had set before the dock was taken off */
++	if (pogo->backlight_set)
++		pogo_send_backlight(pogo);
++	schedule_work(&pogo->led_work);
++}
++
++static void pogo_poll_work(struct work_struct *work)
++{
++	struct pogo *pogo = container_of(to_delayed_work(work), struct pogo, poll_work);
++	unsigned int next = 0;
++	bool low, hello;
++
++	mutex_lock(&pogo->state_lock);
++	if (pogo->suspended)
++		goto out;
++
++	low = pogo_line_low(pogo);
++
++	switch (pogo->state) {
++	case POGO_ABSENT:
++		if (!low)
++			break;
++		pogo_irq_disable(pogo);
++		pogo->state = POGO_DEBOUNCE;
++		pogo->present_cnt = 1;
++		pogo->absent_cnt = 0;
++		next = POGO_DEBOUNCE_MS;
++		break;
++
++	case POGO_DEBOUNCE:
++		if (low) {
++			pogo->present_cnt++;
++			pogo->absent_cnt = 0;
++		} else {
++			pogo->absent_cnt++;
++			pogo->present_cnt = 0;
++		}
++		if (pogo->absent_cnt >= POGO_DEBOUNCE_ABSENT) {
++			pogo_go_absent(pogo, true);
++			break;
++		}
++		if (pogo->present_cnt < POGO_DEBOUNCE_PRESENT) {
++			next = POGO_DEBOUNCE_MS;
++			break;
++		}
++		if (pogo->power_cycles >= POGO_POWER_CYCLES_MAX) {
++			/* something holds the line low, but it is not a dock that talks */
++			dev_warn(pogo->dev, "line low but no dock answered %u times: supply stays off\n",
++				 pogo->power_cycles);
++			pogo->power_cycles = 0;
++			pogo_go_absent(pogo, false);
++			break;
++		}
++		if (pogo_power_on(pogo)) {
++			pogo_go_absent(pogo, false);
++			break;
++		}
++		next = POGO_HEARTBEAT_MS;
++		break;
++
++	case POGO_POWERED:
++	case POGO_CONNECTED:
++		if (pogo->state == POGO_POWERED) {
++			spin_lock_irq(&pogo->rx_lock);
++			hello = pogo->hello_seen;
++			spin_unlock_irq(&pogo->rx_lock);
++			if (hello)
++				pogo_connect(pogo);
++		} else if (pogo->need_wake) {
++			/* back from system sleep: a dock that left meanwhile shows as silence below */
++			pogo->need_wake = false;
++			pogo_send_sleep(pogo, false);
++			schedule_work(&pogo->led_work);
++		}
++		if (atomic_read(&pogo->silent_ticks) >= POGO_SILENT_MAX &&
++		    pogo->uptime_ticks >= POGO_GRACE_TICKS) {
++			pogo_power_off(pogo);
++			if (pogo->power_cycles < POGO_POWER_CYCLES_MAX) {
++				pogo->power_cycles++;
++				pogo->state = POGO_OFF_CHECK;
++				pogo->present_cnt = 0;
++				pogo->absent_cnt = 0;
++				next = POGO_OFF_CHECK_MS;
++			} else {
++				dev_warn(pogo->dev, "no dock answered in %u tries: waiting for the line to change\n",
++					 pogo->power_cycles);
++				pogo_go_absent(pogo, false);
++			}
++			break;
++		}
++		atomic_inc(&pogo->silent_ticks);
++		if (pogo->uptime_ticks < POGO_GRACE_TICKS)
++			pogo->uptime_ticks++;
++		next = POGO_HEARTBEAT_MS;
++		break;
++
++	case POGO_OFF_CHECK:
++		if (low) {
++			pogo->present_cnt++;
++			pogo->absent_cnt = 0;
++		} else {
++			pogo->absent_cnt++;
++			pogo->present_cnt = 0;
++		}
++		if (pogo->absent_cnt >= POGO_OFF_ABSENT) {
++			pogo_go_absent(pogo, true);
++			break;
++		}
++		if (pogo->present_cnt >= POGO_OFF_PRESENT) {
++			if (pogo_power_on(pogo)) {
++				pogo_go_absent(pogo, false);
++				break;
++			}
++			next = POGO_HEARTBEAT_MS;
++			break;
++		}
++		next = POGO_OFF_CHECK_MS;
++		break;
++	}
++
++	if (next)
++		schedule_delayed_work(&pogo->poll_work, msecs_to_jiffies(next));
++out:
++	mutex_unlock(&pogo->state_lock);
++}
++
++/*
++ * An edge on the data line. While the line carries frames the interrupt is
++ * disabled, but those edges are latched and replayed when it is enabled
++ * again; so the line's level decides, not the edge. With no dock known only
++ * a low line means something (attached); with a sleeping dock only a high
++ * one (a key press, or the dock taken off).
++ */
++static irqreturn_t pogo_detect_irq(int irq, void *data)
++{
++	struct pogo *pogo = data;
++	bool want_low = READ_ONCE(pogo->state) != POGO_CONNECTED;
++
++	pogo->stats.irqs++;
++	if (pogo_line_low(pogo) != want_low) {
++		pogo->stats.irqs_stale++;
++		return IRQ_HANDLED;
++	}
++	pm_wakeup_event(pogo->dev, POGO_WAKE_HOLD_MS);
++	mod_delayed_work(system_percpu_wq, &pogo->poll_work, 0);
++
++	return IRQ_HANDLED;
++}
++
++/* --------------------------------------------------------------- debugfs */
++
++static int pogo_status_show(struct seq_file *s, void *unused)
++{
++	struct pogo *pogo = s->private;
++	struct pogo_stats *st = &pogo->stats;
++
++	mutex_lock(&pogo->state_lock);
++	seq_printf(s, "state: %s\n", pogo_state_names[pogo->state]);
++	seq_printf(s, "line: %s\n", pogo_line_low(pogo) ?
++		   "low (a dock holds it)" : "high (idle or empty connector)");
++	seq_printf(s, "supply: %s\n", pogo->vcc_on ? "on" : "off");
++	seq_printf(s, "tx-gate: %d\n", gpiod_get_value_cansleep(pogo->tx_en_gpio));
++	seq_printf(s, "uart: %s, %u baud\n", pogo->port_open ? "open" : "closed", pogo->baud);
++	seq_printf(s, "detect-irq: %s\n", pogo->irq_on ? "armed" : "off");
++	seq_printf(s, "wakeup: %s\n", device_may_wakeup(pogo->dev) ? "enabled" : "disabled");
++	seq_printf(s, "power-cycles: %u\n", pogo->power_cycles);
++	if (pogo->state == POGO_CONNECTED) {
++		seq_printf(s, "keyboard: %s\n", pogo->name);
++		seq_printf(s, "brand: %u\n", pogo->brand);
++		seq_printf(s, "firmware: %s\n", pogo->version[0] ? pogo->version : "unknown");
++		seq_printf(s, "touchpad-disabled: %u\n", pogo->tp_disabled);
++		seq_printf(s, "dock-leds: %#04x\n", pogo->dock_leds);
++		if (pogo->battery_seen)
++			seq_printf(s, "battery: level %u, state %#04x\n",
++				   pogo->battery_level, pogo->battery_state);
++	} else {
++		seq_puts(s, "keyboard: none\n");
++	}
++	seq_printf(s, "backlight: %u%s\n", pogo->backlight_level,
++		   pogo->backlight_set ? "" : " (never set)");
++	mutex_unlock(&pogo->state_lock);
++
++	seq_printf(s, "timing: tx_setup_us %u tx_start_us %u tx_hold_us %u echo_check %d\n",
++		   tx_setup_us, tx_start_us, tx_hold_us, echo_check);
++	seq_printf(s, "rx: bytes %lu noise %lu frames %lu bad %lu unknown %lu\n",
++		   st->rx_bytes, st->rx_noise, st->rx_frames, st->rx_bad, st->rx_unknown);
++	seq_printf(s, "tx: frames %lu errors %lu echo-ok %lu echo-foreign %lu echo-missing %lu reply-timeouts %lu\n",
++		   st->tx_frames, st->tx_errors, st->echo_ok, st->echo_foreign,
++		   st->echo_missing, st->reply_timeouts);
++	seq_printf(s, "reports: keys %lu media %lu touch %lu touch-bad %lu touch-released-by-heartbeat %lu unknown-keys %lu rollover %lu\n",
++		   st->key_reports, st->media_reports, st->touch_reports, st->touch_bad,
++		   st->touch_hb_release, st->unknown_keys, st->rollover);
++	seq_printf(s, "sync: hello %lu heartbeat %lu other %lu\n",
++		   st->sync_hello, st->sync_heartbeat, st->sync_other);
++	seq_printf(s, "events: detect-irqs %lu stale %lu power-on %lu connects %lu\n",
++		   st->irqs, st->irqs_stale, st->power_on, st->connects);
++	seq_printf(s, "selftest: %s\n", pogo->selftest[0] ? pogo->selftest : "not run");
++
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(pogo_status);
++
++/*
++ * The frames as they went over the line, start byte to end byte. The
++ * dock's Bluetooth address (sync frames) and serial number are private:
++ * they and the CRC that depends on them are printed as "xx".
++ */
++static int pogo_trace_show(struct seq_file *s, void *unused)
++{
++	static const char * const kind[] = { "rx", "tx", "echo", "bad" };
++	struct pogo *pogo = s->private;
++	unsigned int i, j, idx, from, to;
++	struct pogo_trace *e;
++	bool crc;
++
++	mutex_lock(&pogo->trace_lock);
++	for (i = 0; i < pogo->trace_count; i++) {
++		idx = (pogo->trace_head + POGO_TRACE_LEN - pogo->trace_count + i) % POGO_TRACE_LEN;
++		e = &pogo->trace[idx];
++		from = 0;
++		to = 0;
++		if (e->kind != POGO_TRACE_BAD && e->len > 7) {
++			if (e->data[3] == POGO_CMD_SYNC && e->data[5] == POGO_SYNC_HELLO) {
++				from = 8;
++				to = 14;
++			} else if (e->data[3] == POGO_CMD_SYNC && e->data[5] == POGO_SYNC_HEARTBEAT) {
++				from = 9;
++				to = 15;
++			} else if (e->data[3] == POGO_CMD_GENERAL + 1 &&
++				   e->data[5] == POGO_GEN_SERIAL) {
++				from = 7;
++				to = e->len;
++			}
++		}
++		seq_printf(s, "%6llu.%06llu %-4s", e->ns / NSEC_PER_SEC,
++			   (e->ns % NSEC_PER_SEC) / NSEC_PER_USEC, kind[e->kind & 3]);
++		for (j = 0; j < e->len; j++) {
++			/* the two bytes before the end byte of a whole frame are its CRC */
++			crc = from && j + 3 >= e->len && j + 1 < e->len;
++			if ((from && j >= from && j < to) || crc)
++				seq_puts(s, " xx");
++			else
++				seq_printf(s, " %02x", e->data[j]);
++		}
++		seq_putc(s, '\n');
++	}
++	mutex_unlock(&pogo->trace_lock);
++
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(pogo_trace);
++
++/*
++ * Without a dock: open the UART, send one frame through the gate and
++ * listen for it. Proves the UART, the transmit gate and the receive path
++ * up to the connector. The supply stays off.
++ */
++static ssize_t pogo_selftest_write(struct file *file, const char __user *ubuf,
++				   size_t count, loff_t *ppos)
++{
++	static const u8 data[] = { POGO_PASS_VERSION, 0x01, 0x01 };
++	struct pogo *pogo = file->private_data;
++	unsigned int n, i;
++	unsigned long bytes;
++	ktime_t t0;
++	s64 us;
++	int ret;
++
++	mutex_lock(&pogo->state_lock);
++	if (pogo->state != POGO_ABSENT || pogo->suspended || pogo_line_low(pogo)) {
++		snprintf(pogo->selftest, sizeof(pogo->selftest),
++			 "skipped: state %s, line %s (it needs an empty connector)",
++			 pogo_state_names[pogo->state], pogo_line_low(pogo) ? "low" : "high");
++		goto out;
++	}
++
++	pogo_irq_disable(pogo);
++	ret = pogo_port_open(pogo);
++	if (ret) {
++		snprintf(pogo->selftest, sizeof(pogo->selftest), "FAIL: UART open %d", ret);
++		pogo_irq_enable(pogo);
++		goto out;
++	}
++
++	spin_lock_irq(&pogo->rx_lock);
++	pogo->raw_len = 0;
++	pogo->raw_on = true;
++	spin_unlock_irq(&pogo->rx_lock);
++	bytes = pogo->stats.rx_bytes;
++
++	t0 = ktime_get();
++	mutex_lock(&pogo->tx_lock);
++	ret = pogo_xfer_once(pogo, POGO_CMD_PASSTHROUGH, data, sizeof(data), true, false);
++	mutex_unlock(&pogo->tx_lock);
++	us = ktime_us_delta(ktime_get(), t0);
++	if (ret)
++		msleep(20);
++
++	spin_lock_irq(&pogo->rx_lock);
++	pogo->raw_on = false;
++	spin_unlock_irq(&pogo->rx_lock);
++	bytes = pogo->stats.rx_bytes - bytes;
++
++	if (!ret) {
++		snprintf(pogo->selftest, sizeof(pogo->selftest),
++			 "PASS: echo of a %zu byte frame heard %lld us after the gate opened (%lu bytes received, %u baud)",
++			 sizeof(data) + POGO_OVERHEAD, us, bytes, pogo->baud);
++	} else {
++		n = scnprintf(pogo->selftest, sizeof(pogo->selftest),
++			      "FAIL: %d, %lu bytes received (%u baud):", ret, bytes, pogo->baud);
++		for (i = 0; i < pogo->raw_len && n + 4 < sizeof(pogo->selftest); i++)
++			n += scnprintf(pogo->selftest + n, sizeof(pogo->selftest) - n,
++				       " %02x", pogo->raw[i]);
++	}
++
++	pogo_port_close(pogo);
++	pogo_go_absent(pogo, true);
++out:
++	dev_info(pogo->dev, "self-test: %s\n", pogo->selftest);
++	mutex_unlock(&pogo->state_lock);
++
++	return count;
++}
++
++static const struct file_operations pogo_selftest_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.write = pogo_selftest_write,
++	.llseek = noop_llseek,
++};
++
++/* what a tester may send through debugfs: nothing that writes the dock's firmware or asks for its serial number */
++static bool pogo_send_allowed(u8 cmd, const u8 *data, unsigned int n)
++{
++	static const u8 general[] = {
++		0x02, 0x03, 0x08, 0x09, 0x0c, 0x0e, 0x11, 0x17, 0x19, 0x1b, 0x1c, 0x21,
++	};
++
++	if (!n)
++		return false;
++
++	switch (cmd) {
++	case POGO_CMD_PARAM_SET:
++		return data[0] == POGO_PARAM_LEDS;
++	case POGO_CMD_PASSTHROUGH:
++		return data[0] == POGO_PASS_VERSION;
++	case POGO_CMD_GENERAL:
++		return memchr(general, data[0], sizeof(general)) != NULL;
++	default:
++		return false;
++	}
++}
++
++/* "3a 1c 01 32": the command, then the data bytes (the length byte is added here) */
++static ssize_t pogo_send_write(struct file *file, const char __user *ubuf,
++			       size_t count, loff_t *ppos)
++{
++	struct seq_file *s = file->private_data;
++	struct pogo *pogo = s->private;
++	u8 msg[64], reply[POGO_FRAME_MAX];
++	unsigned int n = 0, len = 0, i, pos;
++	char buf[200], *p = buf, *tok;
++	int ret;
++
++	if (count >= sizeof(buf))
++		return -EINVAL;
++	if (copy_from_user(buf, ubuf, count))
++		return -EFAULT;
++	buf[count] = 0;
++
++	while ((tok = strsep(&p, " \t\n")) != NULL) {
++		if (!*tok)
++			continue;
++		if (n >= sizeof(msg) || kstrtou8(tok, 16, &msg[n]))
++			return -EINVAL;
++		n++;
++	}
++	if (n < 2 || !pogo_send_allowed(msg[0], &msg[1], n - 1))
++		return -EPERM;
++
++	ret = pogo_xfer(pogo, msg[0], &msg[1], n - 1, reply, &len);
++	pos = scnprintf(pogo->send_result, sizeof(pogo->send_result), "%d:", ret);
++	for (i = 0; !ret && i < len && pos + 4 < sizeof(pogo->send_result); i++)
++		pos += scnprintf(pogo->send_result + pos, sizeof(pogo->send_result) - pos,
++				 " %02x", reply[i]);
++
++	return count;
++}
++
++static int pogo_send_show(struct seq_file *s, void *unused)
++{
++	struct pogo *pogo = s->private;
++
++	seq_printf(s, "%s\n", pogo->send_result);
++
++	return 0;
++}
++
++static int pogo_send_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, pogo_send_show, inode->i_private);
++}
++
++static const struct file_operations pogo_send_fops = {
++	.owner = THIS_MODULE,
++	.open = pogo_send_open,
++	.read = seq_read,
++	.write = pogo_send_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static void pogo_debugfs_remove(void *data)
++{
++	debugfs_remove_recursive(data);
++}
++
++/* ------------------------------------------------------------ PM, probe */
++
++static int pogo_suspend(struct device *dev)
++{
++	struct pogo *pogo = dev_get_drvdata(dev);
++	int ret;
++
++	mutex_lock(&pogo->state_lock);
++	pogo->suspended = true;
++	mutex_unlock(&pogo->state_lock);
++
++	cancel_delayed_work_sync(&pogo->poll_work);
++	cancel_work_sync(&pogo->led_work);
++
++	mutex_lock(&pogo->state_lock);
++	switch (pogo->state) {
++	case POGO_CONNECTED:
++		pogo_release_inputs(pogo);
++		ret = pogo_send_sleep(pogo, true);
++		if (ret)
++			dev_warn(dev, "the dock did not confirm the sleep request: %d\n", ret);
++		/*
++		 * A sleeping dock holds the line low. A key press or taking
++		 * the dock off lets it rise: that is the wake-up event.
++		 */
++		msleep(POGO_SLEEP_IRQ_DELAY_MS);
++		irq_set_irq_type(pogo->irq, IRQ_TYPE_EDGE_RISING);
++		pogo_irq_enable(pogo);
++		break;
++	case POGO_ABSENT:
++		break;
++	default:
++		pogo_power_off(pogo);
++		pogo->state = POGO_ABSENT;
++		pogo_irq_enable(pogo);
++		break;
++	}
++	if (device_may_wakeup(dev))
++		enable_irq_wake(pogo->irq);
++	mutex_unlock(&pogo->state_lock);
++
++	return 0;
++}
++
++static int pogo_resume(struct device *dev)
++{
++	struct pogo *pogo = dev_get_drvdata(dev);
++
++	mutex_lock(&pogo->state_lock);
++	if (device_may_wakeup(dev))
++		disable_irq_wake(pogo->irq);
++	pogo->suspended = false;
++
++	if (pogo->state == POGO_CONNECTED) {
++		pogo_irq_disable(pogo);
++		irq_set_irq_type(pogo->irq, IRQ_TYPE_EDGE_FALLING);
++		pogo->need_wake = true;
++		pogo->uptime_ticks = 0;
++		atomic_set(&pogo->silent_ticks, 0);
++	}
++	schedule_delayed_work(&pogo->poll_work, 0);
++	mutex_unlock(&pogo->state_lock);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(pogo_pm_ops, pogo_suspend, pogo_resume);
++
++static int pogo_probe(struct serdev_device *serdev)
++{
++	struct device *dev = &serdev->dev;
++	struct pogo *pogo;
++	unsigned int baud;
++	int ret;
++
++	pogo = devm_kzalloc(dev, sizeof(*pogo), GFP_KERNEL);
++	if (!pogo)
++		return -ENOMEM;
++
++	pogo->dev = dev;
++	pogo->serdev = serdev;
++	pogo->variant = device_get_match_data(dev);
++	if (!pogo->variant)
++		return -ENODEV;
++	pogo->baud = pogo->variant->baud;
++
++	ret = devm_mutex_init(dev, &pogo->state_lock);
++	if (ret)
++		return ret;
++	ret = devm_mutex_init(dev, &pogo->tx_lock);
++	if (ret)
++		return ret;
++	ret = devm_mutex_init(dev, &pogo->input_lock);
++	if (ret)
++		return ret;
++	ret = devm_mutex_init(dev, &pogo->trace_lock);
++	if (ret)
++		return ret;
++	spin_lock_init(&pogo->rx_lock);
++	init_completion(&pogo->echo_done);
++	init_completion(&pogo->reply_done);
++	INIT_DELAYED_WORK(&pogo->poll_work, pogo_poll_work);
++	INIT_WORK(&pogo->led_work, pogo_led_work);
++
++	pogo->trace = devm_kcalloc(dev, POGO_TRACE_LEN, sizeof(*pogo->trace), GFP_KERNEL);
++	if (!pogo->trace)
++		return -ENOMEM;
++
++	pogo->detect_gpio = devm_gpiod_get(dev, "detect", GPIOD_IN);
++	if (IS_ERR(pogo->detect_gpio))
++		return dev_err_probe(dev, PTR_ERR(pogo->detect_gpio), "no detect GPIO\n");
++
++	pogo->tx_en_gpio = devm_gpiod_get(dev, "tx-enable", GPIOD_OUT_LOW);
++	if (IS_ERR(pogo->tx_en_gpio))
++		return dev_err_probe(dev, PTR_ERR(pogo->tx_en_gpio), "no tx-enable GPIO\n");
++
++	pogo->vcc = devm_regulator_get(dev, "vcc");
++	if (IS_ERR(pogo->vcc))
++		return dev_err_probe(dev, PTR_ERR(pogo->vcc), "no vcc supply\n");
++
++	pogo->irq = gpiod_to_irq(pogo->detect_gpio);
++	if (pogo->irq < 0)
++		return dev_err_probe(dev, pogo->irq, "no interrupt for the detect GPIO\n");
++
++	serdev_device_set_drvdata(serdev, pogo);
++	serdev_device_set_client_ops(serdev, &pogo_serdev_ops);
++
++	/* the UART stays closed (clocks off) while no dock is there: only see that it works */
++	ret = serdev_device_open(serdev);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot open the UART\n");
++	baud = serdev_device_set_baudrate(serdev, pogo->variant->baud);
++	serdev_device_close(serdev);
++	if (baud != pogo->variant->baud)
++		dev_warn(dev, "the UART gives %u baud instead of %u\n", baud, pogo->variant->baud);
++	if (baud)
++		pogo->baud = baud;
++
++	/* threaded: the handler reads the line, and the GPIO may be one that sleeps */
++	ret = devm_request_threaded_irq(dev, pogo->irq, NULL, pogo_detect_irq,
++					IRQF_TRIGGER_FALLING | IRQF_ONESHOT | IRQF_NO_AUTOEN,
++					"pogo-detect", pogo);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot request the detect interrupt\n");
++
++	if (device_property_read_bool(dev, "wakeup-source")) {
++		ret = devm_device_init_wakeup(dev);
++		if (ret)
++			return ret;
++	}
++
++	pogo->debugfs = debugfs_create_dir("oneplus-pogo", NULL);
++	debugfs_create_file("status", 0400, pogo->debugfs, pogo, &pogo_status_fops);
++	debugfs_create_file("trace", 0400, pogo->debugfs, pogo, &pogo_trace_fops);
++	debugfs_create_file("selftest", 0200, pogo->debugfs, pogo, &pogo_selftest_fops);
++	debugfs_create_file("send", 0600, pogo->debugfs, pogo, &pogo_send_fops);
++	ret = devm_add_action_or_reset(dev, pogo_debugfs_remove, pogo->debugfs);
++	if (ret)
++		return ret;
++
++	dev_info(dev, "UART at %u baud, data line %s\n", baud,
++		 pogo_line_low(pogo) ? "low: a dock is there" : "high: no dock");
++
++	mutex_lock(&pogo->state_lock);
++	pogo_go_absent(pogo, true);
++	mutex_unlock(&pogo->state_lock);
++
++	return 0;
++}
++
++static void pogo_remove(struct serdev_device *serdev)
++{
++	struct pogo *pogo = serdev_device_get_drvdata(serdev);
++
++	mutex_lock(&pogo->state_lock);
++	pogo->suspended = true;		/* no more polling */
++	pogo_irq_disable(pogo);
++	mutex_unlock(&pogo->state_lock);
++
++	cancel_delayed_work_sync(&pogo->poll_work);
++
++	mutex_lock(&pogo->state_lock);
++	pogo_power_off(pogo);
++	pogo->state = POGO_ABSENT;
++	mutex_unlock(&pogo->state_lock);
++
++	cancel_work_sync(&pogo->led_work);
++}
++
++/*
++ * OnePlus Pad 4 ("iceland"); the vendor device tree lists the same dock
++ * under three brand names.
++ */
++static const char * const pogo_iceland_names[] = {
++	"OPPO Pad 5 Pro Smart Keyboard",
++	"OnePlus Pad 3 Pro Smart Keyboard",
++	"OnePlus Pad 4 Smart Keyboard",
++};
++
++static const struct pogo_variant pogo_iceland = {
++	.baud = 921600,
++	.tp_x_max = 2560,
++	.tp_y_max = 1440,
++	.tp_x_res = 24,
++	.tp_y_res = 25,
++	.id_vendor = 0x22d9,
++	.id_product = 0x3869,
++	.id_version = 0x0010,
++	.names = pogo_iceland_names,
++	.num_names = ARRAY_SIZE(pogo_iceland_names),
++};
++
++static const struct of_device_id pogo_of_match[] = {
++	{ .compatible = "oneplus,iceland-pogo-keyboard", .data = &pogo_iceland },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, pogo_of_match);
++
++static struct serdev_device_driver pogo_driver = {
++	.probe = pogo_probe,
++	.remove = pogo_remove,
++	.driver = {
++		.name = "oneplus-pogo-keyboard",
++		.of_match_table = pogo_of_match,
++		.pm = pm_sleep_ptr(&pogo_pm_ops),
++	},
++};
++module_serdev_device_driver(pogo_driver);
++
++MODULE_DESCRIPTION("OnePlus / OPPO pogo-pin keyboard dock");
++MODULE_LICENSE("GPL");
+-- 
+2.43.0
+

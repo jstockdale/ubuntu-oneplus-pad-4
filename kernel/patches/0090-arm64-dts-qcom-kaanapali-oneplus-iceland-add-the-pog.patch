@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mzak <mzak.amin@gmail.com>
+Date: Fri, 2 Oct 2026 11:21:25 +0300
+Subject: [PATCH] arm64: dts: qcom: kaanapali-oneplus-iceland: add the pogo
+ keyboard dock
+
+The keyboard dock hangs on UART 17: TX (GPIO 22) through a gate that
+PMH0110 D GPIO 6 opens, RX (GPIO 23) directly on the pogo data line,
+which is also wired to GPIO 151 for attach detection and wake-up. The
+dock's supply is switched by PMH0110 F GPIO 12. Pins, drive strengths
+and the missing pulls are those of the vendor device tree; the TX pad
+is a plain GPIO while the UART is closed, as there.
+
+The data line must not be pulled inside the SoC: under the vendor
+kernel it reads high with an empty connector (no pull on GPIO 23 and
+GPIO 151), while the pull-downs that the boot loader leaves on those
+pads make it read low. An unpowered dock pulls the line low.
+
+[rebased for the Ubuntu iceland port onto Perpetua b7d639cfb282's
+kaanapali-oneplus-iceland.dts with the local series 0001-0089 applied,
+because two of the Fedora hunks no longer match this board file: here
+`chosen` follows `aliases` (not `battery`) and the SuperVOOC pump IRQ
+states head the &tlmm block, so `serial2 = &uart17;` and the four pogo
+pin states were placed by hand at the same points (after serial1, after
+gpio-reserved-ranges); the 85 added lines are mzak's, unchanged. Exit:
+drop when Perpetua takes the Fedora port's pogo keyboard series (the
+Fedora port's to submit).]
+
+Signed-off-by: mzak <mzak.amin@gmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+Co-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>
+---
+ .../dts/qcom/kaanapali-oneplus-iceland.dts    | 85 +++++++++++++++++++
+ 1 file changed, 85 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+index 0e335e745745..2cf3c5fba072 100644
+--- a/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
++++ b/arch/arm64/boot/dts/qcom/kaanapali-oneplus-iceland.dts
+@@ -43,6 +43,7 @@ / {
+ 	aliases {
+ 		serial0 = &uart7;
+ 		serial1 = &uart18;
++		serial2 = &uart17;
+ 	};
+ 
+ 	chosen {
+@@ -320,6 +321,18 @@ platform {
+ 		};
+ 	};
+ 
++	pogo_vcc: pogo-vcc-regulator {
++		compatible = "regulator-fixed";
++
++		regulator-name = "pogo_vcc";
++
++		gpio = <&pmh0110_f_e0_gpios 12 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++
++		pinctrl-0 = <&pogo_vcc_en_default>;
++		pinctrl-names = "default";
++	};
++
+ 	vph_pwr: vph-pwr-regulator {
+ 		compatible = "regulator-fixed";
+ 
+@@ -1329,6 +1342,16 @@ bt_default: bt-default-state {
+ };
+ 
+ &pmh0110_d_e0_gpios {
++	/* stock uart_tx_disable: the gate between the UART's TX and the pogo data line, closed */
++	pogo_tx_en_default: pogo-tx-en-default-state {
++		pins = "gpio6";
++		function = "normal";
++		power-source = <0>;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_LOW>;
++		bias-disable;
++		output-low;
++	};
++
+ 	fte_mout_1p2_active: fte_mout_1p2_active {
+ 		pins = "gpio7";
+ 		function = "paired";
+@@ -1363,6 +1386,16 @@ fte_sin_1p8_active: fte_sin_1p8_active {
+ };
+ 
+ &pmh0110_f_e0_gpios {
++	/* stock pogo_power_disable: the keyboard dock's supply switch, off */
++	pogo_vcc_en_default: pogo-vcc-en-default-state {
++		pins = "gpio12";
++		function = "normal";
++		power-source = <0>;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_MED>;
++		bias-disable;
++		output-low;
++	};
++
+ 	sde_disp0_rst_1p2_active: sde-disp0-rst-1p2-active-state {
+ 		pins = "gpio9";
+ 		function = "paired";
+@@ -1582,6 +1615,36 @@ wcd_tx: codec@0,3 {
+ &tlmm {
+ 	gpio-reserved-ranges = <36 4>;
+ 
++	/* the pogo data line as a GPIO: low = a dock is attached and unpowered or asleep (stock uart_wake_gpio) */
++	pogo_detect_default: pogo-detect-default-state {
++		pins = "gpio151";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	/* stock qupv3_se17_2uart_tx_active / uart_rx_set / qupv3_se17_2uart_tx_default */
++	pogo_uart_tx_active: pogo-uart-tx-active-state {
++		pins = "gpio22";
++		function = "qup3_se4";
++		drive-strength = <8>;
++		bias-disable;
++	};
++
++	pogo_uart_rx: pogo-uart-rx-state {
++		pins = "gpio23";
++		function = "qup3_se4";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	pogo_uart_tx_idle: pogo-uart-tx-idle-state {
++		pins = "gpio22";
++		function = "gpio";
++		drive-strength = <8>;
++		bias-disable;
++	};
++
+ 	cp_main_irq_default: cp-main-irq-state {
+ 		pins = "gpio0";
+ 		function = "gpio";
+@@ -1716,6 +1779,28 @@ &uart7 {
+ 	status = "okay";
+ };
+ 
++&uart17 {
++	/* the keyboard dock's single data line: TX through a gate, RX direct; no flow control pins */
++	pinctrl-0 = <&pogo_uart_tx_active>, <&pogo_uart_rx>;
++	pinctrl-1 = <&pogo_uart_tx_idle>, <&pogo_uart_rx>;
++	pinctrl-names = "default", "sleep";
++
++	status = "okay";
++
++	keyboard {
++		compatible = "oneplus,iceland-pogo-keyboard";
++
++		detect-gpios = <&tlmm 151 GPIO_ACTIVE_LOW>;
++		tx-enable-gpios = <&pmh0110_d_e0_gpios 6 GPIO_ACTIVE_HIGH>;
++		vcc-supply = <&pogo_vcc>;
++
++		pinctrl-0 = <&pogo_detect_default>, <&pogo_tx_en_default>;
++		pinctrl-names = "default";
++
++		wakeup-source;
++	};
++};
++
+ &uart18 {
+ 	status = "okay";
+ 

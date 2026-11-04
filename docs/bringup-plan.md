@@ -410,6 +410,39 @@ decoded shell model cannot run yet.
    SW_HEADPHONE_INSERT=1 and an MBHC plug line on insertion; then a
    Headphones UCM device from the wcd939x sequences alsa-ucm-conf already
    ships; if detection never fires, obtain Fedora's q90w2 headset fixes.
+K — pogo keyboard (the OnePlus Pad 4 Smart Keyboard, arrived 2026-11-04;
+   host side done the same day: patches 0087–0090 = the Fedora port's
+   0094–0097 with the board nodes re-diffed onto our dts, and
+   CONFIG_KEYBOARD_ONEPLUS_POGO=m in kernel/config/config-pogo-keyboard.fragment;
+   one kernel rung). The dock is one data line on three pogo pins: UART17
+   (QUP3 SE4 at 0x1990000, TLMM 22 TX / 23 RX, 921600 baud), the TX gate on
+   PMH0110 D GPIO 6, the dock supply on PMH0110 F GPIO 12, attach detect and
+   wake on TLMM 151. The driver's author had no dock (self-test only: the
+   empty connector reads high, a frame sent through the gate is heard back),
+   so every step past the first is a first contact; the owner's hand is on
+   the dock throughout. DT and driver ride the #47 bundle with the module
+   held back on its first boot (left out of the rootfs module tree, or
+   blacklisted — it has an OF match and would autoload), so #47's own gate
+   runs without it. Then, in order: (1) nothing docked,
+   `modprobe oneplus-pogo-keyboard`: bound on uart17, supply off, detect
+   line high (absent); the debugfs status node and the self-test PASS as on
+   the author's unit; (2) dock on: detect low, supply on within 120 ms, the
+   hello (sync) frame within 0.5 s, keyboard and touchpad input devices
+   registered (`libinput list-devices`); save the debugfs frame trace for
+   mzak (the dock's address and serial are masked by the driver). FAIL = no
+   frame and the supply cycling (the driver gives up after 20 tries) → keep
+   the trace and the detect edges, one power cycle of the dock, stop;
+   (3) keys: evtest, every key once, caps-lock LED follows; (4) touchpad:
+   up to five contacts and the button in evtest, then libinput motion, tap,
+   two-finger scroll, a palm as MT_TOOL_PALM; (5) backlight: the LED class
+   device's brightness steps; (6) Fn/media keys: the 16-bit codes (volume,
+   brightness, mute with its LED, …) and the key map user space can change;
+   (7) report to mzak (trace, timing, key-map deltas) before anything is
+   filed anywhere; the module leaves the hold-back once (1)–(4) PASS and
+   autoloads from the next bundle. Sleep with a dock attached is C6's (F1),
+   not this rung's. Rails: host-only until #47 flies; never a dock during a
+   charging flight (one variable per flight); a pin dispute in 0090 is
+   measured on the live tree before any change (the 0029 lesson).
 
 ## W — Touch-to-wake (one driver rung after #45, flashed 2026-11-03; W3 after C6)
 

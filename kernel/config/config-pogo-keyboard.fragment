@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# OnePlus Pad 4 Smart Keyboard (the pogo-pin dock): the Fedora iceland port's
+# serdev driver, carried as patches 0087-0090. Kconfig: tristate, depends on
+# SERIAL_DEV_BUS && GPIOLIB && LEDS_CLASS && OF (all =y in the config of
+# record). A module, held back on the first boot of the bundle that carries
+# it and loaded by hand (docs/bringup-plan.md, rung K).
+CONFIG_KEYBOARD_ONEPLUS_POGO=m
