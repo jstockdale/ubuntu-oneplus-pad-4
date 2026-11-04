@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 04 Nov 2026 09:42:09 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: keep the CPUs out of deep idle
+ during a session
+
+A SuperVOOC adapter asks the phone a question every 45 ms and waits a
+few milliseconds for the answer, which this driver gives from the
+PHY's interrupt thread over I2C (two bulk transfers, then the pump's
+status and ADC block). The factory AP VOOC PHY driver holds a CPU
+latency QoS request of 0 for the whole fast-charge session, taken when
+the session starts and again before every PHY register access, and
+released when the session ends (oplus_voocphy_pm_qos_update() in
+oplus_ap_voocphy.c, which on kernels since 5.10 turns any value into
+cpu_latency_qos_add_request(&req, 0)); it also floors the CPU
+frequencies (1.79/2.44 GHz) for 15 s from the start of a session and
+for the length of each current change (100 ms on this board). This
+driver held neither.
+
+On the OnePlus Pad 4 the omission reset the tablet, silently, twice in
+a row: 6.2 A sessions on the 55 W factory adapter (model 0x24) died
+four to five minutes in with every reading steady to the last second,
+the charger firmware log normal and nothing issued by the kernel. A
+frame-level I2C trace of the next sessions showed what happens at that
+moment: the adapter, held at its 5.1 A ceiling by a request above its
+class, lowers its output one level exactly 300 s after it granted fast
+charge (9.03 to 8.67 V on the bus in one frame, the battery current
+9.4 to 7.3 A), with nothing on the wire before it. Two sessions that
+crossed that step at the same power with every cpuidle state above WFI
+disabled by hand went on to finish. The kernel this port runs carries
+the hard lockup and CSD lock wait detectors that its maintainer enabled
+after the same freezes "while charging over SuperVOOC", whose trace
+showed the I2C transfers to both pumps timing out and then the charger
+firmware, RPMh and two CPUs stopping within 8 s: the pumps' interrupts
+and transfers arriving into a cluster that had powered down.
+
+Take a CPU latency QoS request of 0 when a session enters IDENTIFY,
+after the wakeup source, and release it in svooc_restore(), after the
+buck input is back, and in the cleanup path, so no CPU enters a state
+deeper than WFI from the adapter's first frame to the end of the
+session. This is the factory driver's hold; its frequency floors are
+left out, as the reply took at most 1.8 ms from interrupt to TX write
+without them, in the sessions that finished and in the two that reset.
+
+The two sessions that survived the step had the states disabled through
+sysfs, which is the same constraint this request places; the module
+with the request is flown next, on the same adapter and power.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_svooc.c |   17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 841ea468f5fc..4a26951f996d 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -19,6 +19,7 @@
+ #include <linux/mutex.h>
+ #include <linux/mux/consumer.h>
+ #include <linux/pm.h>
++#include <linux/pm_qos.h>
+ #include <linux/pm_wakeup.h>
+ #include <linux/power/oplus_svooc.h>
+ #include <linux/power/sc8547.h>
+@@ -147,6 +148,8 @@ struct sc8547_svooc {
+ 	struct notifier_block notifier;
+ 	struct delayed_work work;
+ 	struct dentry *debugfs;
++	/* Deep CPU idle states held off while the adapter talks. */
++	struct pm_qos_request latency;
+ 	/* Serializes the session between the PHY interrupt and the worker. */
+ 	struct mutex lock;
+ 	/* The adapter protocol of the session, chosen when it starts. */
+@@ -710,6 +713,16 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 	}
+ 
+ 	pm_stay_awake(sv->dev);
++	/*
++	 * The adapter asks every 45 ms and gives the reply milliseconds, from
++	 * the PHY's interrupt thread over I2C. The factory driver keeps every
++	 * CPU out of its deep idle states for the whole session; without that,
++	 * this tablet reset silently twice, four to five minutes into a
++	 * session, when the adapter stepped its output and the pumps raised
++	 * interrupts into a cluster that had powered down.
++	 */
++	if (!cpu_latency_qos_request_active(&sv->latency))
++		cpu_latency_qos_add_request(&sv->latency, 0);
+ 	mutex_lock(&sv->lock);
+ 	sv->state = SVOOC_IDENTIFY;
+ 	sv->error = 0;
+@@ -985,6 +998,8 @@ static void svooc_restore(struct sc8547_svooc *sv)
+ 	mutex_lock(&sv->lock);
+ 	sv->state = SVOOC_DONE;
+ 	mutex_unlock(&sv->lock);
++	if (cpu_latency_qos_request_active(&sv->latency))
++		cpu_latency_qos_remove_request(&sv->latency);
+ 	pm_relax(sv->dev);
+ 	power_supply_changed(sv->psy);
+ 	/* The adapter may already be gone. */
+@@ -1206,6 +1221,8 @@ static void svooc_cleanup(void *data)
+ 	cancel_delayed_work_sync(&sv->work);
+ 	if (sv->state == SVOOC_STOPPING)
+ 		svooc_restore(sv);
++	if (cpu_latency_qos_request_active(&sv->latency))
++		cpu_latency_qos_remove_request(&sv->latency);
+ 	sc8547_set_phy_handler(sv->main, NULL, NULL);
+ 	debugfs_remove_recursive(sv->debugfs);
+ 	device_init_wakeup(sv->dev, false);

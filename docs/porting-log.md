@@ -3959,3 +3959,97 @@ phy-decode.py (frames → commands, replies, flags; --all adds the pump's
 ADC and STATUS reads), follow.sh (session follower with a boot census
 on a reset), d1-flight-swap.sh. A stale `cat trace_pipe` from a dropped
 ssh holds an instance busy (EBUSY) until killed by an fd scan.
+
+## 2026-11-04 — Flight D1 PASS: patch 0077 crosses the adapter's +300 s step with cpuidle in the governor's hands; the conformance review's six fixes written (0078–0083)
+
+Flight D1 (sheet: build/pps-work/d-series/flight-sheet-D1.md). Vehicle:
+#46 with the module pair swapped in from /run (sc8547_direct_policy
+d7d5cb47 + sc8547_svooc-d1-cpuqos ec1f3bae = the series state plus
+0077); cpuidle and the frequency floors back to the governor
+(runA-prep.sh restore: state1 disable flags 0, min 384000/768000); the
+one variable against runs A and A2 is that nothing but the driver's own
+`cpu_latency_qos` request holds the CPUs out of cpu-sleep. Drain to
+54 % (discharge-to-half.sh, twice: its 40 °C cell watchdog ended the
+first run at 56 %), cell 32 °C at the plug, brick in at 10:13:40,
+session running at 10:13:45 (uptime 8177 s, same boot since 07:57:28).
+The 6.2 A request kept on purpose so the brick's step still fires.
+
+- +300 s: the brick stepped 5.12 → 4.09 A at 10:18:45 (bus 8.88 →
+  8.64 V), the moment that reset the two fatal runs. No reset. The
+  system stream's deep-idle sum (cpuidle state1 usage over all CPUs)
+  read 3,042,858 at 10:13:53 and 3,042,858 at every sample through
+  10:19:17, after climbing ~1,500 per 12 s before the session: the
+  hold is in effect, from the driver alone. 1,206 frames in the window,
+  0 with an error flag; 20 ms-class replies. Battery 9.2 A at 4.29 V
+  before the step, 6.9 A after; battery connector 49.7 °C at +4:40 (soft
+  limit 60), cell 30–32 °C.
+- The session continues to the +16:00 step and is then ended by hand
+  for the drain before D2.
+
+0077 enters the series (kernel/patches/0077, checkpatch 0/0/0; the
+commit message corrected per the review: stock's per-change frequency
+window is 100 ms, its start window 15 s). The number had been reserved
+for the PD PPS back-end on 11-03; that pair takes 0084/0085.
+
+The conformance review (six reviewer agents over frozen copies, the
+fan-out stopped for cost at 13 of the verdicts, the rest verified by
+hand: build/pps-work/proto-review/conformance-ledger.md) found 16
+differences that matter; its patch plan is written, one patch each,
+under build/pps-work/d-series (patches/, hdr-d*.txt, stage-d*/), all
+checkpatch 0/0/0, W=1 clean on arm64, kernel-doc silent, KUnit 23/23
+under UML, the 82-patch series applying in order on the pin:
+
+- 0078 bound the request by the adapter's power class: the protocol
+  library carries stock's adapter identity table (SVOOC rows: 0x24–0x27
+  = 55 W, 0x2c–0x2e 67 W, 0x4b–0x4e 80 W, …), the policy library the
+  class current (rating over 11 V in 100 mA steps: 5.0 A for this
+  brick, 6.0 A for 67 W, the board's 6.2 A from 80 W up; the board's
+  maximum for an unknown model); applied to the limit and the taper when
+  the adapter is granted. Flight D2 asks whether the +300 s step
+  disappears at 5.0 A.
+- 0079 hysteresis on the readings' caps: a 150 mA deadband where the
+  thermal allowance or the 55 W/VBUS budget binds below the limit and
+  the taper (raises only past it, lowers at once; the ramp still reaches
+  a limit); the flat 2.5 A cold cap replaced by two rows with state —
+  4.0 A below 21 °C and 2.5 A below 16 °C, entered half a degree below,
+  left half a degree above (stock's little_cool rows for 36–55 %).
+- 0080 stray and unknown frames as stock takes them: an unknown command
+  answered with an empty frame and counted; AP_STATUS answered at any
+  stage; a frame with no command (NULL, 0x0e, 0x0f, a VOOC2 head) once
+  granted is a stray — the first after a battery query left unanswered,
+  the second in a row (or one during a current change) ends the session
+  with the retried -EPROTO; a bad head after the first frame likewise;
+  every received frame refreshes the silence timeout.
+- 0081 the change path: the adapter's next question counts as the
+  acknowledgement (RX_DONE without TX_FAILED); a reply the PHY could not
+  send is re-armed up to three times; late replies tolerated to ten
+  after the curve; the over-current check at +400 mA needs twenty ticks
+  (1 s), asks the current again once, and only then -ERANGE; the
+  GET_VBAT report and the VBUS_OK verdict use the pump's own VBAT, as
+  stock on this board (no external_gauge_support).
+- 0082 the second pump: 300 ms + 3 s to share (stock's window) instead
+  of 500 ms; a pump that will not share or stops is seen off and the
+  session goes on with the main pump at 3.0 A, asked at once (above the
+  main pump's 3.3 A the session ends regardless), one more join allowed,
+  then single-pump for the session; released after 3 s below 1.1 A in
+  total and allowed back; the running check no longer fails the session
+  for a stopped second pump and holds the main alone to its maximum
+  only while the second is not enabled.
+- 0083 setup fidelity: the 800 µs bit-0 hold and its 0x60 base go to
+  register 0x3a as in the vendor HAL (we wrote 0x34, a transcription
+  slip; the chip's 0x3a reads 0xc0 by default, which is why it worked);
+  CONTROL bit 2 kept set as in every vendor control write; the pump
+  watchdog at 1 s; the frame-silence timeout 250 ms while charging and
+  500 ms up to the grant (the traced pauses: 174 ms at most during
+  identification).
+
+Flights: D2 = 0078 alone (the step question; needs ≤ 55 %); D3 =
+0079–0082 together (their effects show in one session: no request
+flapping, the counters in the debugfs status); D4 = 0083 with
+sc8547_charger reloaded so 0x34 is at its power-on value, with the PHY
+trace. Each enters the series after its flight. Bundles staged:
+out/bundles/*-d2-class-*.ko (0078 state), *-d4-0083-*.ko (full state);
+svooc-flight-swap.sh (any subset of the four modules from /run/flight
+with a manifest) replaces d1-flight-swap.sh. One independent reviewer
+reads the seven patches against the ledger and the vendor code; its
+findings are folded in before D3.
