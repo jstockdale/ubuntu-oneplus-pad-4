@@ -3386,7 +3386,10 @@ detached as root; the end was the driver's.
   8.91–9.04 V (twice the cell plus 0.1–0.2 V); the buck input 0.00 A
   throughout (the firmware's ICL stayed 3000 while its log shows
   icl_final 0 — the input suspended on the session's vote); both pumps
-  on, the second "shared"; the main pump's input ADC 0.73–1.04 A;
+  on, the second "shared", each drawing about 1.0 A at the 9 V bus
+  (the driver's 2 A is the adapter current, the sum of the two pump
+  inputs; the 2:1 pumps deliver roughly twice that to the cell, less
+  losses); the main pump's input ADC 0.73–1.04 A;
   battery 4.391 → 4.456 V at 1.33–2.58 A (gauge, mean 2.37 A); 88 % at
   +54 s, 89 % at +276 s, 90 % at the end; the taper took `applied` from
   2.0 to 1.5 A when the gauge reached 4.44 V (about +400 s); 11 791
@@ -3413,6 +3416,98 @@ detached as root; the end was the driver's.
   notification: 0x7b" from battmgr, at the Anker's plug (1585 s), not
   during the brick session — a PD-attach code Perpetua does not name yet
   (A-series polish list).
+
+## 2026-11-03 — PD PPS B-series written and reviewed: the policy library with KUnit (0074), the adapter seam (0075), the suspend refusal (0076)
+
+The implementation workflow (one implementer, three adversarial
+reviewers, one revision; 291 tool uses over 100 minutes) produced the
+three refactoring commits the plan's §6 asks for before any PPS code,
+under /srv/ubuntu-iceland/build/pps-work/b-series (patches, the base and
+per-commit snapshots of the six files, the notes with decisions D1–D22
+and a review log, the KUnit configuration and run logs, the first
+revision kept under old-rev1/).
+
+- 0074 moves the adapter-independent arithmetic of sc8547_svooc.c into
+  sc8547_direct_policy.c/.h as pure functions on plain integers (scale,
+  thermal_ua, taper_ua, vbat_uv, admissible, entry_ua,
+  regulate_target_ua, running_ok with the disagreement counter by
+  pointer, second_join, second_shared), a hidden tristate selected by the
+  driver as oplus_svooc is, and pins every number of plan §3.2 in
+  sc8547_direct_policy_test.c: 15 cases, 192 expectation lines, both
+  sides of every boundary — the 60→70 °C die line, each thermistor's
+  soft→hard pair, the 38→44 °C cell line with the 1.5 A floor and the
+  2.5 A cap below 21 °C, the taper 4.40/4.42/4.44/4.46 V → 4/3/2/1.5 A,
+  the entry ladder by 55/85 %, the 55 W budget at 8.0/9.0/9.6 V and the
+  over-power step, the 100 mA rounding, the running window referenced to
+  the gauge voltage (a pump VBAT of 3.0 V under a gauge at 4.0 V does not
+  move it), the +0.3 A slack, 3.3 A per pump, 60 W, the 250 mV
+  disagreement twice, the 1.4 A join and the 0.5 A / 1 A sharing rule,
+  the −EIO-then-−ERANGE order. No behaviour change: the bodies are the
+  former static functions', diffed mechanically after renaming.
+- 0075 introduces struct svooc_adapter_ops — setup, start, tick, busy,
+  change (returning an errno), stop, restore — with the VOOC exchange as
+  the first instance and four per-back-end fields: the quiet window
+  (4.5–5.5 V), the restore condition (VBUS ≤ 5.5 V) and the pre-grant
+  ceiling (5.5 V; the "no pump switches before enable" half stays
+  unconditional, review item S-10). Every I2C write, mux operation,
+  supply read, property write and message is in the base's order; the
+  notes carry a block-by-block table with line numbers.
+- 0076 adds the suspend refusal: −EBUSY while the session is in
+  IDENTIFY..STOPPING. The first revision read the state and returned; the
+  review showed the race — the driver's delayed work runs on
+  system_highpri_wq, which is not freezable, and systemd does not use
+  /sys/power/wakeup_count, so a start deferred 2 s after a plug could
+  begin after the callback answered and the system would sleep with a
+  session running. Now the callback sets an "asleep" mark under the lock,
+  cancels the work synchronously, then reads the state; a session lifts
+  the mark, re-queues the work and refuses; IDLE and DONE sleep with the
+  mark held; resume lifts it and queues the work. Compile-only until
+  suspend is exercisable here (C6).
+
+Evidence: both modules build W=1 clean for arm64 (sc8547_svooc.ko
+depends on sc8547_direct_policy); kernel-doc -none -Wall silent;
+checkpatch --strict 0/2/1 (two inherited patterns, the MAINTAINERS
+reminder), 0/0/0, 0/0/0; KUnit 19 of 19 on the host under UML
+(tools/testing/kunit/kunit.py — the port's first KUnit use; 17 at the
+0074 stage); `git am` of the three reproduces the stages and the tree
+byte for byte; the full series (0001–0073 plus the three) applies in
+order on the pin with `git apply --index` on a scratch worktree, and the
+six files equal the implementer's tree. The reviews' two major findings
+(an unlocked write to lock-protected state from the start-failure path in
+the first 0075; the suspend race) were fixed before entry.
+
+Second pass (41 agents, 39 minutes): five reviewers — 0074 equivalence,
+0075 seam, 0076 PM, KUnit adequacy, upstream style — produced 36
+findings, each handed to an adversarial verifier told to refute it. 18
+survived: one major (the suspend race, already closed by revision 2), the
+rest minors and nits — the cell 44 °C and die 70 °C hard stops living as
+bare literals in both modules, the 54.5 W over-power reference unnamed,
+the 60 W fault bracketed rather than pinned at the boundary, the second
+pump's 3.3 A asserted on one side, the 250 mV rule's lower side and
+re-tolerance unasserted, the PPS pre-grant and quiet numbers computed by
+the test itself instead of living in the library, kernel-doc gaps, the
+0075 message saying the setup failure leaves the state unchanged where the
+code sets DONE, the 0076 message lending its GLINK rationale to the plan,
+the PM callbacks named like the SUSPEND session state, one unevidenced
+sentence in 0074 ("builds with the same thresholds in it"), and the
+protocol-specific strings left in the shared stop path (C1's). 18 were
+refuted, half of them because the reviewers had read the first revision's
+snapshot while the implementation workflow's own revise stage rewrote the
+stage directories under them — lesson: give reviewers a frozen copy.
+Revision 3 applies the surviving items (a general-purpose agent, the
+same scratch-repository method, every change behaviour-preserving) before
+the three patches enter the series.
+
+Decision on plan §11 rule 3 (the SuperVOOC PASS belongs to the module
+that ships): the brick stages continue on the shipped #46 module, so Fast
+can ship on #46 without waiting for the C-series; the refactored pair
+(sc8547_direct_policy.ko, then sc8547_svooc.ko, both from one build —
+modinfo depends and the two hashes checked by the gate script, since
+CONFIG_MODVERSIONS is off) re-flies a 3 A session as the B-gate before any
+bundle carries it. Config: CONFIG_SC8547_DIRECT_POLICY comes from the
+driver's select (the build config already shows =m; neither it nor
+OPLUS_SVOOC is listed in devices/iceland/kernel.config), so no fragment
+change.
 
 Stage 2 (3 A, both pumps by the join rule) at 60–84 % and stage 3 (up to
 6.2 A at ≤ 55 %, Denial's 50–55 W) follow with the same tooling, each

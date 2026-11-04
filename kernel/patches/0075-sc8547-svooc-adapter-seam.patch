@@ -1,0 +1,660 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 03 Nov 2026 17:00:30 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: separate the session from the
+ VOOC exchange
+
+The session driver interleaves two things. One is the session: the
+charge-level gate, the buck handoff, the 50 ms sampling, the running
+checks, the teardown order and the restore of the input. The other is
+the SuperVOOC exchange: the D+/D- mux, the PHY, the handshake, the
+frames and their timeouts, and the way a new current is asked for (as
+the reply to the next battery query). A PD PPS back-end for the same
+pumps shares the first and replaces the second (the PD PPS plan,
+revision 2, section 4.1, one driver with two adapter back-ends), and
+three numbers that read as protocol-neutral belong to the adapter: the
+buck must be seen idle with VBUS at 4.5 to 5.5 V because a VOOC adapter
+holds 5 V until it is granted; the input is given back once VBUS is
+down to 5.5 V because the adapter drops back to 5 V when the replies
+stop; and VBUS above 5.5 V before the grant is a protocol error. A PPS
+session starts from the 9 V contract and lifts VBUS itself before the
+first enable (section 4.3), so each of the three differs there, while
+the other half of the pre-grant rule, that no pump switches before it
+is enabled, holds for every protocol (review item S-10).
+
+Introduce struct svooc_adapter_ops and make the VOOC exchange its first
+instance. The session calls setup (take the link: the mux and the PHY,
+with the pumps prepared), start (begin the exchange under the lock with
+the session initialised: the protocol reset and the handshake write),
+tick (the protocol's own timeouts: the adapter's frames, the current
+acknowledgment, the change), busy (a change is still in flight: the
+one-at-a-time gate, consulted before the ramp arithmetic where the gate
+was), change (ask for a current; it returns an errno because the PD PPS
+request is a firmware write that can fail, 0 here), stop (the PHY off,
+svooc_phy_stop() itself: after the pumps once a session ran, before
+them when setup failed) and restore (the mux released). start is split
+from setup because the link can fail before a session exists: that
+failure is undone without the wakeup source and recorded as a failed
+session, the error kept and the state set to DONE under the lock,
+exactly as before; the handshake, on the other hand, must be written
+after the session is initialised, under the lock. Section 4.3 of the
+plan named five operations and now carries a status note recording
+these seven. The session's own clearing of phy_on, proto.permit and
+pending_ua stays in svooc_stop_locked(), under the lock, where it was.
+The quiet window, the restore condition and the pre-grant ceiling are
+fields of the back-end, and the two checks that use them join the
+policy library's header as inlines next to vbat_uv(), with the 25 mA
+named. The PD PPS numbers to come are named in the same header rather
+than in the test: the 9.5 V the session plans to ask for at most, the
+10.0 V rail it never asks for, the 200 mV a request may be exceeded by
+before the grant, and the 4.5 to 9.5 V window in which its buck must
+be seen idle, with the pre-grant ceiling, the request plus the margin
+and never above the rail, as an inline the PPS back-end will call.
+Nothing in the driver uses them yet. KUnit cases pin the VOOC numbers
+and the PPS ones. The back-end is chosen from the charger type when a
+session starts: a dedicated or Apple-brick charger inside the VOOC
+back-end's own 4.5 to 5.5 V is a SuperVOOC adapter, anything else no
+session, as before.
+
+No behaviour changes. Every I2C write, mux operation, supply read and
+property write happens in the same order with the same operands, every
+message prints the same text ("SuperVOOC" comes from the back-end's
+name), and the supply, debugfs and sysfs are untouched. The regulation
+keeps the instruction order of the original, gate before ramp
+arithmetic before the three writes. Two things moved within orders that
+nothing observes: the VOOC counters are reset after the session's own
+fields instead of among them, inside the same lock section, which the
+PHY interrupt cannot enter before the unlock; and the protocol's three
+-ETIMEDOUT checks run before the 30 s pre-running timeout instead of
+around it, all four returning the same errno. The KUnit suite grows to
+15 cases, all passing on the host.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_direct_policy.h      |   65 +++++
+ drivers/power/supply/sc8547_direct_policy_test.c |   62 +++++
+ drivers/power/supply/sc8547_svooc.c              |  262 ++++++++++++++++------
+ 3 files changed, 316 insertions(+), 73 deletions(-)
+
+diff --git a/drivers/power/supply/sc8547_direct_policy.h b/drivers/power/supply/sc8547_direct_policy.h
+index d517d1a..808f1fd 100644
+--- a/drivers/power/supply/sc8547_direct_policy.h
++++ b/drivers/power/supply/sc8547_direct_policy.h
+@@ -21,6 +21,18 @@
+ #define SC8547_DIRECT_POWER_SETTLE_UW	54500000LL
+ /* A session ends normally at this charge level, in percent. */
+ #define SC8547_DIRECT_CAPACITY_END	90
++/* The buck has let go of the input when it draws no more than this. */
++#define SC8547_DIRECT_QUIET_UA		25000
++/*
++ * The PD PPS session to come: the most it plans to ask for, the input rail,
++ * which is never an operating point, how far above a request VBUS may run
++ * before the grant, and the window in which its buck may be seen idle.
++ */
++#define SC8547_DIRECT_PPS_CAP_UV		9500000
++#define SC8547_DIRECT_RAIL_UV			10000000
++#define SC8547_DIRECT_PPS_PREGRANT_MARGIN_UV	200000
++#define SC8547_DIRECT_PPS_QUIET_MIN_UV		4500000
++#define SC8547_DIRECT_PPS_QUIET_MAX_UV		9500000
+ 
+ enum sc8547_direct_therm {
+ 	SC8547_DIRECT_USB_CONNECTOR,
+@@ -87,4 +99,57 @@ static inline int sc8547_direct_vbat_uv(int gauge_uv, int pump_uv)
+ 	return max(gauge_uv, pump_uv);
+ }
+ 
++/**
++ * sc8547_direct_quiet() - the buck has let go of the input
++ * @usb_ua: the current the USB supply reports drawing
++ * @usb_uv: its voltage
++ * @min_uv: the lowest voltage the adapter holds before the pumps take over
++ * @max_uv: the highest
++ *
++ * The pumps may only take an input that the buck has stopped drawing from,
++ * at the voltage the adapter's protocol leaves it at before the grant.
++ *
++ * Return: true when the buck draws at most 25 mA at a voltage inside
++ * [@min_uv, @max_uv].
++ */
++static inline bool sc8547_direct_quiet(int usb_ua, int usb_uv, int min_uv,
++				       int max_uv)
++{
++	return usb_ua <= SC8547_DIRECT_QUIET_UA && usb_uv >= min_uv &&
++	       usb_uv <= max_uv;
++}
++
++/**
++ * sc8547_direct_pregrant_ok() - the pumps before the adapter is granted
++ * @switching: the main pump is switching
++ * @vbus_uv: its input voltage
++ * @max_uv: the highest voltage the adapter's protocol allows before the grant
++ *
++ * A pump must not switch before it is enabled, whatever the protocol; how
++ * high the adapter may hold VBUS depends on it.
++ *
++ * Return: 0, or -EPROTO.
++ */
++static inline int sc8547_direct_pregrant_ok(bool switching, int vbus_uv,
++					    int max_uv)
++{
++	return switching || vbus_uv > max_uv ? -EPROTO : 0;
++}
++
++/**
++ * sc8547_direct_pps_pregrant_max_uv() - the PD PPS ceiling before the grant
++ * @request_uv: the voltage last requested from the source
++ *
++ * A PPS source may run a margin above what it was asked for; the rail itself
++ * is never an operating point.
++ *
++ * Return: the highest VBUS allowed before the grant, for
++ * sc8547_direct_pregrant_ok().
++ */
++static inline int sc8547_direct_pps_pregrant_max_uv(int request_uv)
++{
++	return min(request_uv + SC8547_DIRECT_PPS_PREGRANT_MARGIN_UV,
++		   SC8547_DIRECT_RAIL_UV);
++}
++
+ #endif
+diff --git a/drivers/power/supply/sc8547_direct_policy_test.c b/drivers/power/supply/sc8547_direct_policy_test.c
+index 92dc0a2..f92f26f 100644
+--- a/drivers/power/supply/sc8547_direct_policy_test.c
++++ b/drivers/power/supply/sc8547_direct_policy_test.c
+@@ -36,6 +36,12 @@ static void sc8547_direct_test_constants(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_DIE_MAX_DC, 700);
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_POWER_SETTLE_UW, 54500000LL);
+ 	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_CAPACITY_END, 90);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_QUIET_UA, 25000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_PPS_CAP_UV, 9500000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_RAIL_UV, 10000000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_PPS_PREGRANT_MARGIN_UV, 200000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_PPS_QUIET_MIN_UV, 4500000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_PPS_QUIET_MAX_UV, 9500000);
+ 
+ 	/*
+ 	 * Soft to hard: usb connector 60-70, battery connector 60-70,
+@@ -564,6 +570,60 @@ static void sc8547_direct_test_second(struct kunit *test)
+ 	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_shared(&m, &s));
+ }
+ 
++/* The buck is quiet at 25 mA or less, with VBUS in the adapter's window. */
++static void sc8547_direct_test_quiet(struct kunit *test)
++{
++	/* A SuperVOOC adapter holds 5 V before the grant: 4.5 to 5.5 V. */
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_quiet(25000, 5000000, 4500000, 5500000));
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_quiet(0, 4500000, 4500000, 5500000));
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_quiet(-100000, 5500000, 4500000, 5500000));
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_quiet(25001, 5000000, 4500000, 5500000));
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_quiet(0, 4499999, 4500000, 5500000));
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_quiet(0, 5500001, 4500000, 5500000));
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_quiet(0, 9000000, 4500000, 5500000));
++	/* A PD PPS session starts from the 9 V contract: 4.5 to 9.5 V. */
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_quiet(0, 9000000, SC8547_DIRECT_PPS_QUIET_MIN_UV,
++						    SC8547_DIRECT_PPS_QUIET_MAX_UV));
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_quiet(25000, 9500000, SC8547_DIRECT_PPS_QUIET_MIN_UV,
++						    SC8547_DIRECT_PPS_QUIET_MAX_UV));
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_quiet(0, 4500000, SC8547_DIRECT_PPS_QUIET_MIN_UV,
++						    SC8547_DIRECT_PPS_QUIET_MAX_UV));
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_quiet(0, 9500001, SC8547_DIRECT_PPS_QUIET_MIN_UV,
++						     SC8547_DIRECT_PPS_QUIET_MAX_UV));
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_quiet(0, 4499999, SC8547_DIRECT_PPS_QUIET_MIN_UV,
++						     SC8547_DIRECT_PPS_QUIET_MAX_UV));
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_quiet(25001, 9000000, SC8547_DIRECT_PPS_QUIET_MIN_UV,
++						     SC8547_DIRECT_PPS_QUIET_MAX_UV));
++}
++
++/* No pump switches before the grant, and VBUS stays under the protocol's ceiling. */
++static void sc8547_direct_test_pregrant(struct kunit *test)
++{
++	int max;
++
++	/* SuperVOOC: the adapter holds 5 V, 5.5 V at most. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 5000000, 5500000), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 5500000, 5500000), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 5500001, 5500000), -EPROTO);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 8000000, 5500000), -EPROTO);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(true, 5000000, 5500000), -EPROTO);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(true, 0, 5500000), -EPROTO);
++
++	/* PD PPS: the request plus 200 mV, never above the 10.0 V rail. */
++	max = sc8547_direct_pps_pregrant_max_uv(8200000);
++	KUNIT_EXPECT_EQ(test, max, 8400000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 8300000, max), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 8400000, max), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 8400001, max), -EPROTO);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(true, 8300000, max), -EPROTO);
++	/* The planned maximum keeps its margin; a request near the rail does not. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pps_pregrant_max_uv(SC8547_DIRECT_PPS_CAP_UV), 9700000);
++	max = sc8547_direct_pps_pregrant_max_uv(9900000);
++	KUNIT_EXPECT_EQ(test, max, SC8547_DIRECT_RAIL_UV);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 10000000, max), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_pregrant_ok(false, 10000001, max), -EPROTO);
++}
++
+ static struct kunit_case sc8547_direct_test_cases[] = {
+ 	KUNIT_CASE(sc8547_direct_test_constants),
+ 	KUNIT_CASE(sc8547_direct_test_scale),
+@@ -578,6 +638,8 @@ static struct kunit_case sc8547_direct_test_cases[] = {
+ 	KUNIT_CASE(sc8547_direct_test_running_current),
+ 	KUNIT_CASE(sc8547_direct_test_running_disagree),
+ 	KUNIT_CASE(sc8547_direct_test_second),
++	KUNIT_CASE(sc8547_direct_test_quiet),
++	KUNIT_CASE(sc8547_direct_test_pregrant),
+ 	{}
+ };
+ 
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 2d57991..9871f82 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -97,6 +97,42 @@ static const char * const svooc_state_names[] = {
+ 	"stopping", "done",
+ };
+ 
++struct sc8547_svooc;
++
++/**
++ * struct svooc_adapter_ops - an adapter protocol behind the shared session
++ * @name: the protocol, for messages.
++ * @quiet_min_uv: the lowest VBUS at which the buck may be seen idle before the
++ *	pumps take over.
++ * @quiet_max_uv: the highest such VBUS.
++ * @restore_max_uv: the input is given back once VBUS is down to this.
++ * @pregrant_max_uv: VBUS may not exceed this before the adapter is granted.
++ * @setup: take the adapter's link, with the pumps prepared; a failure is
++ *	undone by @stop and @restore.
++ * @start: begin the exchange, under the lock, with the session initialised.
++ * @tick: the protocol's own checks on every tick, at @now.
++ * @busy: a current change is still in flight; none is asked for meanwhile.
++ * @change: ask the adapter for a current; a negative return stops the
++ *	session.
++ * @stop: the link off; after the pumps once a session ran, before them when
++ *	@setup failed.
++ * @restore: give the link back.
++ */
++struct svooc_adapter_ops {
++	const char *name;
++	int quiet_min_uv;
++	int quiet_max_uv;
++	int restore_max_uv;
++	int pregrant_max_uv;
++	int (*setup)(struct sc8547_svooc *sv);
++	int (*start)(struct sc8547_svooc *sv);
++	int (*tick)(struct sc8547_svooc *sv, unsigned long now);
++	bool (*busy)(struct sc8547_svooc *sv);
++	int (*change)(struct sc8547_svooc *sv, int ua);
++	int (*stop)(struct sc8547_svooc *sv);
++	int (*restore)(struct sc8547_svooc *sv);
++};
++
+ struct sc8547_svooc {
+ 	struct device *dev;
+ 	struct sc8547 *main;
+@@ -112,6 +148,8 @@ struct sc8547_svooc {
+ 	struct dentry *debugfs;
+ 	/* Serializes the session between the PHY interrupt and the worker. */
+ 	struct mutex lock;
++	/* The adapter protocol of the session, chosen when it starts. */
++	const struct svooc_adapter_ops *ops;
+ 	struct oplus_svooc proto;
+ 	enum svooc_state state;
+ 	enum power_supply_charge_type mode;
+@@ -207,19 +245,6 @@ static int svooc_read_therms(struct sc8547_svooc *sv, int *mc)
+ 	return 0;
+ }
+ 
+-static bool svooc_charger(struct sc8547_svooc *sv, int *vbus_uv)
+-{
+-	int online, type;
+-
+-	if (svooc_get(sv->usb, POWER_SUPPLY_PROP_ONLINE, &online) || !online ||
+-	    svooc_get(sv->usb, POWER_SUPPLY_PROP_USB_TYPE, &type) ||
+-	    svooc_get(sv->usb, POWER_SUPPLY_PROP_VOLTAGE_NOW, vbus_uv))
+-		return false;
+-	/* SuperVOOC adapters present as a dedicated or proprietary charger. */
+-	return type == POWER_SUPPLY_USB_TYPE_DCP ||
+-	       type == POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID;
+-}
+-
+ /* The hotter die of the pumps in use. */
+ static int svooc_die(struct sc8547_svooc *sv)
+ {
+@@ -308,16 +333,17 @@ static void svooc_stop_locked(struct sc8547_svooc *sv, int error)
+ 		return;
+ 	sv->error = error;
+ 	if (error)
+-		dev_warn(sv->dev, "SuperVOOC stopped in %s: %d (rx %02x flags %02x)\n",
+-			 svooc_state_names[sv->state], error, sv->rx, sv->flags);
++		dev_warn(sv->dev, "%s stopped in %s: %d (rx %02x flags %02x)\n",
++			 sv->ops->name, svooc_state_names[sv->state], error, sv->rx,
++			 sv->flags);
+ 	else
+-		dev_info(sv->dev, "SuperVOOC finished\n");
++		dev_info(sv->dev, "%s finished\n", sv->ops->name);
+ 	if (sv->second && sc8547_disable(sv->second))
+ 		dev_crit(sv->dev, "cannot stop the second pump\n");
+ 	if (sc8547_disable(sv->main))
+ 		dev_crit(sv->dev, "cannot stop the main pump\n");
+ 	sv->phy_on = false;
+-	if (svooc_phy_stop(sv))
++	if (sv->ops->stop(sv))
+ 		dev_err(sv->dev, "cannot stop the VOOC PHY\n");
+ 	sv->proto.permit = false;
+ 	sv->second_on = false;
+@@ -517,13 +543,125 @@ static void svooc_phy_irq(void *data)
+ 	mutex_unlock(&sv->lock);
+ }
+ 
++/*
++ * The SuperVOOC exchange: the adapter asks over D+/D- through the pump's
++ * PHY and is answered from the PHY interrupt above. What follows is the
++ * back-end the shared session calls.
++ */
++static int svooc_vooc_setup(struct sc8547_svooc *sv)
++{
++	int ret;
++
++	ret = mux_state_try_select(sv->dpdm);
++	sv->route = !ret;
++	if (!ret)
++		ret = svooc_phy_setup(sv);
++	return ret;
++}
++
++static int svooc_vooc_start(struct sc8547_svooc *sv)
++{
++	oplus_svooc_reset(&sv->proto);
++	sv->frames = 0;
++	sv->irqs = 0;
++	sv->ignored = 0;
++	sv->worst_us = 0;
++	sv->rx = 0;
++	sv->flags = 0;
++	sv->skipped = 0;
++	sv->last_rx = jiffies;
++	sv->phy_on = true;
++	/* The handshake starts the adapter talking: be ready first. */
++	return regmap_write(sv->regmap, SC8547_VOOC_CTRL, 0x81);
++}
++
++/* The adapter keeps asking, and acknowledges each current in time. */
++static int svooc_vooc_tick(struct sc8547_svooc *sv, unsigned long now)
++{
++	int frame_ms = sv->frames ? SVOOC_FRAME_MS : SVOOC_FIRST_FRAME_MS;
++
++	if (time_after(now, sv->last_rx + msecs_to_jiffies(frame_ms)))
++		return -ETIMEDOUT;
++	if (sv->pending_ua && time_after(now, sv->ack_deadline))
++		return -ETIMEDOUT;
++	if (sv->change && time_after(now, sv->change_deadline))
++		return -ETIMEDOUT;
++	return 0;
++}
++
++/* One change at a time, at most one a second. */
++static bool svooc_vooc_busy(struct sc8547_svooc *sv)
++{
++	return sv->pending_ua || sv->change ||
++	       time_before(jiffies, sv->change_deadline);
++}
++
++/*
++ * A change goes out as the reply to the next battery query, which makes the
++ * adapter ask for the current.
++ */
++static int svooc_vooc_change(struct sc8547_svooc *sv, int ua)
++{
++	sv->target_ua = ua;
++	sv->change = true;
++	sv->change_deadline = jiffies + msecs_to_jiffies(SVOOC_CHANGE_MS);
++	return 0;
++}
++
++static int svooc_vooc_restore(struct sc8547_svooc *sv)
++{
++	int ret = 0;
++
++	if (sv->route) {
++		ret = mux_state_deselect(sv->dpdm);
++		sv->route = false;
++	}
++	return ret;
++}
++
++/* The adapter holds 5 V until it is granted and drops back to it after. */
++static const struct svooc_adapter_ops svooc_vooc_ops = {
++	.name = "SuperVOOC",
++	.quiet_min_uv = 4500000,
++	.quiet_max_uv = 5500000,
++	.restore_max_uv = 5500000,
++	.pregrant_max_uv = 5500000,
++	.setup = svooc_vooc_setup,
++	.start = svooc_vooc_start,
++	.tick = svooc_vooc_tick,
++	.busy = svooc_vooc_busy,
++	.change = svooc_vooc_change,
++	.stop = svooc_phy_stop,
++	.restore = svooc_vooc_restore,
++};
++
++/* The adapter protocol the charger calls for, or NULL. */
++static const struct svooc_adapter_ops *svooc_adapter(struct sc8547_svooc *sv)
++{
++	int online, type, vbus;
++
++	if (svooc_get(sv->usb, POWER_SUPPLY_PROP_ONLINE, &online) || !online ||
++	    svooc_get(sv->usb, POWER_SUPPLY_PROP_USB_TYPE, &type) ||
++	    svooc_get(sv->usb, POWER_SUPPLY_PROP_VOLTAGE_NOW, &vbus))
++		return NULL;
++	/* SuperVOOC adapters present as a dedicated or proprietary charger at 5 V. */
++	if ((type == POWER_SUPPLY_USB_TYPE_DCP ||
++	     type == POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID) &&
++	    vbus >= svooc_vooc_ops.quiet_min_uv && vbus <= svooc_vooc_ops.quiet_max_uv)
++		return &svooc_vooc_ops;
++	return NULL;
++}
++
+ static void svooc_start(struct sc8547_svooc *sv)
+ {
++	const struct svooc_adapter_ops *ops;
+ 	struct sc8547_direct_battery bat;
+-	int therm[SC8547_DIRECT_THERMS], vbus, ret;
++	int therm[SC8547_DIRECT_THERMS], ret;
+ 
+-	if (sv->mode != POWER_SUPPLY_CHARGE_TYPE_FAST || !svooc_charger(sv, &vbus) ||
+-	    vbus < 4500000 || vbus > 5500000)
++	if (sv->mode != POWER_SUPPLY_CHARGE_TYPE_FAST)
++		return;
++	ops = svooc_adapter(sv);
++	if (!ops)
+ 		return;
+ 	if (time_before(jiffies, sv->plugged_at + msecs_to_jiffies(SVOOC_PLUG_MS))) {
+ 		mod_delayed_work(system_highpri_wq, &sv->work,
+@@ -534,6 +672,7 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 		return;
+ 
+ 	mutex_lock(&sv->lock);
++	sv->ops = ops;
+ 	sv->bat = bat;
+ 	memcpy(sv->therm_mc, therm, sizeof(therm));
+ 	memset(sv->sample, 0, sizeof(sv->sample));
+@@ -551,21 +690,15 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 	ret = sc8547_prepare(sv->main);
+ 	if (!ret && sv->second)
+ 		ret = sc8547_prepare(sv->second);
+-	if (!ret) {
+-		ret = mux_state_try_select(sv->dpdm);
+-		sv->route = !ret;
+-	}
+ 	if (!ret)
+-		ret = svooc_phy_setup(sv);
++		ret = ops->setup(sv);
+ 	if (ret) {
+-		dev_warn(sv->dev, "cannot start SuperVOOC: %d\n", ret);
+-		svooc_phy_stop(sv);
++		dev_warn(sv->dev, "cannot start %s: %d\n", ops->name, ret);
++		ops->stop(sv);
+ 		if (sv->second)
+ 			sc8547_disable(sv->second);
+ 		sc8547_disable(sv->main);
+-		if (sv->route)
+-			mux_state_deselect(sv->dpdm);
+-		sv->route = false;
++		ops->restore(sv);
+ 		mutex_lock(&sv->lock);
+ 		sv->error = ret;
+ 		sv->state = SVOOC_DONE;
+@@ -575,28 +708,17 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 
+ 	pm_stay_awake(sv->dev);
+ 	mutex_lock(&sv->lock);
+-	oplus_svooc_reset(&sv->proto);
+ 	sv->state = SVOOC_IDENTIFY;
+ 	sv->error = 0;
+-	sv->frames = 0;
+-	sv->irqs = 0;
+-	sv->ignored = 0;
+-	sv->worst_us = 0;
+-	sv->rx = 0;
+-	sv->flags = 0;
+ 	sv->ticks = 0;
+ 	sv->taper_ua = sv->limit_ua;
+ 	sv->target_ua = 0;
+ 	sv->change = false;
+-	sv->skipped = 0;
+ 	sv->disagree = 0;
+ 	sv->discharge_since = 0;
+ 	sv->started = jiffies;
+-	sv->last_rx = jiffies;
+ 	sv->sampled_at = jiffies - msecs_to_jiffies(SVOOC_SAMPLE_MS);
+-	sv->phy_on = true;
+-	/* The handshake starts the adapter talking: be ready first. */
+-	ret = regmap_write(sv->regmap, SC8547_VOOC_CTRL, 0x81);
++	ret = ops->start(sv);
+ 	if (ret)
+ 		svooc_stop_locked(sv, ret);
+ 	else
+@@ -647,9 +769,9 @@ static int svooc_second(struct sc8547_svooc *sv, bool *enable)
+ }
+ 
+ /*
+- * Reductions apply at once, increases by 100 mA every three seconds. A
+- * change goes out as the reply to the next battery query, which makes the
+- * adapter ask for the current. Returns 1 when the buck should finish.
++ * Reductions apply at once, increases by 100 mA every three seconds; the
++ * adapter is asked through its protocol, one change at a time. Returns 1
++ * when the buck should finish, or the protocol's error.
+  */
+ static int svooc_regulate(struct sc8547_svooc *sv)
+ {
+@@ -663,8 +785,7 @@ static int svooc_regulate(struct sc8547_svooc *sv)
+ 					      svooc_ibus(sv), sv->applied_ua);
+ 	if (ua < SC8547_DIRECT_MIN_UA)
+ 		return 1;
+-	if (sv->pending_ua || sv->change ||
+-	    time_before(jiffies, sv->change_deadline))
++	if (sv->ops->busy(sv))
+ 		return 0;
+ 	if (ua >= sv->applied_ua) {
+ 		if (time_before(jiffies, sv->ramp_after))
+@@ -673,31 +794,24 @@ static int svooc_regulate(struct sc8547_svooc *sv)
+ 	}
+ 	if (ua == sv->applied_ua)
+ 		return 0;
+-	sv->target_ua = ua;
+-	sv->change = true;
+-	sv->change_deadline = jiffies + msecs_to_jiffies(SVOOC_CHANGE_MS);
+-	return 0;
++	return sv->ops->change(sv, ua);
+ }
+ 
+ /* Returns 1 to finish normally, or a negative error to stop. */
+ static int svooc_check(struct sc8547_svooc *sv)
+ {
+ 	unsigned long now = jiffies;
+-	int frame_ms = sv->frames ? SVOOC_FRAME_MS : SVOOC_FIRST_FRAME_MS;
+-	int i, vbat = svooc_vbat(sv);
++	int i, ret, vbat = svooc_vbat(sv);
+ 
+ 	if (sv->mode != POWER_SUPPLY_CHARGE_TYPE_FAST ||
+ 	    sv->bat.capacity >= SC8547_DIRECT_CAPACITY_END)
+ 		return 1;
+-	if (time_after(now, sv->last_rx + msecs_to_jiffies(frame_ms)))
+-		return -ETIMEDOUT;
++	ret = sv->ops->tick(sv, now);
++	if (ret)
++		return ret;
+ 	if (sv->state < SVOOC_RUNNING &&
+ 	    time_after(now, sv->started + msecs_to_jiffies(SVOOC_IDENTIFY_MS)))
+ 		return -ETIMEDOUT;
+-	if (sv->pending_ua && time_after(now, sv->ack_deadline))
+-		return -ETIMEDOUT;
+-	if (sv->change && time_after(now, sv->change_deadline))
+-		return -ETIMEDOUT;
+ 	if (sv->bat.health != POWER_SUPPLY_HEALTH_GOOD ||
+ 	    vbat >= SC8547_DIRECT_VBAT_MAX_UV || sv->bat.temp >= SC8547_DIRECT_CELL_MAX_DC)
+ 		return -ERANGE;
+@@ -715,16 +829,20 @@ static int svooc_check(struct sc8547_svooc *sv)
+ 	} else {
+ 		sv->discharge_since = 0;
+ 	}
+-	/* Before the grant the buck charges and VBUS stays at 5 V. */
+-	if (sv->state < SVOOC_GRANTED && (sv->sample[0].switching ||
+-					   sv->sample[0].vbus_uv > 5500000))
+-		return -EPROTO;
++	/* Before the grant the buck charges and the adapter holds VBUS. */
++	if (sv->state < SVOOC_GRANTED) {
++		ret = sc8547_direct_pregrant_ok(sv->sample[0].switching,
++						sv->sample[0].vbus_uv,
++						sv->ops->pregrant_max_uv);
++		if (ret)
++			return ret;
++	}
+ 	if (sv->state == SVOOC_STARTING) {
+ 		if (sv->sample[0].switching && sv->applied_ua) {
+ 			sv->state = SVOOC_RUNNING;
+ 			sv->retries = 0;
+ 			sv->ramp_after = now + msecs_to_jiffies(SVOOC_RAMP_MS);
+-			dev_info(sv->dev, "SuperVOOC adapter %02x at %d mA\n",
++			dev_info(sv->dev, "%s adapter %02x at %d mA\n", sv->ops->name,
+ 				 sv->proto.model, sv->applied_ua / 1000);
+ 		} else if (time_after(now, sv->enabled_at +
+ 				      msecs_to_jiffies(SVOOC_START_MS))) {
+@@ -803,7 +921,8 @@ static void svooc_tick(struct sc8547_svooc *sv)
+ 		suspend = true;
+ 	} else if (sv->state == SVOOC_SUSPEND && !sv->proto.permit) {
+ 		/* The buck must be seen idle three times before the grant. */
+-		if (usb_ua <= 25000 && usb_uv >= 4500000 && usb_uv <= 5500000)
++		if (sc8547_direct_quiet(usb_ua, usb_uv, sv->ops->quiet_min_uv,
++					sv->ops->quiet_max_uv))
+ 			sv->quiet++;
+ 		else
+ 			sv->quiet = 0;
+@@ -840,21 +959,18 @@ unlock:
+ 		power_supply_changed(sv->psy);
+ }
+ 
+-/* With the pumps and PHY off, give D+/D- and the input back. */
++/* With the pumps off, give the adapter's link and the input back. */
+ static void svooc_restore(struct sc8547_svooc *sv)
+ {
+ 	int online = 0, vbus = 0;
+ 
+-	if (sv->route) {
+-		if (mux_state_deselect(sv->dpdm))
+-			dev_err(sv->dev, "cannot release D+/D-\n");
+-		sv->route = false;
+-	}
++	if (sv->ops->restore(sv))
++		dev_err(sv->dev, "cannot release D+/D-\n");
+ 	if (sv->buck_off) {
+-		/* The adapter drops to 5 V once replies stop. */
++		/* The adapter drops its voltage once the exchange stops. */
+ 		svooc_get(sv->usb, POWER_SUPPLY_PROP_ONLINE, &online);
+ 		svooc_get(sv->usb, POWER_SUPPLY_PROP_VOLTAGE_NOW, &vbus);
+-		if (online && vbus > 5500000 && !sv->stopping &&
++		if (online && vbus > sv->ops->restore_max_uv && !sv->stopping &&
+ 		    time_before(jiffies, sv->stopped_at + msecs_to_jiffies(SVOOC_RESTORE_MS))) {
+ 			mod_delayed_work(system_highpri_wq, &sv->work, msecs_to_jiffies(100));
+ 			return;

@@ -1,0 +1,1463 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 03 Nov 2026 17:00:00 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: move the policy arithmetic into
+ a library with KUnit
+
+The SuperVOOC session driver decides how much current the battery, the
+board and the pumps allow with arithmetic that owes nothing to the
+adapter protocol: the linear derates (the hotter pump die from 60 to
+70 °C, each thermistor from its soft to its hard limit, the cell from
+38 to 44 °C with a 1.5 A floor, 2.5 A below 21 °C), the taper (4.0, 3.0,
+2.0 and 1.5 A from 4.40, 4.42, 4.44 and 4.46 V), the entry ladder (6.2 A
+up to 55 %, 3 A below 85 %, 2 A above) under the 55 W budget at the top
+of the VBUS window, the admissibility gate (health Good, below 90 %,
+15 to 44 °C, 3.3 to 4.4 V, every thermistor below its soft limit), the
+running checks (VBUS within -0.1/+0.7 V of twice the gauge's battery
+voltage, the total within 0.3 A of the limit, 3.3 A per pump and alone,
+60 W, the two pumps' VBUS within 250 mV twice) and the second pump's
+join rule (1.4 A, then 0.5 A each within 1 A). A PD PPS back-end for the
+same pumps needs exactly this envelope, and the envelope is the part
+that has run: 53.9 W for 445 s and 54.2 W taking the 4.40 V taper down
+to 36.7 W from the 80 W adapter (devices/iceland/charging.md). Written
+twice, or edited while a second protocol is fitted around it, a
+validated number drifts. The PD PPS plan (revision 2) lists these
+pieces as adapter-independent (section 3.2), asks for them as a
+KUnit-pinned library before any protocol work (sections 4.1 and 4.3)
+and, after review item F-3, insists that the running window stay
+referenced to the gauge voltage rather than to the pump's own sense.
+
+Move that arithmetic into sc8547_direct_policy.c as pure functions on
+plain integers, the gauge's battery reading and the pumps' samples, and
+call them from the driver. The bodies are the former static functions',
+under new names: scale, thermal_ua, taper_ua, vbat_uv, admissible,
+entry_ua, regulate_target_ua, running_ok, second_join and second_shared.
+The one addition is a guard in entry_ua() and regulate_target_ua()
+against a divisor that is not positive (a gauge reading at or below
+-0.35 V; no VBUS): each returns 0 there, which the caller's existing
+refusal below 1.5 A takes, instead of dividing by zero, which the arm64
+division answers with 0 and the host test would trap on. The driver
+cannot reach either: the running window of running_ok() is checked
+before the regulation, and the gauge reads a real cell. The driver keeps
+what depends on the protocol or on time around the calls: the hotter die
+of the pumps in use, the single-pump 3.3 A cap at entry, the check of
+the measured current against the applied one after the ramp, the 300 to
+500 ms join qualifier, the rate limits of a change, and the hard stops
+of svooc_check(). The seven constants move into the library's header,
+the thermistor table into the library, exported, and names are given
+to the 90 % end, to the two hard stops of svooc_check() (the cell at
+44 °C and the pump die at 70 °C, where the two derates also end, so
+that each number exists once and the driver's stops read the library's)
+and to the 54.5 W the over-power step settles the power to. running_ok()
+carries the counter of pump disagreements for its caller, so that the
+two-in-a-row rule keeps its place among the checks.
+
+KUnit tests under CONFIG_SC8547_DIRECT_POLICY_KUNIT_TEST pin every
+number above, the 55 W arithmetic at 8.0, 9.0 and 9.6 V (6.2, 6.0 and
+5.6 A) and the over-power step (6.2 A at 9.0 V asks for 5.9 A; 6.25 A
+at 8.8 V is 55.000000 W and takes no step, one microampere more does),
+the 60 W fault at its boundary (6.25 A at 9.6 V passes, one microampere
+more fails), the second pump's 3.3 A on both sides, the 250 mV
+disagreement on both sides with its count forgiven by one agreeing
+sample, the 100 mA rounding, the gauge reference of the window (a pump
+VBAT of 3.0 V under a gauge at 4.0 V does not move it; a gauge at 3.0 V
+does), the order of the disagreement count and the second pump's
+switching check (-EIO on the first disagreeing sample with the second
+pump stopped, -ERANGE on the second), the two division guards, and the
+limit values themselves: 13 cases, run on the host under UML with
+tools/testing/kunit/kunit.py, all passing. The library follows the
+oplus_svooc.c pattern: a hidden tristate selected by the driver, a test
+symbol that selects the library.
+
+No behaviour changes. The moved bodies were compared with the originals
+mechanically, after the renaming of the move (the constants, the
+functions, and the parameters that replace the session's fields): what
+differs is the signatures, the two guards, and the tail of each range
+where the driver's own code goes on; every comparison, every operand
+and its type, and the order of every early return are the original's,
+and KUnit pins every number of the moved ranges.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/Kconfig                     |   13 
+ drivers/power/supply/Makefile                    |    2 
+ drivers/power/supply/sc8547_direct_policy.c      |  264 ++++++++++
+ drivers/power/supply/sc8547_direct_policy.h      |   90 +++
+ drivers/power/supply/sc8547_direct_policy_test.c |  591 ++++++++++++++++++++++
+ drivers/power/supply/sc8547_svooc.c              |  212 ++------
+ 6 files changed, 1012 insertions(+), 160 deletions(-)
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 7d993fc..d7ade65 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -237,6 +237,18 @@ config OPLUS_SVOOC_KUNIT_TEST
+ 	help
+ 	  Unit tests for the SuperVOOC adapter protocol library.
+ 
++config SC8547_DIRECT_POLICY
++	tristate
++
++config SC8547_DIRECT_POLICY_KUNIT_TEST
++	tristate "KUnit tests for the SC8547D direct charging policy" if !KUNIT_ALL_TESTS
++	depends on KUNIT
++	select SC8547_DIRECT_POLICY
++	default KUNIT_ALL_TESTS
++	help
++	  Unit tests for the current and voltage envelope of direct charging
++	  through SC8547D charge pumps.
++
+ config CHARGER_SC8547
+ 	tristate "Southchip SC8547D charge pump"
+ 	depends on I2C
+@@ -253,6 +265,7 @@ config CHARGER_SC8547_SVOOC
+ 	depends on CHARGER_SC8547 && BATTERY_QCOM_BATTMGR
+ 	depends on IIO && MULTIPLEXER
+ 	select OPLUS_SVOOC
++	select SC8547_DIRECT_POLICY
+ 	help
+ 	  Say Y or M here to charge from Oplus SuperVOOC adapters through the
+ 	  VOOC PHY of an SC8547D charge pump, with an optional second pump.
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index 0669e4a..aa7109d 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -124,6 +124,8 @@ obj-$(CONFIG_CHARGER_SC8547)	+= sc8547_charger.o
+ obj-$(CONFIG_CHARGER_SC8547_SVOOC)	+= sc8547_svooc.o
+ obj-$(CONFIG_OPLUS_SVOOC)	+= oplus_svooc.o
+ obj-$(CONFIG_OPLUS_SVOOC_KUNIT_TEST)	+= oplus_svooc_test.o
++obj-$(CONFIG_SC8547_DIRECT_POLICY)	+= sc8547_direct_policy.o
++obj-$(CONFIG_SC8547_DIRECT_POLICY_KUNIT_TEST)	+= sc8547_direct_policy_test.o
+ obj-$(CONFIG_FUEL_GAUGE_SC27XX)	+= sc27xx_fuel_gauge.o
+ obj-$(CONFIG_FUEL_GAUGE_STC3117)       += stc3117_fuel_gauge.o
+ obj-$(CONFIG_CHARGER_UCS1002)	+= ucs1002_power.o
+diff --git a/drivers/power/supply/sc8547_direct_policy.c b/drivers/power/supply/sc8547_direct_policy.c
+new file mode 100644
+index 0000000..1da8d61
+--- /dev/null
++++ b/drivers/power/supply/sc8547_direct_policy.c
+@@ -0,0 +1,264 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Current and voltage envelope of direct charging through SC8547D pumps.
++ *
++ * Limits adapted from the Oplus SC8547D driver, Copyright (C) 2018-2023
++ * Oplus. All rights reserved. The adapter protocol that regulates the
++ * current is the session driver's business; this library only says how
++ * much the battery, the board and the pumps allow, from plain readings.
++ */
++#include <linux/errno.h>
++#include <linux/math.h>
++#include <linux/math64.h>
++#include <linux/minmax.h>
++#include <linux/module.h>
++#include <linux/power_supply.h>
++
++#include "sc8547_direct_policy.h"
++
++const struct sc8547_direct_limit sc8547_direct_therm_limits[SC8547_DIRECT_THERMS] = {
++	[SC8547_DIRECT_USB_CONNECTOR] = { 60000, 70000 },
++	[SC8547_DIRECT_BATTERY_CONNECTOR] = { 60000, 70000 },
++	[SC8547_DIRECT_BOARD] = { 45000, 55000 },
++	[SC8547_DIRECT_MOS] = { 60000, 70000 },
++};
++EXPORT_SYMBOL_GPL(sc8547_direct_therm_limits);
++
++/**
++ * sc8547_direct_scale() - derate linearly between two temperatures
++ * @value: the temperature
++ * @soft: the temperature up to which the full current is allowed
++ * @hard: the temperature from which none is
++ *
++ * Return: the current allowed, in uA.
++ */
++int sc8547_direct_scale(int value, int soft, int hard)
++{
++	if (value <= soft)
++		return SC8547_DIRECT_MAX_UA;
++	if (value >= hard)
++		return 0;
++	return div_s64((s64)SC8547_DIRECT_MAX_UA * (hard - value), hard - soft);
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_scale);
++
++/**
++ * sc8547_direct_thermal_ua() - the current the temperatures allow
++ * @die: the hotter pump die, in tenths of a degree Celsius
++ * @therm_mc: the thermistors, in m°C, in enum sc8547_direct_therm order
++ * @bat_temp: the cell, in tenths of a degree Celsius
++ *
++ * The battery keeps 1.5 A up to 44 °C and is held to 2.5 A below 21 °C.
++ *
++ * Return: the current allowed, in uA.
++ */
++int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp)
++{
++	int ua, i;
++
++	ua = sc8547_direct_scale(die, 600, SC8547_DIRECT_DIE_MAX_DC);
++	for (i = 0; i < SC8547_DIRECT_THERMS; i++)
++		ua = min(ua, sc8547_direct_scale(therm_mc[i],
++						 sc8547_direct_therm_limits[i].soft,
++						 sc8547_direct_therm_limits[i].hard));
++	if (bat_temp < SC8547_DIRECT_CELL_MAX_DC)
++		ua = min(ua, max(sc8547_direct_scale(bat_temp, 380, SC8547_DIRECT_CELL_MAX_DC),
++				 SC8547_DIRECT_MIN_UA));
++	else
++		ua = 0;
++	if (bat_temp < 210)
++		ua = min(ua, 2500000);
++	return ua;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_thermal_ua);
++
++/**
++ * sc8547_direct_taper_ua() - the current the battery voltage allows
++ * @uv: the battery voltage, see sc8547_direct_vbat_uv()
++ *
++ * Return: 4.0, 3.0, 2.0 and 1.5 A from 4.40, 4.42, 4.44 and 4.46 V; the full
++ * current below.
++ */
++int sc8547_direct_taper_ua(int uv)
++{
++	if (uv >= 4460000)
++		return 1500000;
++	if (uv >= 4440000)
++		return 2000000;
++	if (uv >= 4420000)
++		return 3000000;
++	if (uv >= 4400000)
++		return 4000000;
++	return SC8547_DIRECT_MAX_UA;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_taper_ua);
++
++/**
++ * sc8547_direct_admissible() - whether a session may start
++ * @bat: the battery
++ * @therm_mc: the thermistors, negative when unread
++ *
++ * Return: true when every entry condition holds.
++ */
++bool sc8547_direct_admissible(const struct sc8547_direct_battery *bat,
++			      const int *therm_mc)
++{
++	int i;
++
++	if (bat->health != POWER_SUPPLY_HEALTH_GOOD ||
++	    bat->capacity >= SC8547_DIRECT_CAPACITY_END ||
++	    bat->temp < 150 || bat->temp >= SC8547_DIRECT_CELL_MAX_DC ||
++	    bat->uv < 3300000 || bat->uv >= 4400000)
++		return false;
++	for (i = 0; i < SC8547_DIRECT_THERMS; i++)
++		if (therm_mc[i] < 0 || therm_mc[i] >= sc8547_direct_therm_limits[i].soft)
++			return false;
++	return true;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_admissible);
++
++/**
++ * sc8547_direct_entry_ua() - the session's current, chosen from the charge level
++ * @bat: the battery
++ * @therm_mc: the thermistors
++ * @die: the hotter pump die, in tenths of a degree Celsius
++ *
++ * Return: the current in whole 100 mA steps, which may be below the minimum;
++ * 0 for a gauge reading at or below -0.35 V, where the top of the VBUS window
++ * would not be positive.
++ */
++int sc8547_direct_entry_ua(const struct sc8547_direct_battery *bat,
++			   const int *therm_mc, int die)
++{
++	int ua = bat->capacity <= 55 ? SC8547_DIRECT_MAX_UA :
++		 bat->capacity < 85 ? 3000000 : 2000000;
++
++	ua = min(ua, sc8547_direct_thermal_ua(die, therm_mc, bat->temp));
++	ua = min(ua, sc8547_direct_taper_ua(bat->uv));
++	/* Within the power budget at the top of the VBUS window. */
++	if (2 * bat->uv + 700000 <= 0)
++		return 0;
++	ua = min_t(int, ua, div_s64(SC8547_DIRECT_POWER_UW * 1000000,
++				    2 * bat->uv + 700000));
++	return ua / 100000 * 100000;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_entry_ua);
++
++/**
++ * sc8547_direct_regulate_target_ua() - the current to ask for while running
++ * @limit_ua: the session's limit
++ * @taper_ua: the taper reached so far; lowered here, never raised
++ * @vbat_uv: the battery voltage, see sc8547_direct_vbat_uv()
++ * @thermal_ua: what the temperatures allow, see sc8547_direct_thermal_ua()
++ * @vbus_uv: the main pump's input voltage, which the running window of
++ *	sc8547_direct_running_ok() keeps near twice the battery voltage
++ * @ibus_ua: the pumps' total input current
++ * @applied_ua: the current the adapter was last asked for
++ *
++ * Return: the current in whole 100 mA steps, which may be below the minimum;
++ * 0 when @vbus_uv is not positive.
++ */
++int sc8547_direct_regulate_target_ua(int limit_ua, int *taper_ua, int vbat_uv,
++				     int thermal_ua, int vbus_uv, int ibus_ua,
++				     int applied_ua)
++{
++	s64 power = (s64)vbus_uv * ibus_ua;
++	int ua;
++
++	if (vbus_uv <= 0)
++		return 0;
++	*taper_ua = min(*taper_ua, sc8547_direct_taper_ua(vbat_uv));
++	ua = min(limit_ua, *taper_ua);
++	ua = min(ua, thermal_ua);
++	ua = min_t(int, ua, div_s64(SC8547_DIRECT_POWER_UW * 1000000, vbus_uv) - 100000);
++	if (power > SC8547_DIRECT_POWER_UW * 1000000)
++		ua = min_t(int, ua, applied_ua - 100000 -
++			   div_s64(power - SC8547_DIRECT_POWER_SETTLE_UW * 1000000,
++				   vbus_uv));
++	return ua / 100000 * 100000;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_regulate_target_ua);
++
++/**
++ * sc8547_direct_running_ok() - the checks on the pumps while they switch
++ * @main: the main pump
++ * @second: the second pump
++ * @vbat_uv: the gauge's battery voltage
++ * @limit_ua: the session's limit
++ * @second_on: the second pump has been enabled
++ * @dual: both pumps share the current
++ * @disagree: how many samples in a row the pumps' VBUS disagreed, kept by
++ *	the caller and updated here
++ *
++ * VBUS is held against the gauge's voltage, not against the pump's own
++ * sense of the battery.
++ *
++ * Return: 0, -EIO when a pump that should switch does not, -ERANGE when a
++ * voltage, a current or the power left its window.
++ */
++int sc8547_direct_running_ok(const struct sc8547_sample *main,
++			     const struct sc8547_sample *second, int vbat_uv,
++			     int limit_ua, bool second_on, bool dual,
++			     unsigned int *disagree)
++{
++	int ibus = main->ibus_ua + (second_on ? second->ibus_ua : 0);
++	s64 power = (s64)main->vbus_uv * ibus;
++
++	if (!main->switching)
++		return -EIO;
++	if (main->vbus_uv < 2 * vbat_uv - 100000 || main->vbus_uv > 2 * vbat_uv + 700000)
++		return -ERANGE;
++	if (ibus > limit_ua + 300000 || main->ibus_ua > SC8547_DIRECT_PUMP_MAX_UA ||
++	    (!dual && ibus > SC8547_DIRECT_PUMP_MAX_UA) ||
++	    power > SC8547_DIRECT_POWER_MAX_UW * 1000000)
++		return -ERANGE;
++	if (second_on && second->ibus_ua > SC8547_DIRECT_PUMP_MAX_UA)
++		return -ERANGE;
++	/* The pumps are sampled in turn: one pair may straddle a step. */
++	if (second_on && abs(second->vbus_uv - main->vbus_uv) > 250000) {
++		if (++*disagree > 1)
++			return -ERANGE;
++	} else {
++		*disagree = 0;
++	}
++	if (dual && !second->switching)
++		return -EIO;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_running_ok);
++
++/**
++ * sc8547_direct_second_join() - the main pump carries enough to share
++ * @main: the main pump
++ * @second: the second pump, prepared and not yet enabled
++ *
++ * Return: true when the main pump carries more than 1.4 A and the two pumps'
++ * VBUS agree within 250 mV.
++ */
++bool sc8547_direct_second_join(const struct sc8547_sample *main,
++			       const struct sc8547_sample *second)
++{
++	return main->ibus_ua > SC8547_DIRECT_SECOND_UA &&
++	       abs(second->vbus_uv - main->vbus_uv) <= 250000;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_second_join);
++
++/**
++ * sc8547_direct_second_shared() - both pumps carry their share
++ * @main: the main pump
++ * @second: the second pump, enabled
++ *
++ * Return: true when the second pump switches and each pump carries at least
++ * 0.5 A, within 1 A of the other.
++ */
++bool sc8547_direct_second_shared(const struct sc8547_sample *main,
++				 const struct sc8547_sample *second)
++{
++	return second->switching && main->ibus_ua >= 500000 &&
++	       second->ibus_ua >= 500000 &&
++	       abs(main->ibus_ua - second->ibus_ua) <= 1000000;
++}
++EXPORT_SYMBOL_GPL(sc8547_direct_second_shared);
++
++MODULE_DESCRIPTION("Direct charging envelope for the SC8547D charge pumps");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/power/supply/sc8547_direct_policy.h b/drivers/power/supply/sc8547_direct_policy.h
+new file mode 100644
+index 0000000..d517d1a
+--- /dev/null
++++ b/drivers/power/supply/sc8547_direct_policy.h
+@@ -0,0 +1,90 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _SC8547_DIRECT_POLICY_H
++#define _SC8547_DIRECT_POLICY_H
++
++#include <linux/minmax.h>
++#include <linux/power/sc8547.h>
++#include <linux/types.h>
++
++/* A 2:1 pump and its battery path as qualified on this board. */
++#define SC8547_DIRECT_MAX_UA		6200000
++#define SC8547_DIRECT_PUMP_MAX_UA	3300000
++#define SC8547_DIRECT_MIN_UA		1500000
++#define SC8547_DIRECT_POWER_UW		55000000LL
++#define SC8547_DIRECT_POWER_MAX_UW	60000000LL
++#define SC8547_DIRECT_VBAT_MAX_UV	4480000
++#define SC8547_DIRECT_SECOND_UA		1400000
++/* Hard stops: the cell and the pump die, in tenths of a degree Celsius. */
++#define SC8547_DIRECT_CELL_MAX_DC	440
++#define SC8547_DIRECT_DIE_MAX_DC	700
++/* Over the budget, the current steps down to land the power here. */
++#define SC8547_DIRECT_POWER_SETTLE_UW	54500000LL
++/* A session ends normally at this charge level, in percent. */
++#define SC8547_DIRECT_CAPACITY_END	90
++
++enum sc8547_direct_therm {
++	SC8547_DIRECT_USB_CONNECTOR,
++	SC8547_DIRECT_BATTERY_CONNECTOR,
++	SC8547_DIRECT_BOARD,
++	SC8547_DIRECT_MOS,
++	SC8547_DIRECT_THERMS,
++};
++
++/* Full current up to the soft limit, none at the hard limit, in m°C. */
++struct sc8547_direct_limit {
++	int soft;
++	int hard;
++};
++
++extern const struct sc8547_direct_limit sc8547_direct_therm_limits[SC8547_DIRECT_THERMS];
++
++/**
++ * struct sc8547_direct_battery - the gauge's reading of the battery
++ * @uv: voltage.
++ * @ua: current, negative when discharging.
++ * @capacity: charge level in percent.
++ * @temp: cell temperature in tenths of a degree Celsius.
++ * @health: POWER_SUPPLY_HEALTH_* as the gauge reports it.
++ */
++struct sc8547_direct_battery {
++	int uv;
++	int ua;
++	int capacity;
++	int temp;
++	int health;
++};
++
++int sc8547_direct_scale(int value, int soft, int hard);
++int sc8547_direct_thermal_ua(int die, const int *therm_mc, int bat_temp);
++int sc8547_direct_taper_ua(int uv);
++bool sc8547_direct_admissible(const struct sc8547_direct_battery *bat,
++			      const int *therm_mc);
++int sc8547_direct_entry_ua(const struct sc8547_direct_battery *bat,
++			   const int *therm_mc, int die);
++int sc8547_direct_regulate_target_ua(int limit_ua, int *taper_ua, int vbat_uv,
++				     int thermal_ua, int vbus_uv, int ibus_ua,
++				     int applied_ua);
++int sc8547_direct_running_ok(const struct sc8547_sample *main,
++			     const struct sc8547_sample *second, int vbat_uv,
++			     int limit_ua, bool second_on, bool dual,
++			     unsigned int *disagree);
++bool sc8547_direct_second_join(const struct sc8547_sample *main,
++			       const struct sc8547_sample *second);
++bool sc8547_direct_second_shared(const struct sc8547_sample *main,
++				 const struct sc8547_sample *second);
++
++/**
++ * sc8547_direct_vbat_uv() - the battery voltage the taper follows
++ * @gauge_uv: the gauge's reading
++ * @pump_uv: the main pump's reading at its sense pins
++ *
++ * Neither sense point may hide the taper from the other.
++ *
++ * Return: the higher of the two readings.
++ */
++static inline int sc8547_direct_vbat_uv(int gauge_uv, int pump_uv)
++{
++	return max(gauge_uv, pump_uv);
++}
++
++#endif
+diff --git a/drivers/power/supply/sc8547_direct_policy_test.c b/drivers/power/supply/sc8547_direct_policy_test.c
+new file mode 100644
+index 0000000..92dc0a2
+--- /dev/null
++++ b/drivers/power/supply/sc8547_direct_policy_test.c
+@@ -0,0 +1,591 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * KUnit tests for the direct charging envelope of the SC8547D pumps. The
++ * numbers are those the OnePlus Pad 4 charged with at 51 to 55 W from its
++ * SuperVOOC adapter; every threshold is pinned here so that a change to
++ * the policy is a change to this file.
++ */
++#include <kunit/test.h>
++#include <linux/power_supply.h>
++
++#include "sc8547_direct_policy.h"
++
++/* A cool board: 30 °C on every thermistor, 25 °C on the die and the cell. */
++static const int cool_mc[SC8547_DIRECT_THERMS] = { 30000, 30000, 30000, 30000 };
++
++static const struct sc8547_direct_battery good_battery = {
++	.uv = 3800000,
++	.ua = 2000000,
++	.capacity = 50,
++	.temp = 250,
++	.health = POWER_SUPPLY_HEALTH_GOOD,
++};
++
++static void sc8547_direct_test_constants(struct kunit *test)
++{
++	const struct sc8547_direct_limit *l;
++
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_MAX_UA, 6200000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_PUMP_MAX_UA, 3300000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_MIN_UA, 1500000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_POWER_UW, 55000000LL);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_POWER_MAX_UW, 60000000LL);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_VBAT_MAX_UV, 4480000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_SECOND_UA, 1400000);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_CELL_MAX_DC, 440);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_DIE_MAX_DC, 700);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_POWER_SETTLE_UW, 54500000LL);
++	KUNIT_EXPECT_EQ(test, SC8547_DIRECT_CAPACITY_END, 90);
++
++	/*
++	 * Soft to hard: usb connector 60-70, battery connector 60-70,
++	 * board 45-55, MOS 60-70 °C.
++	 */
++	l = &sc8547_direct_therm_limits[SC8547_DIRECT_USB_CONNECTOR];
++	KUNIT_EXPECT_EQ(test, l->soft, 60000);
++	KUNIT_EXPECT_EQ(test, l->hard, 70000);
++	l = &sc8547_direct_therm_limits[SC8547_DIRECT_BATTERY_CONNECTOR];
++	KUNIT_EXPECT_EQ(test, l->soft, 60000);
++	KUNIT_EXPECT_EQ(test, l->hard, 70000);
++	l = &sc8547_direct_therm_limits[SC8547_DIRECT_BOARD];
++	KUNIT_EXPECT_EQ(test, l->soft, 45000);
++	KUNIT_EXPECT_EQ(test, l->hard, 55000);
++	l = &sc8547_direct_therm_limits[SC8547_DIRECT_MOS];
++	KUNIT_EXPECT_EQ(test, l->soft, 60000);
++	KUNIT_EXPECT_EQ(test, l->hard, 70000);
++}
++
++static void sc8547_direct_test_scale(struct kunit *test)
++{
++	KUNIT_EXPECT_EQ(test, sc8547_direct_scale(20000, 60000, 70000), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_scale(60000, 60000, 70000), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_scale(65000, 60000, 70000), 3100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_scale(69000, 60000, 70000), 620000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_scale(70000, 60000, 70000), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_scale(90000, 60000, 70000), 0);
++	/* The same line in tenths of a degree. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_scale(650, 600, 700), 3100000);
++}
++
++/* The hotter die derates from 60 °C to nothing at 70 °C. */
++static void sc8547_direct_test_thermal_die(struct kunit *test)
++{
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 250), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(599, cool_mc, 250), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(600, cool_mc, 250), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(650, cool_mc, 250), 3100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(699, cool_mc, 250), 62000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(700, cool_mc, 250), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(0, cool_mc, 250), 6200000);
++}
++
++/* Each thermistor derates from its soft limit to nothing at its hard one. */
++static void sc8547_direct_test_thermal_thermistors(struct kunit *test)
++{
++	int mc[SC8547_DIRECT_THERMS];
++	int i;
++
++	for (i = 0; i < SC8547_DIRECT_THERMS; i++) {
++		const struct sc8547_direct_limit *l = &sc8547_direct_therm_limits[i];
++
++		memcpy(mc, cool_mc, sizeof(mc));
++		mc[i] = l->soft;
++		KUNIT_EXPECT_EQ_MSG(test, sc8547_direct_thermal_ua(250, mc, 250), 6200000,
++				    "thermistor %d at its soft limit", i);
++		mc[i] = (l->soft + l->hard) / 2;
++		KUNIT_EXPECT_EQ_MSG(test, sc8547_direct_thermal_ua(250, mc, 250), 3100000,
++				    "thermistor %d half way", i);
++		mc[i] = l->hard;
++		KUNIT_EXPECT_EQ_MSG(test, sc8547_direct_thermal_ua(250, mc, 250), 0,
++				    "thermistor %d at its hard limit", i);
++	}
++	/* The lowest of them rules. */
++	memcpy(mc, cool_mc, sizeof(mc));
++	mc[SC8547_DIRECT_BOARD] = 50000;
++	mc[SC8547_DIRECT_MOS] = 69000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, mc, 250), 620000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(650, mc, 250), 620000);
++}
++
++/*
++ * The cell derates from 38 °C with a 1.5 A floor to 44 °C, and is capped at
++ * 2.5 A below 21 °C.
++ */
++static void sc8547_direct_test_thermal_cell(struct kunit *test)
++{
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 379), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 380), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 410), 3100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 420), 2066666);
++	/* The line would give 0.52 A at 43.5 °C: the floor holds. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 435), 1500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 439), 1500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 440), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 500), 0);
++	/* The floor does not lift a hot die or board. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(690, cool_mc, 435), 620000);
++
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 210), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 209), 2500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, 150), 2500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(250, cool_mc, -50), 2500000);
++	/* A hot die under the cold cap. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_thermal_ua(680, cool_mc, 200), 1240000);
++}
++
++/* 4.0 / 3.0 / 2.0 / 1.5 A from 4.40 / 4.42 / 4.44 / 4.46 V. */
++static void sc8547_direct_test_taper(struct kunit *test)
++{
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(3800000), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4399999), 6200000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4400000), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4419999), 4000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4420000), 3000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4439999), 3000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4440000), 2000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4459999), 2000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4460000), 1500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4480000), 1500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_taper_ua(4700000), 1500000);
++
++	/* Whichever sense point is higher drives the taper. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_vbat_uv(4000000, 4100000), 4100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_vbat_uv(4100000, 4000000), 4100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_vbat_uv(4100000, 0), 4100000);
++}
++
++/* Health Good, below 90 %, cell 15-44 °C, 3.3-4.4 V, every thermistor below soft. */
++static void sc8547_direct_test_admissible(struct kunit *test)
++{
++	struct sc8547_direct_battery bat = good_battery;
++	int mc[SC8547_DIRECT_THERMS];
++	int i;
++
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_admissible(&good_battery, cool_mc));
++
++	bat.health = POWER_SUPPLY_HEALTH_OVERHEAT;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.health = POWER_SUPPLY_HEALTH_UNKNOWN;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_admissible(&bat, cool_mc));
++
++	bat = good_battery;
++	bat.capacity = 89;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.capacity = 90;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.capacity = 0;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_admissible(&bat, cool_mc));
++
++	bat = good_battery;
++	bat.temp = 149;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.temp = 150;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.temp = 439;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.temp = 440;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_admissible(&bat, cool_mc));
++
++	bat = good_battery;
++	bat.uv = 3299999;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.uv = 3300000;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.uv = 4399999;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_admissible(&bat, cool_mc));
++	bat.uv = 4400000;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_admissible(&bat, cool_mc));
++
++	for (i = 0; i < SC8547_DIRECT_THERMS; i++) {
++		memcpy(mc, cool_mc, sizeof(mc));
++		mc[i] = sc8547_direct_therm_limits[i].soft - 1;
++		KUNIT_EXPECT_TRUE_MSG(test, sc8547_direct_admissible(&good_battery, mc),
++				      "thermistor %d just below soft", i);
++		mc[i] = sc8547_direct_therm_limits[i].soft;
++		KUNIT_EXPECT_FALSE_MSG(test, sc8547_direct_admissible(&good_battery, mc),
++				       "thermistor %d at soft", i);
++		/* An unread thermistor is no thermistor. */
++		mc[i] = -1;
++		KUNIT_EXPECT_FALSE_MSG(test, sc8547_direct_admissible(&good_battery, mc),
++				       "thermistor %d unread", i);
++	}
++}
++
++/* 6.2 A up to 55 %, 3 A below 85 %, 2 A from there; then the derates and the 55 W budget. */
++static void sc8547_direct_test_entry(struct kunit *test)
++{
++	struct sc8547_direct_battery bat = good_battery;
++
++	bat.capacity = 0;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 6200000);
++	bat.capacity = 55;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 6200000);
++	bat.capacity = 56;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 3000000);
++	bat.capacity = 84;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 3000000);
++	bat.capacity = 85;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++	bat.capacity = 89;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++
++	/* The budget at the top of the window, 2 x VBAT + 0.7 V. */
++	bat = good_battery;
++	bat.capacity = 55;
++	bat.uv = 4000000;	/* 55 W / 8.7 V = 6.32 A: the ladder binds */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 6200000);
++	bat.uv = 4300000;	/* 55 W / 9.3 V = 5.91 A */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 5900000);
++	bat.uv = 4350000;	/* 55 W / 9.4 V = 5.85 A */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 5800000);
++	bat.uv = 4440000;	/* the taper, 2 A, below the budget's 5.7 A */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++
++	/* The thermal derate, rounded down to 100 mA. */
++	bat = good_battery;
++	bat.capacity = 56;
++	bat.temp = 420;		/* 2.07 A from the cell line */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2000000);
++	bat.temp = 250;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 650), 3000000);
++	bat.capacity = 55;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 650), 3100000);
++	bat.temp = 200;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 2500000);
++	/* Below the minimum is reported as such: the caller refuses. */
++	bat.temp = 437;		/* 0.31 A from the line; the floor gives 1.5 A */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 1500000);
++	bat.temp = 440;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 0);
++
++	/* A reading that puts the top of the window at or below 0 V is refused. */
++	bat = good_battery;
++	bat.uv = -350000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 0);
++	bat.uv = -1000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_entry_ua(&bat, cool_mc, 0), 0);
++}
++
++/* min(limit, taper, thermal, 55 W / VBUS - 0.1 A), the over-power step, 100 mA steps. */
++static void sc8547_direct_test_regulate(struct kunit *test)
++{
++	int taper = 6200000;
++
++	/* 55 W at 8.0 V allows 6.78 A: the 6.2 A limit binds. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8000000, 1000000, 1000000), 6200000);
++	/* 55 W at 9.0 V: 6.11 A - 0.1 A -> 6.0 A. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       9000000, 1000000, 1000000), 6000000);
++	/* 55 W at 9.6 V: 5.73 A - 0.1 A -> 5.6 A. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       9600000, 1000000, 1000000), 5600000);
++	KUNIT_EXPECT_EQ(test, taper, 6200000);
++
++	/*
++	 * 6.2 A at 9.0 V is 55.8 W: step down from the applied current by
++	 * 0.1 A plus the excess over 54.5 W.
++	 */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       9000000, 6200000, 6200000), 5900000);
++	/*
++	 * The step is taken above 55 W, not at it: 6.25 A at 8.8 V is
++	 * 55.000000 W and leaves the budget's 6.15 A, rounded to 6.1 A; one
++	 * more microampere (8.8 uW over) steps down from the applied 6.2 A by
++	 * 0.1 A plus the 0.5 W over 54.5 W at 8.8 V, to 6.0 A.
++	 */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8800000, 6250000, 6200000), 6100000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8800000, 6250001, 6200000), 6000000);
++
++	/* The thermal allowance binds, and whole 100 mA steps are kept. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 2500000,
++							       8000000, 2500000, 2500000), 2500000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 1450000,
++							       8000000, 1500000, 1500000), 1400000);
++	/* The limit binds. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(3000000, &taper, 4000000, 6200000,
++							       8000000, 3000000, 3000000), 3000000);
++
++	/* The taper is lowered by the battery voltage and never raised again. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4420000, 6200000,
++							       8840000, 3000000, 3000000), 3000000);
++	KUNIT_EXPECT_EQ(test, taper, 3000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       8000000, 3000000, 3000000), 3000000);
++	KUNIT_EXPECT_EQ(test, taper, 3000000);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4460000, 6200000,
++							       8920000, 2000000, 2000000), 1500000);
++	KUNIT_EXPECT_EQ(test, taper, 1500000);
++
++	/* No VBUS is refused, not divided by; the running window stops it first. */
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       0, 0, 1000000), 0);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_regulate_target_ua(6200000, &taper, 4000000, 6200000,
++							       -1, 0, 1000000), 0);
++	KUNIT_EXPECT_EQ(test, taper, 1500000);
++}
++
++static const struct sc8547_sample main_running = {
++	.ibus_ua = 3000000,
++	.vbus_uv = 8000000,
++	.vout_uv = 4000000,
++	.vbat_uv = 4000000,
++	.temp = 400,
++	.health = POWER_SUPPLY_HEALTH_GOOD,
++	.switching = true,
++};
++
++/* VBUS within [2 x VBAT - 0.1 V, 2 x VBAT + 0.7 V] of the gauge's voltage. */
++static void sc8547_direct_test_running_window(struct kunit *test)
++{
++	struct sc8547_sample m = main_running, s = {};
++	unsigned int disagree = 0;
++
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), 0);
++	m.vbus_uv = 7899999;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), -ERANGE);
++	m.vbus_uv = 7900000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), 0);
++	m.vbus_uv = 8700000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), 0);
++	m.vbus_uv = 8700001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), -ERANGE);
++
++	/*
++	 * The window is referenced to the gauge, not to the pump's sense of the
++	 * battery: a low pump reading does not shift it, a low gauge reading does.
++	 */
++	m = main_running;
++	m.vbat_uv = 3000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), 0);
++	m.vbat_uv = 4000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 3000000, 6200000, false, false,
++						       &disagree), -ERANGE);
++	m.vbat_uv = 4000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 3650000, 6200000, false, false,
++						       &disagree), 0);
++
++	/* A main pump that is not switching fails before anything else. */
++	m = main_running;
++	m.switching = false;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), -EIO);
++	m.vbus_uv = 12000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), -EIO);
++}
++
++/* Total within limit + 0.3 A, 3.3 A per pump and alone, 60 W. */
++static void sc8547_direct_test_running_current(struct kunit *test)
++{
++	struct sc8547_sample m = main_running, s = main_running;
++	unsigned int disagree = 0;
++
++	m.ibus_ua = 2300000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 2000000, false, false,
++						       &disagree), 0);
++	m.ibus_ua = 2300001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 2000000, false, false,
++						       &disagree), -ERANGE);
++
++	/* The main pump alone may carry 3.3 A. */
++	m.ibus_ua = 3300000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), 0);
++	m.ibus_ua = 3300001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), -ERANGE);
++	/* The main pump's own limit holds with the second one sharing. */
++	s.ibus_ua = 1000000;
++	m.ibus_ua = 3300000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), 0);
++	m.ibus_ua = 3300001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), -ERANGE);
++	/* Until the second pump shares, the total is held to one pump's worth. */
++	m.ibus_ua = 3000000;
++	s.ibus_ua = 400000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), -ERANGE);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), 0);
++	/* The second pump is held to 3.3 A as well. */
++	s.ibus_ua = 3300000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), 0);
++	s.ibus_ua = 3300001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), -ERANGE);
++	s.ibus_ua = 3200000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), 0);
++
++	/* 6.5 A at 9.3 V is 60.45 W; at 9.2 V, 59.8 W. */
++	m.ibus_ua = 3250000;
++	s.ibus_ua = 3250000;
++	m.vbus_uv = 9300000;
++	s.vbus_uv = 9300000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, true,
++						       &disagree), -ERANGE);
++	m.vbus_uv = 9200000;
++	s.vbus_uv = 9200000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, true,
++						       &disagree), 0);
++
++	/* A second pump that stopped while sharing. */
++	s.switching = false;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, true,
++						       &disagree), -EIO);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4400000, 6200000, true, false,
++						       &disagree), -ERANGE);
++
++	/* 60.000000 W, 6.25 A at 9.6 V, passes; one more microampere does not. */
++	s.switching = true;
++	m.ibus_ua = 3125000;
++	s.ibus_ua = 3125000;
++	m.vbus_uv = 9600000;
++	s.vbus_uv = 9600000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4500000, 6200000, true, true,
++						       &disagree), 0);
++	m.ibus_ua = 3125001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4500000, 6200000, true, true,
++						       &disagree), -ERANGE);
++}
++
++/* The pumps' VBUS may disagree by 250 mV, and by more only once. */
++static void sc8547_direct_test_running_disagree(struct kunit *test)
++{
++	struct sc8547_sample m = main_running, s = main_running;
++	unsigned int disagree = 0;
++
++	m.ibus_ua = 1500000;
++	s.ibus_ua = 1500000;
++	s.vbus_uv = 8250000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 0U);
++	s.vbus_uv = 8250001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 1U);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), -ERANGE);
++	KUNIT_EXPECT_EQ(test, disagree, 2U);
++	s.vbus_uv = 7750000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 0U);
++	/* Either side counts, and a sample in agreement forgives the count. */
++	s.vbus_uv = 7749999;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 1U);
++	s.vbus_uv = 8000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 0U);
++	s.vbus_uv = 8250001;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 1U);
++	s.vbus_uv = 8000000;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 0U);
++	/* Without the second pump its sample is not consulted. */
++	s.vbus_uv = 0;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, false, false,
++						       &disagree), 0);
++	KUNIT_EXPECT_EQ(test, disagree, 0U);
++
++	/*
++	 * The disagreement is counted before a stopped second pump is seen:
++	 * the first such sample stops with -EIO, the second with -ERANGE.
++	 */
++	s = main_running;
++	s.ibus_ua = 1500000;
++	s.switching = false;
++	s.vbus_uv = 8250001;
++	disagree = 0;
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), -EIO);
++	KUNIT_EXPECT_EQ(test, disagree, 1U);
++	KUNIT_EXPECT_EQ(test, sc8547_direct_running_ok(&m, &s, 4000000, 6200000, true, true,
++						       &disagree), -ERANGE);
++	KUNIT_EXPECT_EQ(test, disagree, 2U);
++}
++
++/* The second pump joins above 1.4 A with VBUS agreeing, and shares from 0.5 A each within 1 A. */
++static void sc8547_direct_test_second(struct kunit *test)
++{
++	struct sc8547_sample m = main_running, s = {};
++
++	s.vbus_uv = 8000000;
++	m.ibus_ua = 1400000;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_join(&m, &s));
++	m.ibus_ua = 1400001;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_join(&m, &s));
++	s.vbus_uv = 8250000;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_join(&m, &s));
++	s.vbus_uv = 8250001;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_join(&m, &s));
++	s.vbus_uv = 7749999;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_join(&m, &s));
++
++	s = main_running;
++	m.ibus_ua = 500000;
++	s.ibus_ua = 500000;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_shared(&m, &s));
++	m.ibus_ua = 499999;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_shared(&m, &s));
++	m.ibus_ua = 500000;
++	s.ibus_ua = 499999;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_shared(&m, &s));
++	m.ibus_ua = 1500000;
++	s.ibus_ua = 500000;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_shared(&m, &s));
++	m.ibus_ua = 1500001;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_shared(&m, &s));
++	m.ibus_ua = 500000;
++	s.ibus_ua = 1500001;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_shared(&m, &s));
++	s.ibus_ua = 1500000;
++	KUNIT_EXPECT_TRUE(test, sc8547_direct_second_shared(&m, &s));
++	s.switching = false;
++	KUNIT_EXPECT_FALSE(test, sc8547_direct_second_shared(&m, &s));
++}
++
++static struct kunit_case sc8547_direct_test_cases[] = {
++	KUNIT_CASE(sc8547_direct_test_constants),
++	KUNIT_CASE(sc8547_direct_test_scale),
++	KUNIT_CASE(sc8547_direct_test_thermal_die),
++	KUNIT_CASE(sc8547_direct_test_thermal_thermistors),
++	KUNIT_CASE(sc8547_direct_test_thermal_cell),
++	KUNIT_CASE(sc8547_direct_test_taper),
++	KUNIT_CASE(sc8547_direct_test_admissible),
++	KUNIT_CASE(sc8547_direct_test_entry),
++	KUNIT_CASE(sc8547_direct_test_regulate),
++	KUNIT_CASE(sc8547_direct_test_running_window),
++	KUNIT_CASE(sc8547_direct_test_running_current),
++	KUNIT_CASE(sc8547_direct_test_running_disagree),
++	KUNIT_CASE(sc8547_direct_test_second),
++	{}
++};
++
++static struct kunit_suite sc8547_direct_test_suite = {
++	.name = "sc8547-direct-policy",
++	.test_cases = sc8547_direct_test_cases,
++};
++kunit_test_suite(sc8547_direct_test_suite);
++
++MODULE_DESCRIPTION("KUnit tests for the SC8547D direct charging envelope");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index f700348..2d57991 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -28,6 +28,8 @@
+ #include <linux/seq_file.h>
+ #include <linux/workqueue.h>
+ 
++#include "sc8547_direct_policy.h"
++
+ #define SC8547_DPDM_CTRL	0x21
+ #define SC8547_DPDM_CTRL2	0x22
+ #define SC8547_VOOC_CTRL	0x2b
+@@ -46,15 +48,8 @@
+ #define SC8547_PHY_MASK_RX	0x05
+ #define SC8547_PHY_MASK_TX	0x04
+ 
+-/* A 2:1 pump and its battery path as qualified on this board. */
++/* The FASTCHG reply describing this board's charging circuit. */
+ #define SVOOC_CIRCUIT		0x30
+-#define SVOOC_MAX_UA		6200000
+-#define SVOOC_PUMP_MAX_UA	3300000
+-#define SVOOC_MIN_UA		1500000
+-#define SVOOC_POWER_UW		55000000LL
+-#define SVOOC_POWER_MAX_UW	60000000LL
+-#define SVOOC_VBAT_MAX_UV	4480000
+-#define SVOOC_SECOND_UA		1400000
+ /* Noise frames tolerated before the adapter's first one. */
+ #define SVOOC_IGNORE_MAX	6
+ /* Late replies in a row tolerated after the battery curve. */
+@@ -79,27 +74,11 @@
+ #define SVOOC_RESTORE_MS	3000
+ #define SVOOC_PLUG_MS		2000
+ 
+-enum svooc_therm {
+-	SVOOC_USB_CONNECTOR,
+-	SVOOC_BATTERY_CONNECTOR,
+-	SVOOC_BOARD,
+-	SVOOC_MOS,
+-	SVOOC_THERMS,
+-};
+-
+-static const char * const svooc_therm_names[] = {
+-	"usb-connector", "battery-connector", "board", "mos",
+-};
+-
+-/* Full current up to the soft limit, none at the hard limit, in m°C. */
+-static const struct {
+-	int soft;
+-	int hard;
+-} svooc_therm_limits[] = {
+-	[SVOOC_USB_CONNECTOR] = { 60000, 70000 },
+-	[SVOOC_BATTERY_CONNECTOR] = { 60000, 70000 },
+-	[SVOOC_BOARD] = { 45000, 55000 },
+-	[SVOOC_MOS] = { 60000, 70000 },
++static const char * const svooc_therm_names[SC8547_DIRECT_THERMS] = {
++	[SC8547_DIRECT_USB_CONNECTOR] = "usb-connector",
++	[SC8547_DIRECT_BATTERY_CONNECTOR] = "battery-connector",
++	[SC8547_DIRECT_BOARD] = "board",
++	[SC8547_DIRECT_MOS] = "mos",
+ };
+ 
+ enum svooc_state {
+@@ -118,21 +97,13 @@ static const char * const svooc_state_names[] = {
+ 	"stopping", "done",
+ };
+ 
+-struct svooc_battery {
+-	int uv;
+-	int ua;
+-	int capacity;
+-	int temp;
+-	int health;
+-};
+-
+ struct sc8547_svooc {
+ 	struct device *dev;
+ 	struct sc8547 *main;
+ 	struct sc8547 *second;
+ 	struct regmap *regmap;
+ 	struct mux_state *dpdm;
+-	struct iio_channel *therm[SVOOC_THERMS];
++	struct iio_channel *therm[SC8547_DIRECT_THERMS];
+ 	struct power_supply *usb;
+ 	struct power_supply *battery;
+ 	struct power_supply *psy;
+@@ -145,8 +116,8 @@ struct sc8547_svooc {
+ 	enum svooc_state state;
+ 	enum power_supply_charge_type mode;
+ 	struct sc8547_sample sample[2];
+-	struct svooc_battery bat;
+-	int therm_mc[SVOOC_THERMS];
++	struct sc8547_direct_battery bat;
++	int therm_mc[SC8547_DIRECT_THERMS];
+ 	unsigned long plugged_at;
+ 	unsigned long started;
+ 	unsigned long last_rx;
+@@ -207,7 +178,8 @@ static int svooc_set_input(struct sc8547_svooc *sv, bool suspend)
+ 					 POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val);
+ }
+ 
+-static int svooc_read_battery(struct sc8547_svooc *sv, struct svooc_battery *bat)
++static int svooc_read_battery(struct sc8547_svooc *sv,
++			      struct sc8547_direct_battery *bat)
+ {
+ 	int ret;
+ 
+@@ -227,7 +199,7 @@ static int svooc_read_therms(struct sc8547_svooc *sv, int *mc)
+ {
+ 	int i, ret;
+ 
+-	for (i = 0; i < SVOOC_THERMS; i++) {
++	for (i = 0; i < SC8547_DIRECT_THERMS; i++) {
+ 		ret = iio_read_channel_processed(sv->therm[i], &mc[i]);
+ 		if (ret < 0)
+ 			return ret;
+@@ -248,80 +220,20 @@ static bool svooc_charger(struct sc8547_svooc *sv, int *vbus_uv)
+ 	       type == POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID;
+ }
+ 
+-static int svooc_scale(int value, int soft, int hard)
++/* The hotter die of the pumps in use. */
++static int svooc_die(struct sc8547_svooc *sv)
+ {
+-	if (value <= soft)
+-		return SVOOC_MAX_UA;
+-	if (value >= hard)
+-		return 0;
+-	return div_s64((s64)SVOOC_MAX_UA * (hard - value), hard - soft);
++	return max(sv->sample[0].temp, sv->second ? sv->sample[1].temp : 0);
+ }
+ 
+-/* The current the temperatures allow; the battery keeps 1.5 A up to 44 °C. */
+ static int svooc_thermal_ua(struct sc8547_svooc *sv)
+ {
+-	int ua, die, i;
+-
+-	die = max(sv->sample[0].temp, sv->second ? sv->sample[1].temp : 0);
+-	ua = svooc_scale(die, 600, 700);
+-	for (i = 0; i < SVOOC_THERMS; i++)
+-		ua = min(ua, svooc_scale(sv->therm_mc[i], svooc_therm_limits[i].soft,
+-					 svooc_therm_limits[i].hard));
+-	if (sv->bat.temp < 440)
+-		ua = min(ua, max(svooc_scale(sv->bat.temp, 380, 440), SVOOC_MIN_UA));
+-	else
+-		ua = 0;
+-	if (sv->bat.temp < 210)
+-		ua = min(ua, 2500000);
+-	return ua;
++	return sc8547_direct_thermal_ua(svooc_die(sv), sv->therm_mc, sv->bat.temp);
+ }
+ 
+ static int svooc_vbat(struct sc8547_svooc *sv)
+ {
+-	/* Neither sense point may hide the taper from the other. */
+-	return max(sv->bat.uv, sv->sample[0].vbat_uv);
+-}
+-
+-static int svooc_taper_ua(int uv)
+-{
+-	if (uv >= 4460000)
+-		return 1500000;
+-	if (uv >= 4440000)
+-		return 2000000;
+-	if (uv >= 4420000)
+-		return 3000000;
+-	if (uv >= 4400000)
+-		return 4000000;
+-	return SVOOC_MAX_UA;
+-}
+-
+-static bool svooc_admissible(struct sc8547_svooc *sv)
+-{
+-	const struct svooc_battery *bat = &sv->bat;
+-	int i;
+-
+-	if (bat->health != POWER_SUPPLY_HEALTH_GOOD || bat->capacity >= 90 ||
+-	    bat->temp < 150 || bat->temp >= 440 ||
+-	    bat->uv < 3300000 || bat->uv >= 4400000)
+-		return false;
+-	for (i = 0; i < SVOOC_THERMS; i++)
+-		if (sv->therm_mc[i] < 0 || sv->therm_mc[i] >= svooc_therm_limits[i].soft)
+-			return false;
+-	return true;
+-}
+-
+-/* The session's current, chosen at entry from the charge level. */
+-static int svooc_entry_ua(struct sc8547_svooc *sv)
+-{
+-	int ua = sv->bat.capacity <= 55 ? SVOOC_MAX_UA :
+-		 sv->bat.capacity < 85 ? 3000000 : 2000000;
+-
+-	ua = min(ua, svooc_thermal_ua(sv));
+-	ua = min(ua, svooc_taper_ua(sv->bat.uv));
+-	/* Within the power budget at the top of the VBUS window. */
+-	ua = min_t(int, ua, div_s64(SVOOC_POWER_UW * 1000000,
+-				    2 * sv->bat.uv + 700000));
+-	return ua / 100000 * 100000;
++	return sc8547_direct_vbat_uv(sv->bat.uv, sv->sample[0].vbat_uv);
+ }
+ 
+ static int svooc_ibus(struct sc8547_svooc *sv)
+@@ -607,8 +519,8 @@ static void svooc_phy_irq(void *data)
+ 
+ static void svooc_start(struct sc8547_svooc *sv)
+ {
+-	struct svooc_battery bat;
+-	int therm[SVOOC_THERMS], vbus, ret;
++	struct sc8547_direct_battery bat;
++	int therm[SC8547_DIRECT_THERMS], vbus, ret;
+ 
+ 	if (sv->mode != POWER_SUPPLY_CHARGE_TYPE_FAST || !svooc_charger(sv, &vbus) ||
+ 	    vbus < 4500000 || vbus > 5500000)
+@@ -625,11 +537,12 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 	sv->bat = bat;
+ 	memcpy(sv->therm_mc, therm, sizeof(therm));
+ 	memset(sv->sample, 0, sizeof(sv->sample));
+-	sv->limit_ua = svooc_entry_ua(sv);
++	sv->limit_ua = sc8547_direct_entry_ua(&sv->bat, sv->therm_mc, svooc_die(sv));
+ 	if (!sv->second)
+-		sv->limit_ua = min(sv->limit_ua, SVOOC_PUMP_MAX_UA);
++		sv->limit_ua = min(sv->limit_ua, SC8547_DIRECT_PUMP_MAX_UA);
+ 	mutex_unlock(&sv->lock);
+-	if (!svooc_admissible(sv) || sv->limit_ua < SVOOC_MIN_UA) {
++	if (!sc8547_direct_admissible(&sv->bat, sv->therm_mc) ||
++	    sv->limit_ua < SC8547_DIRECT_MIN_UA) {
+ 		mod_delayed_work(system_highpri_wq, &sv->work,
+ 				 msecs_to_jiffies(SVOOC_RETRY_MS));
+ 		return;
+@@ -694,31 +607,17 @@ static void svooc_start(struct sc8547_svooc *sv)
+ 
+ static int svooc_check_running(struct sc8547_svooc *sv)
+ {
+-	const struct sc8547_sample *m = &sv->sample[0], *s = &sv->sample[1];
+-	int ibus = svooc_ibus(sv), vbat = sv->bat.uv;
+-	s64 power = (s64)m->vbus_uv * ibus;
++	int ret;
+ 
+-	if (!m->switching)
+-		return -EIO;
+-	if (m->vbus_uv < 2 * vbat - 100000 || m->vbus_uv > 2 * vbat + 700000)
+-		return -ERANGE;
+-	if (ibus > sv->limit_ua + 300000 || m->ibus_ua > SVOOC_PUMP_MAX_UA ||
+-	    (!sv->dual && ibus > SVOOC_PUMP_MAX_UA) ||
+-	    power > SVOOC_POWER_MAX_UW * 1000000)
+-		return -ERANGE;
+-	if (sv->second_on && s->ibus_ua > SVOOC_PUMP_MAX_UA)
+-		return -ERANGE;
+-	/* The pumps are sampled in turn: one pair may straddle a step. */
+-	if (sv->second_on && abs(s->vbus_uv - m->vbus_uv) > 250000) {
+-		if (++sv->disagree > 1)
+-			return -ERANGE;
+-	} else {
+-		sv->disagree = 0;
+-	}
+-	if (sv->dual && !s->switching)
+-		return -EIO;
++	ret = sc8547_direct_running_ok(&sv->sample[0], &sv->sample[1], sv->bat.uv,
++				       sv->limit_ua, sv->second_on, sv->dual,
++				       &sv->disagree);
++	if (ret)
++		return ret;
++	/* The adapter must settle on what it was asked for. */
+ 	if (sv->state == SVOOC_RUNNING && !sv->pending_ua && !sv->change &&
+-	    time_after_eq(jiffies, sv->ramp_after) && ibus > sv->applied_ua + 300000)
++	    time_after_eq(jiffies, sv->ramp_after) &&
++	    svooc_ibus(sv) > sv->applied_ua + 300000)
+ 		return -ERANGE;
+ 	return 0;
+ }
+@@ -731,8 +630,7 @@ static int svooc_second(struct sc8547_svooc *sv, bool *enable)
+ 	if (!sv->second || sv->dual || sv->state != SVOOC_RUNNING)
+ 		return 0;
+ 	if (!sv->second_on) {
+-		if (m->ibus_ua > SVOOC_SECOND_UA &&
+-		    abs(s->vbus_uv - m->vbus_uv) <= 250000) {
++		if (sc8547_direct_second_join(m, s)) {
+ 			sv->second_on = true;
+ 			sv->second_at = jiffies;
+ 			*enable = true;
+@@ -741,8 +639,7 @@ static int svooc_second(struct sc8547_svooc *sv, bool *enable)
+ 	}
+ 	if (time_before(jiffies, sv->second_at + msecs_to_jiffies(300)))
+ 		return 0;
+-	if (s->switching && m->ibus_ua >= 500000 && s->ibus_ua >= 500000 &&
+-	    abs(m->ibus_ua - s->ibus_ua) <= 1000000) {
++	if (sc8547_direct_second_shared(m, s)) {
+ 		sv->dual = true;
+ 		return 0;
+ 	}
+@@ -756,21 +653,15 @@ static int svooc_second(struct sc8547_svooc *sv, bool *enable)
+  */
+ static int svooc_regulate(struct sc8547_svooc *sv)
+ {
+-	int vbus = sv->sample[0].vbus_uv, ua;
+-	s64 power = (s64)vbus * svooc_ibus(sv);
++	int ua;
+ 
+ 	if (sv->state != SVOOC_RUNNING || (sv->second && !sv->dual &&
+-					    sv->applied_ua > SVOOC_PUMP_MAX_UA))
++					    sv->applied_ua > SC8547_DIRECT_PUMP_MAX_UA))
+ 		return 0;
+-	sv->taper_ua = min(sv->taper_ua, svooc_taper_ua(svooc_vbat(sv)));
+-	ua = min(sv->limit_ua, sv->taper_ua);
+-	ua = min(ua, svooc_thermal_ua(sv));
+-	ua = min_t(int, ua, div_s64(SVOOC_POWER_UW * 1000000, vbus) - 100000);
+-	if (power > SVOOC_POWER_UW * 1000000)
+-		ua = min_t(int, ua, sv->applied_ua - 100000 -
+-			   div_s64(power - (SVOOC_POWER_UW - 500000) * 1000000, vbus));
+-	ua = ua / 100000 * 100000;
+-	if (ua < SVOOC_MIN_UA)
++	ua = sc8547_direct_regulate_target_ua(sv->limit_ua, &sv->taper_ua, svooc_vbat(sv),
++					      svooc_thermal_ua(sv), sv->sample[0].vbus_uv,
++					      svooc_ibus(sv), sv->applied_ua);
++	if (ua < SC8547_DIRECT_MIN_UA)
+ 		return 1;
+ 	if (sv->pending_ua || sv->change ||
+ 	    time_before(jiffies, sv->change_deadline))
+@@ -795,7 +686,8 @@ static int svooc_check(struct sc8547_svooc *sv)
+ 	int frame_ms = sv->frames ? SVOOC_FRAME_MS : SVOOC_FIRST_FRAME_MS;
+ 	int i, vbat = svooc_vbat(sv);
+ 
+-	if (sv->mode != POWER_SUPPLY_CHARGE_TYPE_FAST || sv->bat.capacity >= 90)
++	if (sv->mode != POWER_SUPPLY_CHARGE_TYPE_FAST ||
++	    sv->bat.capacity >= SC8547_DIRECT_CAPACITY_END)
+ 		return 1;
+ 	if (time_after(now, sv->last_rx + msecs_to_jiffies(frame_ms)))
+ 		return -ETIMEDOUT;
+@@ -806,13 +698,13 @@ static int svooc_check(struct sc8547_svooc *sv)
+ 		return -ETIMEDOUT;
+ 	if (sv->change && time_after(now, sv->change_deadline))
+ 		return -ETIMEDOUT;
+-	if (sv->bat.health != POWER_SUPPLY_HEALTH_GOOD || vbat >= SVOOC_VBAT_MAX_UV ||
+-	    sv->bat.temp >= 440)
++	if (sv->bat.health != POWER_SUPPLY_HEALTH_GOOD ||
++	    vbat >= SC8547_DIRECT_VBAT_MAX_UV || sv->bat.temp >= SC8547_DIRECT_CELL_MAX_DC)
+ 		return -ERANGE;
+-	for (i = 0; i < SVOOC_THERMS; i++)
+-		if (sv->therm_mc[i] >= svooc_therm_limits[i].hard)
++	for (i = 0; i < SC8547_DIRECT_THERMS; i++)
++		if (sv->therm_mc[i] >= sc8547_direct_therm_limits[i].hard)
+ 			return -ERANGE;
+-	if (max(sv->sample[0].temp, sv->sample[1].temp) >= 700)
++	if (max(sv->sample[0].temp, sv->sample[1].temp) >= SC8547_DIRECT_DIE_MAX_DC)
+ 		return -ERANGE;
+ 	if (sv->bat.ua <= -3000000) {
+ 		if (!sv->discharge_since)
+@@ -850,8 +742,8 @@ static int svooc_check(struct sc8547_svooc *sv)
+ static void svooc_tick(struct sc8547_svooc *sv)
+ {
+ 	struct sc8547_sample sample[2] = {};
+-	struct svooc_battery bat;
+-	int therm[SVOOC_THERMS], usb_ua = 0, usb_uv = 0, online = 0;
++	struct sc8547_direct_battery bat;
++	int therm[SC8547_DIRECT_THERMS], usb_ua = 0, usb_uv = 0, online = 0;
+ 	bool read_main, read_bat, read_therm, read_usb, suspend = false, second = false, changed;
+ 	enum svooc_state state;
+ 	int ret;
+@@ -1257,7 +1149,7 @@ static int svooc_probe(struct auxiliary_device *adev,
+ 	sv->dpdm = devm_mux_state_get(dev, NULL);
+ 	if (IS_ERR(sv->dpdm))
+ 		return dev_err_probe(dev, PTR_ERR(sv->dpdm), "Cannot get the D+/D- mux\n");
+-	for (i = 0; i < SVOOC_THERMS; i++) {
++	for (i = 0; i < SC8547_DIRECT_THERMS; i++) {
+ 		sv->therm[i] = devm_iio_channel_get(dev, svooc_therm_names[i]);
+ 		if (IS_ERR(sv->therm[i]))
+ 			return dev_err_probe(dev, PTR_ERR(sv->therm[i]),

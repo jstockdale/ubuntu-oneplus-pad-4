@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Tue, 03 Nov 2026 17:01:00 -0800
+Subject: [PATCH] power: supply: sc8547_svooc: refuse system suspend while a
+ session runs
+
+The driver holds a wakeup source from the start of a session to its
+restore (pm_stay_awake() in svooc_start(), pm_relax() in
+svooc_restore()). That keeps autosleep away; it does not stop a suspend
+written to /sys/power/state or ordered by systemctl. Asleep, the
+session's worker stops: the pumps keep switching until their 5 s
+watchdog, the firmware keeps the input suspended on the session's vote
+(input current limit 0), and a VOOC adapter left without replies drops
+back to 5 V under pumps that expect twice the battery voltage. Nothing
+in the driver sees any of it until resume. devices/iceland/charging.md
+asks that a suspend with an active session "stop cleanly or refuse",
+and the PD PPS plan (revision 2, section 4.3 "System suspend", commit
+B3) records that refusing was chosen. This commit refuses rather than
+stops because a stop at suspend time would race the firmware round
+trips of the restore (the input current limit given back, VBUS watched
+down to 5.5 V) against the suspend of the GLINK transport they travel
+on, which nothing orders after this driver's; a restore that did not
+reach the firmware would leave the input suspended across the sleep.
+
+Add a suspend callback that returns -EBUSY while the session is between
+IDENTIFY and STOPPING, so the suspend is aborted and the devices already
+suspended are resumed, and say so in the log, naming the protocol and
+the state the session was in. IDLE and DONE let the system sleep: no
+pump is prepared and the input is the buck's. The wakeup source stays
+as it is. The auxiliary bus has no PM operations of its own, so the
+callbacks go in the driver's dev_pm_ops; they are named for the PM
+core, since the driver already has a session state called SUSPEND, the
+buck handoff.
+
+A check of the state alone would race the driver's own worker. Its
+delayed work runs on system_highpri_wq, which is not freezable, and a
+start it has put off, 2 s after a plug or 10 s after a refused gauge
+reading, could begin a session after the callback had answered 0; the
+system would then sleep with it, since the PM core counts wakeup
+sources against a suspend in progress only while /sys/power/wakeup_count
+is in use, which systemd does not do. So the callback first marks the
+driver asleep, which the worker checks under the lock before it starts
+a session, then cancels the work synchronously so that a start under
+way completes one way or the other, and only then reads the state: a
+session is refused, the mark lifted and the work queued again, since
+the cancel took its next tick; IDLE and DONE sleep with the mark held.
+The resume callback lifts the mark and queues the work, so a plug
+deferred across the sleep starts then.
+
+Not exercised on the tablet: system suspend is unverified on this port
+and the sleep targets are not yet usable there. The module builds with
+CONFIG_PM_SLEEP=y and carries both callbacks.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/power/supply/sc8547_svooc.c |   63 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 62 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/sc8547_svooc.c b/drivers/power/supply/sc8547_svooc.c
+index 9871f82..841ea46 100644
+--- a/drivers/power/supply/sc8547_svooc.c
++++ b/drivers/power/supply/sc8547_svooc.c
+@@ -18,6 +18,7 @@
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/mux/consumer.h>
++#include <linux/pm.h>
+ #include <linux/pm_wakeup.h>
+ #include <linux/power/oplus_svooc.h>
+ #include <linux/power/sc8547.h>
+@@ -194,6 +195,8 @@ struct sc8547_svooc {
+ 	unsigned int skipped;
+ 	unsigned int retries;
+ 	bool stopping;
++	/* No session starts while the system is suspended; under the lock. */
++	bool asleep;
+ };
+ 
+ static int svooc_get(struct power_supply *psy, enum power_supply_property prop,
+@@ -1028,14 +1031,16 @@ static void svooc_work(struct work_struct *work)
+ {
+ 	struct sc8547_svooc *sv = container_of(work, struct sc8547_svooc, work.work);
+ 	enum svooc_state state;
++	bool asleep;
+ 
+ 	mutex_lock(&sv->lock);
+ 	state = sv->state;
++	asleep = sv->asleep;
+ 	mutex_unlock(&sv->lock);
+ 
+ 	switch (state) {
+ 	case SVOOC_IDLE:
+-		if (!sv->stopping)
++		if (!sv->stopping && !asleep)
+ 			svooc_start(sv);
+ 		break;
+ 	case SVOOC_STOPPING:
+@@ -1332,11 +1337,67 @@ static void svooc_shutdown(struct auxiliary_device *adev)
+ 		svooc_restore(sv);
+ }
+ 
++/*
++ * A session holds the charger's input and may have the pumps switching
++ * under their watchdog; asleep, the driver could keep neither in hand. The
++ * wakeup source keeps the system up while one runs, and a suspend forced
++ * past it is refused. The worker is not frozen with the system, so a start
++ * it has put off (2 s after a plug, 10 s after a refusal) is held back
++ * first, and one under way is let finish before the state is read.
++ */
++static int svooc_pm_suspend(struct device *dev)
++{
++	struct sc8547_svooc *sv = dev_get_drvdata(dev);
++	const char *name = NULL;
++	enum svooc_state state;
++	bool busy;
++
++	if (!sv)
++		return 0;
++	mutex_lock(&sv->lock);
++	sv->asleep = true;
++	mutex_unlock(&sv->lock);
++	cancel_delayed_work_sync(&sv->work);
++	mutex_lock(&sv->lock);
++	state = sv->state;
++	busy = sv->state >= SVOOC_IDENTIFY && sv->state <= SVOOC_STOPPING;
++	if (busy) {
++		name = sv->ops->name;
++		/* The session goes on, with the tick the cancel took. */
++		sv->asleep = false;
++		mod_delayed_work(system_highpri_wq, &sv->work, 0);
++	}
++	mutex_unlock(&sv->lock);
++	if (busy)
++		dev_warn(dev, "refusing system suspend: %s session in %s\n", name,
++			 svooc_state_names[state]);
++	return busy ? -EBUSY : 0;
++}
++
++/* What was put off across the sleep may start now. */
++static int svooc_pm_resume(struct device *dev)
++{
++	struct sc8547_svooc *sv = dev_get_drvdata(dev);
++
++	if (!sv)
++		return 0;
++	mutex_lock(&sv->lock);
++	sv->asleep = false;
++	mutex_unlock(&sv->lock);
++	mod_delayed_work(system_highpri_wq, &sv->work, 0);
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(svooc_pm_ops, svooc_pm_suspend, svooc_pm_resume);
++
+ static struct auxiliary_driver svooc_driver = {
+ 	.name = "svooc",
+ 	.probe = svooc_probe,
+ 	.shutdown = svooc_shutdown,
+ 	.id_table = svooc_id_table,
++	.driver = {
++		.pm = pm_sleep_ptr(&svooc_pm_ops),
++	},
+ };
+ module_auxiliary_driver(svooc_driver);
+ 
