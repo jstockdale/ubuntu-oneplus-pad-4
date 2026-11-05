@@ -4447,3 +4447,53 @@ after a session end, under the witness load). The controlled ending
 (the session script's end, the witnesses off, a quiet minute in
 Standard, then the unplug) follows; the 2 A stage comes after a
 backlight-only drain to 88 %.
+
+## 2026-11-04 — The fourth silent reset, at an unplug four minutes after a session end with no load; the 2 A stage passes; the hazard window is the minutes after a session
+
+The ending after the 3 A stage was done by the book: the session
+script's end, the host witnesses stopped, the tablet-side readers and
+the sync loop killed, a quiet minute in Standard (load 0.26–0.77, the
+owner using the pen), then the owner's unplug at ≈ 17:58:54. The tablet
+reset within seconds — the host lost it by 17:59:17 and the new boot
+was up at ≈ 18:01:20, on the flashed #46 kernel (a RAM boot does not
+survive a reset). No load this time, so the CPU-load reading of the
+12:20:42 event is gone. What the two unplug resets share is an unplug
+within minutes of a SuperVOOC session end (12:20: 10 s after; 17:59:
+4 min after, and 4 min after the brick's own output cycle); D3's unplug
+21 min after its end did not reset, and today's 86-minute load-free
+drain had no session before it.
+
+Witness lesson: the persisted journal of a boot that ends in one of
+these resets holds no kernel message after early boot (1983 lines, the
+last at 8.9 s; the 12:20 census showed the same), while the running
+boot's journal has every kernel line — the kernel lines of the last
+minutes do not reach the disk. And the sync loop went with the
+witnesses. So the firmware log stream and a kernel-log stream (`dmesg
+-w` to the host) must run across the next unplug — lightweight, not
+the chg.sh status stream — and the sync loop stays.
+
+The 2 A stage then ran on the #46 boot with the #47 module tree (the
+same charging modules; the kernels differ only in the pogo device
+tree): the brick in at 88 % after a backlight-only drain, "SuperVOOC
+adapter 24 (55 W) at 2000 mA" at 18:10:08, both pumps at 1.03 + 0.98 A
+(0082's join above 1.4 A total), the taper 2.0 → 1.5 A, "SuperVOOC
+finished" at 18:16:33 — 88 → 90 % in 6.5 minutes, 8300 frames, every
+counter zero, thermistors ≤ 35.6 °C, the brick's output cycle at the end
+again. PASS. All three stages — 2 A, 3 A and the class-capped one —
+have now passed on the patched driver (D3 and #47).
+
+The ending this time kept the firmware and kernel streams and two sync
+loops running and armed the reset watcher; the owner's unplug came at
+18:46:55, thirty minutes after the end rather than the two or three
+intended, and the tablet stayed up (no reset in 150 s). That is the
+third unplug twenty or more minutes after a session end with no reset,
+against two within four minutes that reset. The witnessed early unplug
+remains owed for a day with a drained battery; it is the next
+experiment on the reset item, ahead of the CPU-load one.
+
+State at the end of the day: the tablet on battery at 90 % on the
+flashed #46 kernel with the #47 module tree (0091, 0092), policy
+Standard; bundle boot-47-7b8bb53d RAM-booted twice with a green census
+and the stages passed, the flash to boot_b the owner's decision; rung K
+(the keyboard) needs the #47 kernel; the 24 h soak and the Fast default
+follow the flash.
