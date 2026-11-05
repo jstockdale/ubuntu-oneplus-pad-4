@@ -410,7 +410,17 @@ decoded shell model cannot run yet.
    SW_HEADPHONE_INSERT=1 and an MBHC plug line on insertion; then a
    Headphones UCM device from the wcd939x sequences alsa-ucm-conf already
    ships; if detection never fires, obtain Fedora's q90w2 headset fixes.
-K — pogo keyboard (the OnePlus Pad 4 Smart Keyboard, arrived 2026-11-04;
+K — pogo keyboard — **first contact 2026-11-04 19:43–20:08 on the flashed #47: PASS with 0093.** The dock
+   attached, named itself (firmware KA031_A_1.3.1_PT_A_31_TP_A_16), registered its keyboard and touchpad and the
+   backlight LED — and then sent nothing but its hello frame every 100 ms (sync: hello 6474, heartbeat 0): a dock
+   stays in its plug-in phase until the host says it is awake (general 0x3a sub 0x02), which 0088 only did after a
+   system resume. A hand-sent wake through the debugfs node flipped it to heartbeats at once; the Fedora queue's
+   0280 (2026-10-10, SuperTurtleDev's finding) is the fix, adopted byte-identical as 0093; reloaded with the dock
+   on, the attach is hello → version → wake → ack → LED → heartbeat within 50 ms, and keys, media keys, touchpad
+   and backlight work for the owner. Firmware notes for mzak: general sub-commands 0c/0e/1c/03/08/09/1b/21 get no
+   answer, 11/17/19 are acked. The flight blacklist is lifted (autoload from the next boot); owed: a detach/
+   re-attach cycle, a reboot census with the autoload, sleep/wake with the dock, 0.2.34. Original rung text:
+   (the OnePlus Pad 4 Smart Keyboard, arrived 2026-11-04;
    host side done the same day: patches 0087–0090 = the Fedora port's
    0094–0097 with the board nodes re-diffed onto our dts, and
    CONFIG_KEYBOARD_ONEPLUS_POGO=m in kernel/config/config-pogo-keyboard.fragment;

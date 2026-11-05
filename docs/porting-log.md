@@ -4509,3 +4509,48 @@ flight blacklist, the 0092 touch module on disk. The 24 h soak runs
 from here; rung K, the witnessed early unplug and the Fast default
 follow. (The partition names on Ubuntu are /dev/disk/by-partlabel/…,
 not Android's /dev/block/by-name — a runbook line.)
+
+## 2026-11-04 — Rung K, the keyboard's first contact: the dock stayed in its hello phase until the host said it was awake; with Fedora's 0280 (our 0093) keys, touchpad, media keys and backlight work
+
+With the dock off, `modprobe oneplus_pogo_keyboard` (the flight blacklist
+holds it back from autoloading) probed cleanly: "UART at 921600 baud, data
+line high: no dock", debugfs under /sys/kernel/debug/oneplus-pogo with
+status, trace, send and selftest, the supply off, the detect interrupt
+armed. The dock attached at 19:43:27: the line went low, the supply came
+on, one second later the hello frame named it "OnePlus Pad 4 Smart
+Keyboard", the driver asked its version (firmware
+KA031_A_1.3.1_PT_A_31_TP_A_16) and registered the keyboard (event8) and
+touchpad (event9, 107 × 58 mm) devices and a backlight LED. Then nothing:
+four captures over twenty minutes saw no key, media or touchpad frame,
+and the status told why — sync: hello 6474, heartbeat 0. The dock
+repeated its hello every 100 ms and the driver, reading each hello as
+"the dock restarted", re-sent the LED parameter once a second (the one
+frame per second in the trace). A dock that keeps saying hello has not
+left its plug-in phase and reports nothing. Sent by hand through the
+debugfs node, the general command 0x3a sub-command 0x02 "awake" got the
+dock's acknowledgement and its first heartbeat within milliseconds.
+
+The Fedora queue already had the fix: 0280 "tell the dock the host is
+awake on attach" (2026-10-10), crediting SuperTurtleDev's finding in a
+different driver for the same dock; their FEATURES.md records the owner
+confirming keys, touchpad, lamps and backlight on 2026-10-22. It had not
+come along in the afternoon because a file listing was cut at five
+entries. Adopted byte-identical as 0093, the module built against the
+#47 tree and reloaded with the dock attached: hello → version → the wake
+40 µs after the version reply → acknowledgement → LED parameter → the
+first heartbeat within 50 ms, three frames sent, no resend. The keys
+still seemed silent for a while — the captures were empty because nothing
+had been typed into them yet — and then the owner: the backlight lit at
+the LED device's command, "the brightness keys work now", "hey its
+working", and a few minutes later "now the mouse works too". The driver
+counted 44 key and 8 media reports by 20:06; the first key frame in the
+trace is a plain boot report. Keys, media keys, touchpad and backlight:
+rung K's first contact passes on #47.
+
+Bring-up notes for mzak: most general sub-commands get no answer from
+this firmware (touchpad status 0c, battery 0e, brightness 1c, and 03,
+08, 09, 1b, 21 all time out), three (11, 17, 19) are acked with 01; the
+status field read as "touchpad-disabled" from a heartbeat byte showed 75
+after those queries. The flight blacklist was lifted the same evening so
+the driver autoloads from the next boot; a detach/re-attach cycle and a
+reboot census with the autoload remain the rung's last checks.
