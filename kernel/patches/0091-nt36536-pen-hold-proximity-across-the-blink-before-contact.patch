@@ -1,0 +1,196 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 4 Nov 2026 16:11:46 -0800
+Subject: [PATCH] Input: nt36536: hold the pen in proximity across the
+ controller's blink before contact
+
+The controller reports the pen out of range once between hovering and
+the first contact. On the OnePlus Pad 4 an evtest capture shows the
+sequence at every touch: hover frames with the tool in proximity, then a
+frame with the tool out, then 37 ms of nothing, then one frame with the
+tip down, the pressure and the tool back in proximity together. The
+driver passed that blink through as a proximity-out followed by a
+proximity-in in the same frame as the tip-down.
+
+A compositor that takes a tool's position from its own record of the
+tool when a tip-down starts a window grab - mutter's
+meta_window_drag_begin queries the tool's sprite - then begins the grab
+from the position it held at proximity-out, not from the tip: on GNOME
+50.1 a window dragged by its title bar with the pen lands with its far
+corner under the tip, while rubber-band selection and scrubbing, which
+use the event's own coordinates, anchor correctly.
+
+Hold the tool in proximity for 80 ms after a frame that says it has
+gone, and let the next pen frame cancel the hold, so that the blink
+before a touch is never reported and a real lift is reported 80 ms
+late. The "no pen" frame also no longer zeroes the position: the tip,
+the buttons and the pressure go at once, the position stays where the
+pen was (a jump to 0,0 moves the cursor to the corner, the "ghost
+cursor at the origin" of other GNOME 50 reports), and the deferred
+proximity-out clears the distance and the tool. The deferred work takes
+the driver's lock; the driver's own release paths drop a pending hold
+without waiting, remove and shutdown wait for it.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/input/touchscreen/nt36536/nt36xxx.c | 67 +++++++++++++++++++--
+ drivers/input/touchscreen/nt36536/nt36xxx.h |  3 +
+ 2 files changed, 65 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index a7af60c9822e..cd008ca54778 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -1038,6 +1038,9 @@ static void release_pen_event(void) {
+ 		input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
+ 		input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
+ 		input_sync(ts->pen_input_dev);
++		cancel_delayed_work(&ts->pen_out_work);
++		ts->pen_out_pending = false;
++		ts->pen_in_prox = false;
+ 	}
+ }
+ 
+@@ -1124,6 +1127,7 @@ static uint8_t nvt_fw_recovery(uint8_t *point_data)
+ }
+ 
+ #define PEN_DATA_LEN 14
++#define NVT_PEN_OUT_HOLD_MS 80	/* see nvt_pen_out_work() */
+ 
+ #if NVT_TOUCH_WDT_RECOVERY
+ static uint8_t recovery_cnt = 0;
+@@ -1189,6 +1193,43 @@ void nvt_read_fw_history(uint32_t fw_history_addr)
+ return:
+ 	n.a.
+ *******************************************************/
++/*
++ * The controller reports the pen out of range once between hovering and
++ * the first contact (on the OnePlus Pad 4, 37 ms before the touch frame,
++ * with nothing in between) and again when the pen really leaves.  Hold the
++ * tool in proximity for NVT_PEN_OUT_HOLD_MS and let the next pen frame
++ * cancel the hold, so that the blink before a touch is never reported.  A
++ * compositor that takes a tool's position from its own record of the tool
++ * when a tip-down starts a window grab (mutter, meta_window_drag_begin)
++ * otherwise begins the grab from the position it held at proximity-out
++ * and anchors the window at its far corner.
++ */
++static void nvt_pen_out_work(struct work_struct *work)
++{
++	struct nvt_ts_data *data = container_of(to_delayed_work(work),
++						 struct nvt_ts_data, pen_out_work);
++
++	mutex_lock(&data->lock);
++	if (data->pen_out_pending && data->pen_input_dev) {
++		data->pen_out_pending = false;
++		data->pen_in_prox = false;
++		input_report_abs(data->pen_input_dev, ABS_DISTANCE, 0);
++		input_report_key(data->pen_input_dev, BTN_TOOL_PEN, 0);
++		input_sync(data->pen_input_dev);
++	}
++	mutex_unlock(&data->lock);
++}
++
++/* Schedule the deferred proximity-out, once, while the tool is in; ts->lock held. */
++static void nvt_pen_out_hold(struct nvt_ts_data *data)
++{
++	if (data->pen_in_prox && !data->pen_out_pending) {
++		data->pen_out_pending = true;
++		schedule_delayed_work(&data->pen_out_work,
++				      msecs_to_jiffies(NVT_PEN_OUT_HOLD_MS));
++	}
++}
++
+ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ {
+ 	int32_t ret = -1;
+@@ -1356,7 +1397,14 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ 				input_report_abs(ts->pen_input_dev, ABS_TILT_X, pen_tilt_x);
+ 				input_report_abs(ts->pen_input_dev, ABS_TILT_Y, pen_tilt_y);
+ 				input_report_abs(ts->pen_input_dev, ABS_DISTANCE, pen_distance);
+-				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, !!pen_distance || !!pen_pressure);
++				if (pen_distance || pen_pressure) {
++					cancel_delayed_work(&ts->pen_out_work);
++					ts->pen_out_pending = false;
++					ts->pen_in_prox = true;
++					input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 1);
++				} else {
++					nvt_pen_out_hold(ts);
++				}
+ 				input_report_key(ts->pen_input_dev, BTN_STYLUS, pen_btn1);
+ 				input_report_key(ts->pen_input_dev, BTN_STYLUS2, pen_btn2);
+ 				// TBD: pen battery event report
+@@ -1368,16 +1416,19 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
+ 				goto XFER_ERROR;
+ 			}
+ 		} else { // pen_format_id = 0xFF, i.e. no pen present
+-			input_report_abs(ts->pen_input_dev, ABS_X, 0);
+-			input_report_abs(ts->pen_input_dev, ABS_Y, 0);
++			/*
++			 * The tip, the buttons and the pressure go at once; the
++			 * position stays where the pen was (a jump to 0,0 moves the
++			 * cursor to the corner) and the tool leaves proximity after
++			 * the hold, nvt_pen_out_work().
++			 */
+ 			input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
+ 			input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
+ 			input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
+-			input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
+ 			input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
+-			input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
+ 			input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
+ 			input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
++			nvt_pen_out_hold(ts);
+ 		}
+ 
+ 		input_sync(ts->pen_input_dev);
+@@ -1832,6 +1883,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
+ 	}
+ 
+ 	INIT_WORK(&ts->resume_work, nvt_resume_work);
++	INIT_DELAYED_WORK(&ts->pen_out_work, nvt_pen_out_work);
+ 
+ 	bTouchIsAwake = 1;
+ 	NVT_LOG("end\n");
+@@ -1907,6 +1959,7 @@ static void nvt_ts_remove(struct spi_device *client)
+ 
+ 	bTouchIsAwake = 0;
+ 
++	cancel_delayed_work_sync(&ts->pen_out_work);
+ 	mutex_destroy(&ts->pen_switch_lock);
+ 	destroy_workqueue(ts->event_wq);
+ 	ts->event_wq = NULL;
+@@ -1963,6 +2016,7 @@ static void nvt_ts_shutdown(struct spi_device *client)
+ 
+ 	nvt_irq_enable(false);
+ 
++	cancel_delayed_work_sync(&ts->pen_out_work);
+ 	mutex_destroy(&ts->pen_switch_lock);
+ 	destroy_workqueue(ts->event_wq);
+ 	ts->event_wq = NULL;
+@@ -2032,6 +2086,9 @@ static int32_t nvt_ts_suspend(struct device *dev)
+ 		input_report_key(ts->pen_input_dev, BTN_STYLUS, 0);
+ 		input_report_key(ts->pen_input_dev, BTN_STYLUS2, 0);
+ 		input_sync(ts->pen_input_dev);
++		cancel_delayed_work(&ts->pen_out_work);
++		ts->pen_out_pending = false;
++		ts->pen_in_prox = false;
+ 	}
+ 
+ 	msleep(50);
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.h b/drivers/input/touchscreen/nt36536/nt36xxx.h
+index 500b48c50c0f..88c92049969e 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.h
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.h
+@@ -150,6 +150,9 @@ struct nvt_ts_data {
+ 	uint8_t y_gang_num;
+ 	struct input_dev *pen_input_dev;
+ 	bool pen_input_dev_enable;
++	struct delayed_work pen_out_work;	/* the deferred proximity-out, nvt_pen_out_work() */
++	bool pen_in_prox;
++	bool pen_out_pending;
+ 	int8_t pen_phys[32];
+ 	int result_type;
+ 	int panel_index;
+-- 
+2.53.0
+

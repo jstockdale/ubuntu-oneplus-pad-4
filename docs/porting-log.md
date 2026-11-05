@@ -4332,3 +4332,50 @@ Next: bundle #47 = 0001–0084 + the pogo keyboard set 0087–0090 (the PD
 PPS pair keeps 0085/0086), RAM boot, the staged validation on the
 flashed driver (2 A above 85 %, 3 A from 56 %, the class-capped stage at
 ≤ 55 %), the 24 h soak, then Fast as the default.
+
+## 2026-11-04 — The pen's window-drag anchor: the controller blinks proximity before every contact and mutter 50.1 starts the grab from its sprite; patch 0091
+
+While #47 built, the owner asked for the GNOME stylus calibration to
+go back to factory (done: the `area` matrix and the output mapping
+under org/gnome/desktop/peripherals/tablets/0603:6536 reset; the
+pressure curves were already default) and reported that the pointer
+tracks the pen correctly but a window grabbed by its title bar with the
+pen anchors at the window's lower-right corner — the desktop's
+rubber-band selection and a YouTube scrub anchor perfectly.
+
+Evidence, in order: the pen's Bluetooth HID link (a 3-button relative
+mouse and a keyboard, by its report descriptor) emitted nothing during
+a minute of taps and drags, so the double-report theory went. An evtest
+capture of the digitizer shows the controller's sequence at every
+touch: hover frames with BTN_TOOL_PEN set and ABS_DISTANCE 1, then a
+frame with the tool out, then 37 ms of nothing, then one frame with
+BTN_TOUCH, the pressure and BTN_TOOL_PEN back together. In mutter 50.1
+(the Ubuntu orig tarball, src/compositor/meta-window-drag.c:1999)
+meta_window_drag_begin takes the grab's start position not from the
+event but from clutter_seat_query_state on the tool's sprite; after a
+proximity-out that sprite's position is stale or reset (Ubuntu's own
+50.1-0ubuntu2.5 carries "clutter: Reset tablet tool sprite's clear area
+on PROXIMITY_OUT" and two tool-grab patches from upstream MR 5043 — the
+same code is being fixed for other stylus symptoms), and the relative
+anchor computed from it clamps to (1, 1): the window's far corner under
+the pen. The shell's gestures use the event's coordinates, hence
+unaffected. Other GNOME 50 users report a "ghost cursor at (0,0)" after
+proximity-out — the vendor driver's "no pen" frame zeroes ABS_X/ABS_Y.
+
+Patch 0091 (the driver side, ours): hold the tool in proximity for 80 ms
+after a frame that says it has gone, a delayed work under the driver's
+lock that the next pen frame cancels, so the blink is never reported and
+a real lift is reported 80 ms late; the "no pen" frame reports the tip,
+the buttons and the pressure at once and leaves the position where the
+pen was; the release paths drop a pending hold without waiting, remove
+and shutdown wait for it. checkpatch 0/0/0 with --strict; nt36536_ts.ko
+built against the #47 config in a scratch object directory (sha
+32c2e496, vermagic 7.3.0+) — the touch module cannot be swapped live
+(the UAF rule), so it rides the #47 RAM boot in the installed module
+tree and the test is the owner's drag of a maximized and of a small
+window. The mutter side (start a tablet-tool grab from the event's
+position) is an upstream report to file once the driver side is
+confirmed. Also before the boot: the #46 module tree backed up
+(tablet-modules-7.3.0+-kernel46-20261104-1612.tar.gz, 944 modules, on
+the tablet and under /srv/ubuntu-iceland/backups), and the pogo module
+blacklisted for the first boot (rung K loads it by hand).
