@@ -1,5 +1,5 @@
 Package: ubuntu-iceland-device
-Version: 0.2.33
+Version: 0.2.34
 Section: admin
 Priority: optional
 Architecture: arm64
@@ -12,6 +12,20 @@ Description: Device support for the OnePlus Pad 4 (iceland)
  Board-specific integration for the OPD2514 running an Ubuntu userspace on
  the Perpetua mainline kernel:
  .
+  * pen barrel button (0.2.34): the pen's Bluetooth link reports the release
+    of a short press as 03, of a long hold as 04, and drops releases now and
+    then (three quick presses arrived as 02 02 02 03); iceland-pen now takes
+    any barrel code other than the press as a release, treats a press while
+    the button is down as release-then-press, and logs unknown codes — a
+    press the driver kept re-asserting had left the compositor's grab state
+    wrong for every later touch (kernel patches 0091/0092 are the driver's
+    half: proximity across the controller's blink, buttons only in
+    proximity, the lift releases them);
+  * Smart Keyboard (0.2.34): nothing of userspace is needed — the pogo dock
+    driver (kernel patches 0087–0090, 0093) autoloads on the serdev child of
+    uart17, libinput handles the touchpad as a button pad and GNOME the
+    keyboard; the first-boot blacklist of flight #47 is not part of this
+    package and was lifted on the tablet;
   * root filesystem discovery: the initramfs conf.d that points
     initramfs-tools at LABEL=UBPAD4_ROOT, because the stock vendor_boot
     cmdline carries no root= and is deliberately never rewritten;
