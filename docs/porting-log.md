@@ -4379,3 +4379,71 @@ confirmed. Also before the boot: the #46 module tree backed up
 (tablet-modules-7.3.0+-kernel46-20261104-1612.tar.gz, 944 modules, on
 the tablet and under /srv/ubuntu-iceland/backups), and the pogo module
 blacklisted for the first boot (rung K loads it by hand).
+
+## 2026-11-04 — Bundle #47 RAM-booted twice: the pen's drag anchor needed a second half (the barrel button's path, 0092 and two daemon rules), then the 3 A stage passed on the patched driver
+
+Build #47 (87 patches, nothing dropped) was bundled as boot-47-7b8bb53d
+with the same initramfs as #46, the module tree with 0091's touch module
+installed, and the RAM boot went on the first `fastboot boot` at
+16:50:28. Census at 32 s of uptime: the four charging modules from the
+installed tree with the new debugfs fields, policy Standard from the
+boot-time unit, uart17 and the pogo regulator registered with the
+keyboard child on the serdev bus and no driver (the blacklist honoured),
+touch, pen, Stylo Pro, the audio card, Wi-Fi, Bluetooth and the pen
+charger all up, only the known benign errors.
+
+The pen: after the login the owner's drags anchored under the tip
+("pen is fixed") — until a barrel right-click, after which they
+desynced again and nothing reset them. Three captures (the raw driver
+stream, libinput's view and the pen daemon's log, 17:03–17:08) gave the
+second half. The barrel button does not come from the digitizer at all:
+the pen reports it over Bluetooth, the bridge daemon writes it into the
+driver, and the driver (patch 0042) reported BTN_STYLUS at once in a
+frame of its own, in or out of proximity. libinput releases a tool's
+buttons at proximity-out and takes no button event while the tool is
+out, so a change delivered then is lost or mistimed. Worse, the pen's
+link drops releases — three quick presses arrived as 02 02 02 03, and a
+press at 17:02:07 had no release for four seconds — and reports the
+release of a long hold as 04 instead of 03 (census: 02 at 17:08:08.5,
+04 at 17:08:11.5), which the daemon mapped to nothing. The driver then
+re-asserted "stylus button held" in every frame, libinput delivered
+"PROXIMITY in" and "BTN_STYLUS pressed" at the same instant at every
+approach — the stale-sprite case with a button — and mutter kept the
+grab state of that episode for every later touch. Barrel vocabulary: 02
+press, 03 short release, 04 long-hold release, a double press is two
+pairs about 90 ms apart with no code of its own.
+
+Patch 0092: an injected button is reported at once only while the tool
+is in proximity (out of range it waits for the first frame that brings
+the pen back, which the frame path already carries), and the deferred
+proximity-out releases the buttons in the kernel's state and clears the
+injected state, so a lost release cannot outlive a lift; a button still
+held comes back with the pen's next press report. The daemon (repo and
+tablet): any non-press code on the barrel characteristic is a release,
+a press while the button is down is release-then-press, unknown codes
+are logged as warnings. The owner asked whether the release should
+rather be generated when the pen next appears, so a context menu
+survives a lift: it does — libinput itself releases at proximity-out,
+GTK keeps a menu open until a click elsewhere, and what must not happen
+is a held state coming back as a press at every approach. Module
+29d77257 installed, the second RAM boot of the same image at 17:09:40
+(first try), the daemon's rules installed after it. The owner: **"Pen
+all seems to work great now"**. 0091 and 0092 go into the next kernel
+build formally; the mutter report (start a tablet-tool grab from the
+event's position) remains to file; a distinct long-press action and the
+double-press gesture are pen polish.
+
+The 3 A stage on the patched driver, 17:12:27–17:54:50: the brick in at
+77 %, "SuperVOOC adapter 24 (55 W) at 3000 mA", 1.57 + 1.51 A at
+8.85 V, the taper 3.0 → 2.0 → 1.5 A, "SuperVOOC finished" at 90 % after
+42 minutes, 54 547 frames, every counter zero, worst reply 2.4 ms, both
+pumps on to the end, thermistors ≤ 34.5 °C, cell 31–32 °C. PASS. One
+new fact at the end: the brick cycles its own output when SuperVOOC
+ends — for about two seconds the USB read 0.19 V with the port offline
+and the pack discharging, then it returned as the 5 V × 2.99 A BrickID
+source. Every session end is therefore an input-removal transient on
+this adapter, which belongs next to the 12:20:42 reset (ten seconds
+after a session end, under the witness load). The controlled ending
+(the session script's end, the witnesses off, a quiet minute in
+Standard, then the unplug) follows; the 2 A stage comes after a
+backlight-only drain to 88 %.

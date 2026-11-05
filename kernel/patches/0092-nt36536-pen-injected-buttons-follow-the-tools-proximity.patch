@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Stockdale <jstockdale@gmail.com>
+Date: Wed, 4 Nov 2026 17:03:16 -0800
+Subject: [PATCH] Input: nt36536: injected pen buttons follow the tool's
+ proximity
+
+The barrel button of this pen arrives over Bluetooth and is written into
+the driver by the bridge daemon, which reported it at once in a frame of
+its own, whether or not the pen was in range. libinput releases a
+tool's buttons when the tool leaves proximity and takes no button event
+while it is out, so a press or a release delivered then is lost or
+mistimed. The pen's link also drops a release now and then, or sends a
+code the bridge did not know (a press at 17:02:07 with no release before
+the next press four seconds later; a release reported as 04 instead of
+03, 2026-11-04): the driver then re-asserted "stylus button held" in
+every frame, a press arrived with every proximity-in, and the compositor
+kept the grab state of that episode for later touches.
+
+Report an injected button at once only while the tool is in proximity;
+out of range the change waits for the first frame that brings the pen
+back, which the frame path already carries. The deferred proximity-out
+releases the buttons in the kernel's state and clears the injected
+state, so a lost release cannot outlive a lift; a button still held
+comes back with the next press the pen reports.
+
+Signed-off-by: John Stockdale <jstockdale@gmail.com>
+---
+ drivers/input/touchscreen/nt36536/nt36xxx.c | 25 +++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/input/touchscreen/nt36536/nt36xxx.c b/drivers/input/touchscreen/nt36536/nt36xxx.c
+index cd008ca54778..6d28f8b06948 100644
+--- a/drivers/input/touchscreen/nt36536/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36536/nt36xxx.c
+@@ -336,8 +336,19 @@ static ssize_t pen_input_store(struct device *dev, struct device_attribute *attr
+ 		pen_inject.valid = true;
+ 	} else if (!strcmp(word, "button") && n == 3 && a >= 1 && a <= 2) {
+ 		pen_inject.btn[a - 1] = !!b;
+-		input_report_key(ts->pen_input_dev, a == 1 ? BTN_STYLUS : BTN_STYLUS2, !!b);
+-		input_sync(ts->pen_input_dev);
++		/*
++		 * At once only while the tool is in proximity.  Out of range the
++		 * change waits for the first frame that brings the pen back (the
++		 * frame path reports the injected state every frame): libinput
++		 * releases a tool's buttons when it leaves proximity and takes no
++		 * button event while it is out, so a press or release delivered
++		 * then is lost or mistimed - a release lost that way leaves the
++		 * compositor holding the stylus button for every later touch.
++		 */
++		if (ts->pen_in_prox) {
++			input_report_key(ts->pen_input_dev, a == 1 ? BTN_STYLUS : BTN_STYLUS2, !!b);
++			input_sync(ts->pen_input_dev);
++		}
+ 	} else {
+ 		mutex_unlock(&ts->lock);
+ 		return -EINVAL;
+@@ -1214,6 +1225,16 @@ static void nvt_pen_out_work(struct work_struct *work)
+ 		data->pen_out_pending = false;
+ 		data->pen_in_prox = false;
+ 		input_report_abs(data->pen_input_dev, ABS_DISTANCE, 0);
++		/*
++		 * The buttons go with the tool, in the kernel's state and in the
++		 * injected one: the pen's Bluetooth link drops a release now and
++		 * then (or sends a code the bridge does not know), and a press that
++		 * outlived a lift would come back as a press at every approach.
++		 */
++		pen_inject.btn[0] = false;
++		pen_inject.btn[1] = false;
++		input_report_key(data->pen_input_dev, BTN_STYLUS, 0);
++		input_report_key(data->pen_input_dev, BTN_STYLUS2, 0);
+ 		input_report_key(data->pen_input_dev, BTN_TOOL_PEN, 0);
+ 		input_sync(data->pen_input_dev);
+ 	}
+-- 
+2.53.0
+

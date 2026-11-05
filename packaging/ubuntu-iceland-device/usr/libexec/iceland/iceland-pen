@@ -141,6 +141,7 @@ class Pen:
         self.connected = False
         self.press = None
         self.pressure = None
+        self.button_down = {}
 
     def _objects(self):
         om = dbus.Interface(self.bus.get_object(BLUEZ, "/"), "org.freedesktop.DBus.ObjectManager")
@@ -250,9 +251,23 @@ class Pen:
             if b_uuid != uuid:
                 continue
             if data == press_bytes:
+                # the pen drops releases now and then (three quick presses
+                # arrived as 02 02 02 03 on 2026-11-04): a press while the
+                # button is already down is a release and a press
+                if self.button_down.get(button):
+                    self.ctl.inject("button %d 0" % button)
+                    log.warning("button %d: press while down, released first", button)
+                self.button_down[button] = True
                 self.ctl.inject("button %d 1" % button)
-            elif data == release_bytes:
+            else:
+                self.button_down[button] = False
+                # the pen reports the release as 03, and now and then as
+                # another code (04 seen 2026-11-04) or not at all; anything
+                # that is not the press is a release, and the driver drops
+                # a held button at the lift as well (patch 0092)
                 self.ctl.inject("button %d 0" % button)
+                if data != release_bytes:
+                    log.warning("button %d: unexpected code %s taken as release", button, data.hex())
             log.info("button %d: %s", button, data.hex())
             return
         text = data.decode("ascii", "replace") if uuid == self.cfg.log_uuid else data.hex()
