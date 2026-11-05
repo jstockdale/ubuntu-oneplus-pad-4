@@ -418,8 +418,9 @@ K — pogo keyboard — **first contact 2026-11-04 19:43–20:08 on the flashed 
    0280 (2026-10-10, SuperTurtleDev's finding) is the fix, adopted byte-identical as 0093; reloaded with the dock
    on, the attach is hello → version → wake → ack → LED → heartbeat within 50 ms, and keys, media keys, touchpad
    and backlight work for the owner. Firmware notes for mzak: general sub-commands 0c/0e/1c/03/08/09/1b/21 get no
-   answer, 11/17/19 are acked. The flight blacklist is lifted (autoload from the next boot); owed: a detach/
-   re-attach cycle, a reboot census with the autoload, sleep/wake with the dock, 0.2.34. Original rung text:
+   answer, 11/17/19 are acked. The flight blacklist is lifted (autoload from the next boot); the detach/re-attach cycle PASS 20:07 (detached,
+   supply off, reconnected with the wake in 2.5 s; 98 key, 80 media and 582 touchpad reports by 20:10, none bad);
+   owed: a reboot census with the autoload, sleep/wake with the dock, 0.2.34. Original rung text:
    (the OnePlus Pad 4 Smart Keyboard, arrived 2026-11-04;
    host side done the same day: patches 0087–0090 = the Fedora port's
    0094–0097 with the board nodes re-diffed onto our dts, and
