@@ -4497,3 +4497,15 @@ Standard; bundle boot-47-7b8bb53d RAM-booted twice with a green census
 and the stages passed, the flash to boot_b the owner's decision; rung K
 (the keyboard) needs the #47 kernel; the 24 h soak and the Fast default
 follow the flash.
+
+Later the same evening, on the owner's green light: **#47 flashed to
+boot_b at 19:38:12** — "Writing 'boot_b' OKAY" on the first try,
+`fastboot reboot`, the tablet up on Wi-Fi within 40 s. Lock-in PASS:
+kernel #47 in `uname`, boot_b's sha256 equals the bundle
+(7b8bb53d…), boot_a is the stock reference (1f11e2c6…) untouched, slot
+b current, qbootctl active, policy Standard from the boot-time unit,
+uart17 and the pogo regulator live with the driver held back by the
+flight blacklist, the 0092 touch module on disk. The 24 h soak runs
+from here; rung K, the witnessed early unplug and the Fast default
+follow. (The partition names on Ubuntu are /dev/disk/by-partlabel/…,
+not Android's /dev/block/by-name — a runbook line.)
